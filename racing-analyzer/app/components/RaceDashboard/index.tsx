@@ -208,11 +208,14 @@ const RaceDashboard = () => {
                     <th className="px-4 py-2 text-left">Pos</th>
                     <th className="px-4 py-2 text-left">Team</th>
                     <th className="px-4 py-2 text-left">Last Lap</th>
+                    <th className="px-4 py-2 text-left">Best Lap</th>
                     <th className="px-4 py-2 text-right">Gap</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {teams.map(team => (
+                  {[...teams]
+                    .sort((a, b) => parseInt(a.Position) - parseInt(b.Position))
+                    .map(team => (
                     <tr key={team.Kart} className="hover:bg-gray-50">
                       <td className="px-4 py-2">{team.Position}</td>
                       <td className="px-4 py-2">
@@ -220,6 +223,7 @@ const RaceDashboard = () => {
                         <div className="text-sm text-gray-500">Kart #{team.Kart}</div>
                       </td>
                       <td className="px-4 py-2">{team['Last Lap']}</td>
+                      <td className="px-4 py-2">{team['Best Lap']}</td>
                       <td className="px-4 py-2 text-right">{team.Gap}</td>
                     </tr>
                   ))}
