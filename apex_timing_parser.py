@@ -109,38 +109,38 @@ class ApexTimingParser:
             self.logger.error(f"WebDriver setup error: {e}")
             raise
     
-        def get_page_content(self, url: str) -> tuple[str, str]:
-            """Load page and wait for content to be available"""
-            try:
-                self.logger.info(f"Loading URL: {url}")
-                self.driver.get(url)
-                
-                # Wait for initial page load
-                self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                self.logger.debug("Page body loaded")
-                
-                # Wait for the grid and dyna table to be present
-                self.logger.debug("Waiting for elements...")
-                grid = self.wait.until(EC.presence_of_element_located((By.ID, "grid")))
-                dyna = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "dyna")))
-                self.logger.debug("Elements found")
-                
-                # Wait for table to populate
-                self.logger.debug("Waiting for table rows...")
-                table = self.wait.until(EC.presence_of_element_located((By.ID, "tgrid")))
-                self.wait.until(lambda d: len(d.find_elements(By.CSS_SELECTOR, "#tgrid tr")) > 1)
-                self.logger.debug("Table rows found")
-                
-                # Get both table HTMLs
-                grid_html = grid.get_attribute('outerHTML')
-                dyna_html = dyna.get_attribute('outerHTML')
-                self.logger.info("Successfully retrieved HTML content")
-                
-                return grid_html, dyna_html
-                
-            except Exception as e:
-                self.logger.error(f"Error loading page content: {traceback.format_exc()}")
-                return "", ""
+    def get_page_content(self, url: str) -> tuple[str, str]:
+        """Load page and wait for content to be available"""
+        try:
+            self.logger.info(f"Loading URL: {url}")
+            self.driver.get(url)
+            
+            # Wait for initial page load
+            self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            self.logger.debug("Page body loaded")
+            
+            # Wait for the grid and dyna table to be present
+            self.logger.debug("Waiting for elements...")
+            grid = self.wait.until(EC.presence_of_element_located((By.ID, "grid")))
+            dyna = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "dyna")))
+            self.logger.debug("Elements found")
+            
+            # Wait for table to populate
+            self.logger.debug("Waiting for table rows...")
+            table = self.wait.until(EC.presence_of_element_located((By.ID, "tgrid")))
+            self.wait.until(lambda d: len(d.find_elements(By.CSS_SELECTOR, "#tgrid tr")) > 1)
+            self.logger.debug("Table rows found")
+            
+            # Get both table HTMLs
+            grid_html = grid.get_attribute('outerHTML')
+            dyna_html = dyna.get_attribute('outerHTML')
+            self.logger.info("Successfully retrieved HTML content")
+            
+            return grid_html, dyna_html
+            
+        except Exception as e:
+            self.logger.error(f"Error loading page content: {traceback.format_exc()}")
+            return "", ""
 
     def parse_dyna_info(self, html_content: str) -> Dict[str, str]:
         """Parse the dynamic information from the dyna table"""
