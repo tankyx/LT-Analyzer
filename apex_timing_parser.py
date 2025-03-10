@@ -87,10 +87,6 @@ class ApexTimingParser:
     def setup_driver(self):
         """Setup Chrome WebDriver with appropriate options"""
         try:
-            from webdriver_manager.chrome import ChromeDriverManager
-            from webdriver_manager.core.utils import ChromeType
-            from selenium.webdriver.chrome.service import Service
-    
             chrome_options = Options()
             chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--no-sandbox")
@@ -103,9 +99,8 @@ class ApexTimingParser:
             chrome_options.add_argument("--disable-notifications")
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
             
-            # Use specific Chrome driver manager for Chromium snap
-            service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Use the system ChromeDriver (installed above)
+            self.driver = webdriver.Chrome(options=chrome_options)
             
             self.driver.set_page_load_timeout(30)
             self.wait = WebDriverWait(self.driver, 30)
