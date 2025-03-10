@@ -84,25 +84,37 @@ class ApexTimingParser:
             self.logger.error(f"Database setup error: {e}")
             raise
 
-    def setup_driver(self):
-        """Setup Chrome WebDriver with appropriate options"""
-        try:
-            chrome_options = Options()
-            chrome_options.add_argument("--headless=new")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--disable-notifications")
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-            
-            self.driver = webdriver.Chrome(options=chrome_options)
-            self.driver.set_page_load_timeout(30)
-            self.wait = WebDriverWait(self.driver, 30)
-            self.logger.info("WebDriver setup successful")
-        except Exception as e:
-            self.logger.error(f"WebDriver setup error: {e}")
-            raise
+def setup_driver(self):
+    """Setup Chrome WebDriver with appropriate options"""
+    try:
+        from webdriver_manager.chrome import ChromeDriverManager
+        from selenium.webdriver.chrome.service import Service
+
+        chrome_options = Options()
+        chrome_options.add_argument("--headless=new")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
+        
+        # These options are critical for server environments
+        chrome_options.add_argument("--remote-debugging-port=9222")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-setuid-sandbox")
+        
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("--disable-notifications")
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        
+        # Use webdriver-manager to handle driver installation
+        service = Service(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+        self.driver.set_page_load_timeout(30)
+        self.wait = WebDriverWait(self.driver, 30)
+        self.logger.info("WebDriver setup successful")
+    except Exception as e:
+        self.logger.error(f"WebDriver setup error: {e}")
+        raise
 
     def get_page_content(self, url: str) -> tuple[str, str]:
         """Load page and wait for content to be available"""
