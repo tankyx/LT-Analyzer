@@ -1,10 +1,23 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from apex_timing_parser import ApexTimingParser
 import threading
 import time
 from collections import deque
 from statistics import mean
+import traceback
+import sys
+import inspect
+
+# First check to make sure we can import the parser correctly
+try:
+    from apex_timing_parser import ApexTimingParser
+    # Check if the class has the required method
+    if not hasattr(ApexTimingParser, 'get_page_content'):
+        print("ERROR: ApexTimingParser class exists but doesn't have a get_page_content method.")
+        print("Available methods:", [method for method in dir(ApexTimingParser) if not method.startswith('__')])
+except ImportError as e:
+    print(f"ERROR: Could not import ApexTimingParser: {e}")
+    sys.exit(1)
 
 app = Flask(__name__)
 CORS(app)
@@ -19,8 +32,15 @@ race_data = {
     'gap_history': {}
 }
 
-# Global parser instance
-parser = ApexTimingParser()
+# Try to initialize the parser with debugging
+try:
+    parser = ApexTimingParser()
+    print("Successfully created ApexTimingParser instance")
+    print("Methods available:", [method for method in dir(parser) if not method.startswith('__')])
+except Exception as e:
+    print(f"ERROR initializing ApexTimingParser: {e}")
+    print(traceback.format_exc())
+    sys.exit(1)
 
 def calculate_trend(current_gap, previous_gaps):
     """Calculate trend and determine arrow type based on gap change
@@ -126,7 +146,24 @@ def update_race_data():
     """Background thread to update race data"""
     while True:
         try:
-            grid_html, dyna_html = parser.get_page_content("https://www.apex-timing.com/live-timing/karting-mariembourg/index.html")
+            # First check if the method exists on the parser instance
+            if not hasattr(parser, 'get_page_content'):
+                print("ERROR: parser instance doesn't have get_page_content method")
+                print("Available methods:", [method for method in dir(parser) if not method.startswith('__')])
+                time.sleep(5)
+                continue
+                
+            # Try calling the method
+            try:
+                print("Attempting to call get_page_content method...")
+                grid_html, dyna_html = parser.get_page_content("https://www.apex-timing.com/live-timing/karting-mariembourg/index.html")
+                print(f"get_page_content returned grid_html length: {len(grid_html) if grid_html else 0}, dyna_html length: {len(dyna_html) if dyna_html else 0}")
+            except Exception as method_error:
+                print(f"ERROR calling get_page_content: {method_error}")
+                print(traceback.format_exc())
+                time.sleep(5)
+                continue
+                
             if grid_html and dyna_html:
                 df = parser.parse_grid_data(grid_html)
                 if not df.empty:
@@ -145,7 +182,8 @@ def update_race_data():
                     print(f"Data updated at {race_data['last_update']}")
         except Exception as e:
             print(f"Error updating race data: {e}")
-        time.sleep(1)
+            print(traceback.format_exc())
+        time.sleep(5)  # Increased sleep time to reduce log spam
 
 def get_serializable_race_data():
     """Convert race_data to a JSON-serializable format"""
@@ -182,6 +220,48 @@ def update_monitoring():
     print("Updated race_data:", race_data['my_team'], race_data['monitored_teams'])  # Debug print
     return jsonify({'status': 'success'})
 
+# Route to check parser status
+@app.route('/api/parser-status')
+def parser_status():
+    methods = [method for method in dir(parser) if not method.startswith('__')]
+    return jsonify({
+        'parser_type': str(type(parser)),
+        'has_get_page_content': hasattr(parser, 'get_page_content'),
+        'available_methods': methods
+    })
+
+# For debugging purposes - simulate data when no live data is available
+@app.route('/api/simulate-data', methods=['POST'])
+def simulate_data():
+    """Generate fake race data for testing"""
+    import random
+    from datetime import datetime
+    
+    # Generate 10 fake teams
+    teams = []
+    for i in range(1, 11):
+        teams.append({
+            'Kart': str(i),
+            'Team': f"Team {i}",
+            'Position': str(i),
+            'Last Lap': f"1:{random.randint(37, 45)}.{random.randint(100, 999)}",
+            'Best Lap': f"1:{random.randint(35, 40)}.{random.randint(100, 999)}",
+            'Pit Stops': str(random.randint(0, 2)),
+            'Gap': f"{i * 1.5:.3f}" if i > 1 else "0.000",
+            'RunTime': f"{random.randint(10, 30)}:{random.randint(10, 59)}",
+            'Status': random.choice(['On Track', 'Pit-in', 'Pit-out', 'Finished'])
+        })
+    
+    race_data['teams'] = teams
+    race_data['session_info'] = {
+        'dyn1': 'Simulation Mode',
+        'dyn2': f'Simulated at {datetime.now().strftime("%H:%M:%S")}',
+        'light': random.choice(['green', 'yellow', 'red'])
+    }
+    race_data['last_update'] = time.strftime('%H:%M:%S')
+    
+    return jsonify({'status': 'success', 'message': 'Simulation data generated'})
+
 if __name__ == '__main__':
     try:
         # Start the background update thread
@@ -191,6 +271,12 @@ if __name__ == '__main__':
         print("Starting Flask server on port 5000...")
         # Run the Flask app on port 5000
         app.run(host='0.0.0.0', port=5000, debug=True)
+    except Exception as e:
+        print(f"Error starting server: {e}")
+        print(traceback.format_exc())
     finally:
         # Ensure browser is closed when app exits
-        parser.cleanup()
+        try:
+            parser.cleanup()
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
