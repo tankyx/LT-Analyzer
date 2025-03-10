@@ -1,4 +1,5 @@
 /racing-analyzer/.next
-/__pycache__
+__pycache__/
 repopack-output.txt
-/__pycache__
+lt-venv/
+live-timing-extract.html.txt
