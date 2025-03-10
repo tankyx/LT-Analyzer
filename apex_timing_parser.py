@@ -213,15 +213,59 @@ class ApexTimingParser:
                         'Pit Stops': None
                     }
                     
-                    # Status (from rXXXXXc1 td)
+                    # Status (from td with data-type='sta')
                     status_cell = row.find('td', {'data-type': 'sta'})
                     if status_cell:
-                        if status_cell.find({'class': 'si'}): #In the pits
-                            row_data['Status'] = 'Pit-in'
-                        elif status_cell({'class': 'so'}): #Out of the pits
-                            row_data['Status'] = 'Pit-out'
-                        else:
+                        # Define the status mappings
+                        status_classes = {
+                            'sf': 'Finished',  # finish
+                            'si': 'Pit-in',    # pit in
+                            'so': 'Pit-out',   # pit out
+                            'su': 'Up',        # moving up
+                            'sd': 'Down',      # moving down
+                            'ss': 'Stopped',   # stopped
+                            'sr': 'On Track',  # running
+                            'sl': 'Lapped'     # lapped
+                        }
+                        
+                        # Check if any status class exists directly on the status cell
+                        cell_classes = status_cell.get('class', [])
+                        
+                        # Try to find the status
+                        found_status = False
+                        
+                        # Check for status in cell's own classes
+                        if cell_classes:
+                            if isinstance(cell_classes, list):
+                                for cls in cell_classes:
+                                    if cls in status_classes:
+                                        row_data['Status'] = status_classes[cls]
+                                        found_status = True
+                                        break
+                            elif isinstance(cell_classes, str):
+                                # If it's a string, check each status class
+                                for cls, status in status_classes.items():
+                                    if cls in cell_classes:
+                                        row_data['Status'] = status
+                                        found_status = True
+                                        break
+                        
+                        # If status not found in cell classes, look for child elements with status classes
+                        if not found_status:
+                            for cls, status in status_classes.items():
+                                # There might be a div or span with the class
+                                status_element = status_cell.find(class_=cls)
+                                if status_element:
+                                    row_data['Status'] = status
+                                    found_status = True
+                                    break
+                        
+                        # Default to 'On Track' if we couldn't determine status
+                        if not found_status:
                             row_data['Status'] = 'On Track'
+                    else:
+                        # Couldn't find a status cell
+                        row_data['Status'] = 'Unknown'
 
                     # Position (from p tag within rk cell)
                     pos_cell = row.find('td', {'data-type': 'rk'})
@@ -274,7 +318,7 @@ class ApexTimingParser:
 
             df = pd.DataFrame(data)
             # Ensure all expected columns exist with defaults if missing
-            for col in ['Position', 'Kart', 'Team', 'Last Lap', 'Best Lap', 'Gap', 'RunTime', 'Pit Stops']:
+            for col in ['Position', 'Kart', 'Team', 'Last Lap', 'Best Lap', 'Gap', 'RunTime', 'Pit Stops', 'Status']:
                 if col not in df.columns:
                     df[col] = None
                     
@@ -380,7 +424,7 @@ class ApexTimingParser:
             )
             return cursor.lastrowid
 
-    def monitor_race(self, url: str, interval: int = 5):
+    def monitor_race(self, url: str, interval: int = 1):
         """Continuously monitor race data"""
         pd.set_option('display.max_rows', None)
         pd.set_option('display.max_columns', None)
