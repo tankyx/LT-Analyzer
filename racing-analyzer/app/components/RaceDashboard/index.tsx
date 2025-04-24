@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import TimeDeltaChart from './TimeDeltaChart';
 import SimulationControls from './SimulationControls';
+import ApiService from '../../services/ApiService';
 
 // Types
 interface Team {
@@ -115,15 +116,9 @@ const RaceDashboard = () => {
 
   const updateMonitoring = async () => {
     try {
-      await fetch('http://localhost:5000/api/update-monitoring', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          myTeam,
-          monitoredTeams,
-        }),
+      await ApiService.updateMonitoring({
+        myTeam,
+        monitoredTeams,
       });
     } catch (error) {
       console.error('Error updating monitoring:', error);
@@ -132,24 +127,15 @@ const RaceDashboard = () => {
 
   const startSimulation = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/start-simulation', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to start simulation');
-      }
-      
+      const response = await ApiService.startSimulation();
+    
       setSimulating(true);
       setAlerts([...alerts, {
         id: Date.now(),
         message: 'Simulation started successfully',
         type: 'success'
       }]);
-      return await response.json();
+      return response;
     } catch (error) {
       console.error('Error starting simulation:', error);
       setAlerts([...alerts, {
@@ -163,24 +149,15 @@ const RaceDashboard = () => {
 
   const stopSimulation = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/stop-simulation', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to stop simulation');
-      }
-      
+      const response = await ApiService.stopSimulation();
+    
       setSimulating(false);
       setAlerts([...alerts, {
         id: Date.now(),
         message: 'Simulation stopped successfully',
         type: 'info'
       }]);
-      return await response.json();
+      return response;
     } catch (error) {
       console.error('Error stopping simulation:', error);
       setAlerts([...alerts, {
@@ -191,7 +168,7 @@ const RaceDashboard = () => {
       throw error;
     }
   };
-  
+
   const toggleDarkMode = () => {
     setIsDarkMode(!isDarkMode);
   };
@@ -203,11 +180,7 @@ const RaceDashboard = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/race-data');
-        if (!response.ok) {
-          throw new Error('Failed to fetch race data');
-        }
-        const data = await response.json();
+        const data = await ApiService.getRaceData();
         setTeams(data.teams);
         setSessionInfo(data.session_info);
         setLastUpdate(data.last_update);
@@ -222,9 +195,9 @@ const RaceDashboard = () => {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 2000); // Shorter interval for simulation
+    const interval = setInterval(fetchData, 2000);
     return () => clearInterval(interval);
-  }, []);
+  }, []); 
 
   const checkPitStops = (currentTeams: Team[]) => {
     monitoredTeams.forEach(kartNum => {
