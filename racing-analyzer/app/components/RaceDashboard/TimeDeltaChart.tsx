@@ -1,5 +1,9 @@
-// racing-analyzer/app/components/RaceDashboard/TimeDeltaChart.tsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, ReferenceLine, Label, Area, ComposedChart
+} from 'recharts';
+import { motion } from 'framer-motion';
 
 // Types
 interface GapHistory {
@@ -29,41 +33,24 @@ interface TimeDeltaChartProps {
   isDarkMode?: boolean; 
 }
 
-interface TooltipData {
-  visible: boolean;
-  x: number;
-  y: number;
-  kart: string;
-  teamName: string;
-  lap: number;
-  gap: number;
-}
-
 const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({ 
   gapHistory, 
   teams, 
   monitoredTeams,
   isDarkMode = false
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [tooltip, setTooltip] = useState<TooltipData>({
-    visible: false,
-    x: 0,
-    y: 0,
-    kart: '',
-    teamName: '',
-    lap: 0,
-    gap: 0
-  });
   const [chartData, setChartData] = useState<any[]>([]);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
-  const [highlightedKart, setHighlightedKart] = useState<string | null>(null);
+  const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
+  const [chartKey, setChartKey] = useState<number>(0); // Used to force re-render when theme changes
+  
+  // Force chart re-render when theme changes
+  useEffect(() => {
+    setChartKey(prev => prev + 1);
+  }, [isDarkMode]);
 
-  /**
-   * Generates a color based on kart number to ensure consistent colors
-   */
-  const generateColor = (kartNumber: string): string => {
+  // Generate team colors
+  const generateColor = useCallback((kartNumber: string): string => {
     // Simple hash function to generate consistent colors
     const hash = kartNumber.split('').reduce((acc, char) => {
       return char.charCodeAt(0) + ((acc << 5) - acc);
@@ -77,9 +64,9 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     const lightness = isDarkMode ? '60%' : '45%';
     
     return `hsl(${hue}, ${saturation}, ${lightness})`;
-  };
+  }, [isDarkMode]);
 
-  // Prepare data and colors
+  // Prepare data with sliding window of 15 laps
   useEffect(() => {
     if (!gapHistory || Object.keys(gapHistory).length === 0) return;
 
@@ -101,14 +88,32 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
       }
     });
 
-    // Create data structure for each lap
-    for (let i = 0; i < maxLaps; i++) {
-      const lapData: any = { lap: i + 1 };
+    // Determine the window start (for sliding window of 15 laps)
+    const MAX_VISIBLE_LAPS = 15;
+    const windowStart = Math.max(0, maxLaps - MAX_VISIBLE_LAPS);
+    
+    // Create data structure for the most recent 15 laps
+    for (let i = windowStart; i < maxLaps; i++) {
+      // Use relative lap numbers so they always start at 1 within the window
+      const relativeLapNumber = i - windowStart + 1;
+      const absoluteLapNumber = i + 1;
+      
+      const lapData: any = { 
+        lap: relativeLapNumber,
+        absoluteLap: absoluteLapNumber
+      };
       
       monitoredTeams.forEach(kartNum => {
+        const team = teams.find(t => t.Kart === kartNum);
         if (gapHistory[kartNum] && gapHistory[kartNum].gaps && gapHistory[kartNum].gaps[i] !== undefined) {
           lapData[`kart_${kartNum}`] = gapHistory[kartNum].gaps[i];
-          lapData[`kart_${kartNum}_team`] = teams.find(t => t.Kart === kartNum)?.Team || `Kart ${kartNum}`;
+          lapData[`kart_${kartNum}_team`] = team?.Team || `Kart ${kartNum}`;
+          
+          // Store additional lap info if available
+          if (team) {
+            lapData[`kart_${kartNum}_status`] = team.Status || 'On Track';
+            lapData[`kart_${kartNum}_position`] = team.Position;
+          }
         }
       });
       
@@ -116,529 +121,107 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     }
 
     setChartData(preparedData);
-  }, [gapHistory, teams, monitoredTeams, isDarkMode]);
+  }, [gapHistory, teams, monitoredTeams, isDarkMode, generateColor]);
 
-  // Handle mouse movement for tooltips
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!canvasRef.current || chartData.length === 0) return;
-    
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    // Chart dimensions and padding
-    const width = canvas.width;
-    const height = canvas.height;
-    const padding = {
-      top: 30,
-      right: 30,
-      bottom: 40,
-      left: 60
-    };
-    
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
-    
-    // Find min and max values for y-axis scaling
-    let minGap = 0;
-    let maxGap = 0;
-    
-    monitoredTeams.forEach(kartNum => {
-      if (gapHistory[kartNum] && gapHistory[kartNum].gaps) {
-        const gaps = gapHistory[kartNum].gaps;
-        const kartMin = Math.min(...gaps);
-        const kartMax = Math.max(...gaps);
-        
-        if (kartMin < minGap) minGap = kartMin;
-        if (kartMax > maxGap) maxGap = kartMax;
-      }
-    });
-    
-    // Add some buffer to min/max
-    minGap = Math.floor(minGap - 1);
-    maxGap = Math.ceil(maxGap + 1);
-    
-    // Make sure we have some range even if all values are the same
-    if (minGap === maxGap) {
-      minGap -= 1;
-      maxGap += 1;
-    }
-    
-    const maxLaps = chartData.length;
-    
-    // Check if mouse is in chart area
-    if (x < padding.left || x > width - padding.right || 
-        y < padding.top || y > height - padding.bottom) {
-      setTooltip({ ...tooltip, visible: false });
-      setHighlightedKart(null);
-      return;
-    }
-    
-    // Convert mouse position to data coordinates
-    const xRatio = (x - padding.left) / chartWidth;
-    const lapIndex = Math.floor(xRatio * maxLaps);
-    
-    if (lapIndex < 0 || lapIndex >= chartData.length) {
-      setTooltip({ ...tooltip, visible: false });
-      setHighlightedKart(null);
-      return;
-    }
-    
-    const lapData = chartData[lapIndex];
-    
-    // Find the closest data point to mouse position
-    let closestDist = Infinity;
-    let closestKart = '';
-    let closestGap = 0;
-    let closestTeam = '';
-    
-    monitoredTeams.forEach(kartNum => {
-      const dataKey = `kart_${kartNum}`;
-      if (lapData[dataKey] !== undefined) {
-        const gap = lapData[dataKey];
-        const yPos = padding.top + chartHeight - ((gap - minGap) / (maxGap - minGap) * chartHeight);
-        const dist = Math.abs(y - yPos);
-        
-        if (dist < closestDist) {
-          closestDist = dist;
-          closestKart = kartNum;
-          closestGap = gap;
-          closestTeam = lapData[`${dataKey}_team`] || '';
-        }
-      }
-    });
-    
-    if (closestKart && closestDist < 20) {
-      const tooltipX = padding.left + (lapData.lap - 0.5) * (chartWidth / maxLaps);
-      const tooltipY = padding.top + chartHeight - ((closestGap - minGap) / (maxGap - minGap) * chartHeight);
+  // Custom tooltip component
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      // Get the actual lap number
+      const dataIndex = label - 1;
+      const absoluteLap = chartData[dataIndex]?.absoluteLap || label;
       
-      setTooltip({
-        visible: true,
-        x: tooltipX,
-        y: tooltipY,
-        kart: closestKart,
-        teamName: closestTeam,
-        lap: lapData.lap,
-        gap: closestGap
-      });
+      // Sort data by gap value
+      const sortedPayload = [...payload].sort((a, b) => a.value - b.value);
       
-      setHighlightedKart(closestKart);
-    } else {
-      setTooltip({ ...tooltip, visible: false });
-      setHighlightedKart(null);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    setTooltip({ ...tooltip, visible: false });
-    setHighlightedKart(null);
-  };
-
-  // Draw the chart
-  useEffect(() => {
-    if (!canvasRef.current || chartData.length === 0) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Get canvas dimensions
-    const width = canvas.width;
-    const height = canvas.height;
-    
-    // Clear the canvas
-    ctx.clearRect(0, 0, width, height);
-    
-    // Set up the chart area with some padding
-    const padding = {
-      top: 30,
-      right: 30,
-      bottom: 40,
-      left: 60
-    };
-    
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
-    
-    // Find min and max values for y-axis scaling
-    let minGap = 0;
-    let maxGap = 0;
-    
-    monitoredTeams.forEach(kartNum => {
-      if (gapHistory[kartNum] && gapHistory[kartNum].gaps) {
-        const gaps = gapHistory[kartNum].gaps;
-        const kartMin = Math.min(...gaps);
-        const kartMax = Math.max(...gaps);
-        
-        if (kartMin < minGap) minGap = kartMin;
-        if (kartMax > maxGap) maxGap = kartMax;
-      }
-    });
-    
-    // Add some buffer to min/max
-    minGap = Math.floor(minGap - 1);
-    maxGap = Math.ceil(maxGap + 1);
-    
-    // Make sure we have some range even if all values are the same
-    if (minGap === maxGap) {
-      minGap -= 1;
-      maxGap += 1;
-    }
-    
-    // Background color based on dark mode
-    ctx.fillStyle = isDarkMode ? '#1f2937' : '#fcfcfc'; // Dark mode: gray-800, Light mode: almost white
-    ctx.fillRect(0, 0, width, height);
-    
-    // Chart background
-    ctx.fillStyle = isDarkMode ? '#111827' : '#f8f9fa'; // Dark mode: gray-900, Light mode: very light gray
-    ctx.fillRect(padding.left, padding.top, chartWidth, chartHeight);
-    
-    // Chart border - subtle
-    ctx.strokeStyle = isDarkMode ? '#374151' : '#e2e8f0'; // Dark mode: gray-700, Light mode: light gray
-    ctx.lineWidth = 1;
-    ctx.strokeRect(padding.left, padding.top, chartWidth, chartHeight);
-    
-    // Draw grid lines
-    const ySteps = 5;
-    const yStepSize = (maxGap - minGap) / ySteps;
-    
-    // Horizontal grid lines
-    ctx.strokeStyle = isDarkMode ? '#374151' : '#e2e8f0'; // Dark mode: gray-700, Light mode: light gray
-    ctx.beginPath();
-    for (let i = 0; i <= ySteps; i++) {
-      const y = padding.top + (i * chartHeight / ySteps);
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(padding.left + chartWidth, y);
-    }
-    ctx.stroke();
-    
-    // Vertical grid lines
-    const xSteps = Math.min(10, chartData.length);
-    const xStepSize = Math.ceil(chartData.length / xSteps);
-    
-    ctx.beginPath();
-    for (let i = 1; i <= chartData.length; i++) {
-      if (i % xStepSize !== 0 && i !== chartData.length) continue;
-      const x = padding.left + (i * chartWidth / chartData.length);
-      ctx.moveTo(x, padding.top);
-      ctx.lineTo(x, padding.top + chartHeight);
-    }
-    ctx.stroke();
-    
-    // Draw axes
-    ctx.strokeStyle = isDarkMode ? '#9ca3af' : '#64748b'; // Dark mode: gray-400, Light mode: gray-500
-    ctx.lineWidth = 1.5;
-    
-    // Draw y-axis
-    ctx.beginPath();
-    ctx.moveTo(padding.left, padding.top);
-    ctx.lineTo(padding.left, padding.top + chartHeight);
-    ctx.stroke();
-    
-    // Draw x-axis
-    ctx.beginPath();
-    ctx.moveTo(padding.left, padding.top + chartHeight);
-    ctx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
-    ctx.stroke();
-    
-    // Draw y-axis labels
-    ctx.fillStyle = isDarkMode ? '#e5e7eb' : '#64748b'; // Dark mode: gray-200, Light mode: gray-500
-    ctx.font = '12px Inter, system-ui, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    
-    for (let i = 0; i <= ySteps; i++) {
-      const value = maxGap - i * yStepSize;
-      const y = padding.top + (i * chartHeight / ySteps);
-      
-      ctx.fillText(value.toFixed(1) + 's', padding.left - 8, y);
-      
-      // Axis ticks
-      ctx.beginPath();
-      ctx.moveTo(padding.left - 4, y);
-      ctx.lineTo(padding.left, y);
-      ctx.stroke();
-    }
-    
-    // Draw x-axis labels
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    
-    for (let i = 1; i <= chartData.length; i++) {
-      if (i % xStepSize !== 0 && i !== chartData.length) continue;
-      
-      const x = padding.left + (i * chartWidth / chartData.length);
-      
-      ctx.fillText(i.toString(), x, padding.top + chartHeight + 8);
-      
-      // Axis ticks
-      ctx.beginPath();
-      ctx.moveTo(x, padding.top + chartHeight);
-      ctx.lineTo(x, padding.top + chartHeight + 4);
-      ctx.stroke();
-    }
-    
-    // Add axis labels
-    ctx.font = '14px Inter, system-ui, sans-serif';
-    ctx.fillStyle = isDarkMode ? '#e5e7eb' : '#475569'; // Dark mode: gray-200, Light mode: gray-600
-    ctx.textAlign = 'center';
-    ctx.fillText('Lap', padding.left + chartWidth / 2, padding.top + chartHeight + 30);
-    
-    ctx.save();
-    ctx.translate(padding.left - 40, padding.top + chartHeight / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.textAlign = 'center';
-    ctx.fillText('Delta (s)', 0, 0);
-    ctx.restore();
-    
-    // Draw zero line (reference line for your team)
-    const zeroY = padding.top + chartHeight * (maxGap / (maxGap - minGap));
-    ctx.strokeStyle = isDarkMode ? '#6b7280' : '#f8fafc'; // Dark mode: gray-500, Light mode: light color
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(padding.left, zeroY);
-    ctx.lineTo(padding.left + chartWidth, zeroY);
-    ctx.stroke();
-    
-    // Add subtle drop shadow to the zero line
-    ctx.strokeStyle = isDarkMode ? '#4b5563' : '#cbd5e1'; // Dark mode: gray-600, Light mode: light gray
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(padding.left, zeroY + 2);
-    ctx.lineTo(padding.left + chartWidth, zeroY + 2);
-    ctx.stroke();
-    
-    // Draw lines for each team (draw non-highlighted teams first)
-    const drawTeam = (kartNum: string, isHighlighted: boolean) => {
-      if (!gapHistory[kartNum] || !gapHistory[kartNum].gaps || gapHistory[kartNum].gaps.length === 0) return;
-      
-      const team = teams.find(t => t.Kart === kartNum);
-      const color = teamColors[kartNum];
-      const gaps = gapHistory[kartNum].gaps;
-      
-      // Line style based on highlight state
-      ctx.strokeStyle = color;
-      ctx.lineWidth = isHighlighted ? 4 : 2.5;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      
-      // Add line shadow for depth
-      if (isHighlighted) {
-        ctx.shadowColor = isDarkMode ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.2)';
-        ctx.shadowBlur = 6;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-      } else {
-        ctx.shadowColor = isDarkMode ? 'rgba(0, 0, 0, 0.3)' : 'rgba(0, 0, 0, 0.1)';
-        ctx.shadowBlur = 3;
-        ctx.shadowOffsetX = 1;
-        ctx.shadowOffsetY = 1;
-      }
-      
-      ctx.beginPath();
-      
-      gaps.forEach((gap, index) => {
-        // Convert data points to canvas coordinates
-        const x = padding.left + ((index + 0.5) * chartWidth / chartData.length);
-        const y = padding.top + chartHeight - ((gap - minGap) / (maxGap - minGap) * chartHeight);
-        
-        if (index === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-      
-      ctx.stroke();
-      
-      // Remove shadow for dots
-      ctx.shadowColor = 'transparent';
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-      
-      // Draw data points
-      gaps.forEach((gap, index) => {
-        const x = padding.left + ((index + 0.5) * chartWidth / chartData.length);
-        const y = padding.top + chartHeight - ((gap - minGap) / (maxGap - minGap) * chartHeight);
-        
-        // Dot style based on highlight state
-        const outerRadius = isHighlighted ? 5 : 4;
-        const innerRadius = isHighlighted ? 2.5 : 2;
-        
-        // Draw dot with white center
-        ctx.beginPath();
-        ctx.arc(x, y, outerRadius, 0, Math.PI * 2);
-        ctx.fillStyle = color;
-        ctx.fill();
-        
-        ctx.beginPath();
-        ctx.arc(x, y, innerRadius, 0, Math.PI * 2);
-        ctx.fillStyle = isDarkMode ? '#1f2937' : 'white'; // Dark mode: dark gray, Light mode: white
-        ctx.fill();
-        
-        // Highlight last point with larger dot
-        if (index === gaps.length - 1) {
-          ctx.beginPath();
-          ctx.arc(x, y, isHighlighted ? 7 : 6, 0, Math.PI * 2);
-          ctx.fillStyle = color;
-          ctx.fill();
+      return (
+        <div className={`p-4 rounded-lg shadow-lg border max-w-xs ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+          <div className="flex items-center space-x-2 mb-2">
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+              <span className="font-bold">{absoluteLap}</span>
+            </div>
+            <h3 className={`font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-800'}`}>Lap {absoluteLap}</h3>
+          </div>
           
-          ctx.beginPath();
-          ctx.arc(x, y, isHighlighted ? 4 : 3, 0, Math.PI * 2);
-          ctx.fillStyle = isDarkMode ? '#1f2937' : 'white'; // Dark mode: dark gray, Light mode: white
-          ctx.fill();
-        }
-      });
-    };
-    
-    // First draw non-highlighted teams
-    monitoredTeams.forEach(kartNum => {
-      if (kartNum !== highlightedKart) {
-        drawTeam(kartNum, false);
-      }
-    });
-    
-    // Then draw highlighted team on top
-    if (highlightedKart) {
-      drawTeam(highlightedKart, true);
+          <div className="space-y-2 mt-2 max-h-60 overflow-y-auto">
+            {sortedPayload.map((entry: any) => {
+              const kartNum = entry.dataKey.replace('kart_', '');
+              const teamName = chartData[dataIndex]?.[`kart_${kartNum}_team`] || `Kart ${kartNum}`;
+              const gap = entry.value;
+              const color = entry.color;
+              const status = chartData[dataIndex]?.[`kart_${kartNum}_status`];
+              const position = chartData[dataIndex]?.[`kart_${kartNum}_position`];
+              
+              return (
+                <div key={entry.dataKey} className={`flex items-center p-2 rounded ${hoveredTeam === kartNum ? (isDarkMode ? 'bg-gray-700' : 'bg-gray-100') : ''}`}>
+                  <div className="flex-shrink-0 mr-3">
+                    <div className="w-3 h-10 rounded-sm" style={{ backgroundColor: color }}></div>
+                  </div>
+                  <div className="flex-grow">
+                    <div className="flex items-center gap-2">
+                      <div className={`text-xs font-medium text-center rounded px-1 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                        P{position || '?'}
+                      </div>
+                      <div className={`font-medium truncate ${isDarkMode ? 'text-gray-200' : 'text-gray-800'}`}>
+                        {teamName}
+                      </div>
+                    </div>
+                    <div className="flex items-center mt-1">
+                      <span className={`text-sm ${status === 'Pit-in' ? 'text-red-500 font-semibold' : (isDarkMode ? 'text-gray-400' : 'text-gray-600')}`}>
+                        {status === 'Pit-in' ? '🔴 In Pits' : status || 'On Track'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <span 
+                      className={`font-bold text-base ${gap < 0 ? 'text-green-500' : gap > 0 ? 'text-red-500' : 'text-blue-500'}`}
+                    >
+                      {gap.toFixed(3)}s
+                    </span>
+                    <div className="text-xs mt-1">
+                      {gap < 0 ? '▼ Catching' : gap > 0 ? '▲ Falling back' : 'Same pace'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
     }
-    
-    // Draw tooltip if visible
-    if (tooltip.visible) {
-      const tooltipWidth = 150;
-      const tooltipHeight = 75;
-      let tooltipX = tooltip.x + 10;
-      
-      // Keep tooltip within chart bounds
-      if (tooltipX + tooltipWidth > width - padding.right) {
-        tooltipX = tooltip.x - tooltipWidth - 10;
-      }
-      
-      // Draw tooltip background with shadow
-      ctx.shadowColor = isDarkMode ? 'rgba(0, 0, 0, 0.5)' : 'rgba(0, 0, 0, 0.2)';
-      ctx.shadowBlur = 10;
-      ctx.shadowOffsetX = 2;
-      ctx.shadowOffsetY = 2;
-      
-      ctx.fillStyle = isDarkMode ? '#374151' : '#ffffff'; // Dark mode: gray-700, Light mode: white
-      ctx.beginPath();
-      ctx.roundRect(tooltipX, tooltip.y - tooltipHeight / 2, tooltipWidth, tooltipHeight, 8);
-      ctx.fill();
-      
-      // Remove shadow
-      ctx.shadowColor = 'transparent';
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-      
-      // Draw tooltip border
-      ctx.strokeStyle = isDarkMode ? '#4b5563' : '#e2e8f0'; // Dark mode: gray-600, Light mode: light gray
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(tooltipX, tooltip.y - tooltipHeight / 2, tooltipWidth, tooltipHeight, 8);
-      ctx.stroke();
-      
-      // Draw team color indicator
-      const teamColor = teamColors[tooltip.kart];
-      ctx.fillStyle = teamColor;
-      ctx.beginPath();
-      ctx.roundRect(tooltipX + 8, tooltip.y - tooltipHeight / 2 + 8, 4, 25, 2);
-      ctx.fill();
-      
-      // Draw tooltip content
-      ctx.fillStyle = isDarkMode ? '#f3f4f6' : '#0f172a'; // Dark mode: gray-100, Light mode: almost black
-      ctx.font = 'bold 12px Inter, system-ui, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(tooltip.teamName, tooltipX + 18, tooltip.y - tooltipHeight / 2 + 8);
-      
-      ctx.font = '12px Inter, system-ui, sans-serif';
-      ctx.fillStyle = isDarkMode ? '#d1d5db' : '#374151'; // Dark mode: gray-300, Light mode: gray-700
-      ctx.fillText(`Kart #${tooltip.kart}`, tooltipX + 18, tooltip.y - tooltipHeight / 2 + 28);
-      ctx.fillText(`Lap: ${tooltip.lap}`, tooltipX + 18, tooltip.y - tooltipHeight / 2 + 44);
-      
-      const gapText = `Gap: ${tooltip.gap.toFixed(3)}s`;
-      ctx.fillStyle = tooltip.gap >= 0 ? 
-        (isDarkMode ? '#ef4444' : '#dc2626') : // Red: dark mode vs light mode
-        (isDarkMode ? '#22c55e' : '#16a34a');  // Green: dark mode vs light mode
-      ctx.fillText(gapText, tooltipX + 18, tooltip.y - tooltipHeight / 2 + 60);
-    }
-    
-    // Add legend
-    const legendY = padding.top - 20;
-    let legendX = padding.left;
-    
-    monitoredTeams.forEach(kartNum => {
-      const team = teams.find(t => t.Kart === kartNum);
-      if (!team) return;
-      
-      const teamName = team.Team;
-      const shortName = teamName.length > 15 ? teamName.substring(0, 12) + '...' : teamName;
-      const color = teamColors[kartNum];
-      
-      // Legend item container with highlight effect
-      const isHighlighted = kartNum === highlightedKart;
-      
-      if (isHighlighted) {
-        // Draw highlight background for legend item
-        ctx.fillStyle = isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
-        const textWidth = ctx.measureText(`${shortName} (#${kartNum})`).width;
-        ctx.beginPath();
-        ctx.roundRect(legendX - 4, legendY - 6, textWidth + 28, 12, 4);
-        ctx.fill();
-      }
-      
-      // Draw color box
-      ctx.fillStyle = color;
-      ctx.fillRect(legendX, legendY, 12, 6);
-      
-      // Draw team name
-      ctx.fillStyle = isDarkMode ? '#e5e7eb' : '#475569'; // Dark mode: gray-200, Light mode: gray-600
-      ctx.font = isHighlighted ? 'bold 11px Inter, system-ui, sans-serif' : '11px Inter, system-ui, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`${shortName} (#${kartNum})`, legendX + 16, legendY + 3);
-      
-      // Move to next legend item
-      legendX += ctx.measureText(`${shortName} (#${kartNum})`).width + 30;
-    });
-    
-  }, [chartData, gapHistory, teams, monitoredTeams, teamColors, tooltip, highlightedKart, isDarkMode]);
+    return null;
+  };
 
-  // Handle window resize to make the chart responsive
-  useEffect(() => {
-    const handleResize = () => {
-      if (canvasRef.current && containerRef.current) {
-        const container = containerRef.current;
-        const canvas = canvasRef.current;
-        
-        // Set canvas dimensions based on container size with proper resolution
-        const devicePixelRatio = window.devicePixelRatio || 1;
-        canvas.width = container.clientWidth * devicePixelRatio;
-        canvas.height = Math.min(300, container.clientHeight) * devicePixelRatio;
-        
-        // Adjust CSS dimensions
-        canvas.style.width = `${container.clientWidth}px`;
-        canvas.style.height = `${Math.min(300, container.clientHeight)}px`;
-        
-        // Scale canvas context to counter devicePixelRatio
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.scale(devicePixelRatio, devicePixelRatio);
+  // Get min and max Y values for chart
+  const { minGap, maxGap } = useMemo(() => {
+    let min = 0;
+    let max = 0;
+    
+    if (chartData.length > 0) {
+      for (const lapData of chartData) {
+        for (const kartNum of monitoredTeams) {
+          const key = `kart_${kartNum}`;
+          if (lapData[key] !== undefined) {
+            min = Math.min(min, lapData[key]);
+            max = Math.max(max, lapData[key]);
+          }
         }
       }
-    };
+    }
     
-    window.addEventListener('resize', handleResize);
-    handleResize(); // Initial resize
+    // Add buffer and ensure minimum range
+    const buffer = Math.max(1, (max - min) * 0.2);
+    min = Math.floor(min - buffer);
+    max = Math.ceil(max + buffer);
     
-    return () => {
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
+    if (max - min < 2) {
+      min -= 1;
+      max += 1;
+    }
+    
+    return { minGap: min, maxGap: max };
+  }, [chartData, monitoredTeams]);
 
+  // Empty state when no teams are monitored
   if (!gapHistory || Object.keys(gapHistory).length === 0 || monitoredTeams.length === 0) {
     return (
       <div className={`rounded-lg shadow p-4 mb-4 transition-colors duration-300 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
@@ -646,7 +229,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
-          <h2 className="font-bold text-lg">Time Delta Chart</h2>
+          <h2 className="font-bold text-lg">Race Delta Analysis</h2>
         </div>
         <div className={`text-center py-12 rounded-lg border-2 border-dashed ${isDarkMode ? 'border-gray-700 text-gray-400' : 'border-gray-200 text-gray-500'}`}>
           <svg className="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -655,7 +238,6 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
           <p className="text-lg font-medium">No data available</p>
           <p className="mt-2">Monitor teams to see the time delta chart</p>
           <button 
-            onClick={() => {}} // This would be connected to a "show me how" function
             className={`mt-4 px-4 py-2 rounded-md transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'}`}
           >
             Monitor teams by clicking the star icon
@@ -666,44 +248,178 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   }
 
   return (
-    <div className={`rounded-lg shadow overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className={`rounded-lg shadow overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}
+    >
       <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
-        <h2 className="font-bold text-lg flex items-center gap-2">
-          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          Time Delta Chart
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-bold text-lg flex items-center gap-2">
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            Race Delta Analysis
+          </h2>
+          
+          <div className={`text-xs rounded-md px-2 py-1 ${isDarkMode ? 'bg-blue-900 text-blue-100' : 'bg-blue-50 text-blue-800'}`}>
+            <span>Showing last 15 laps</span>
+          </div>
+        </div>
       </div>
       
       <div className="p-4">
-        <div className="h-64 w-full" ref={containerRef}>
-          <canvas 
-            ref={canvasRef} 
-            className="w-full h-full cursor-crosshair"
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-          />
+        <div className="h-64 w-full">
+          <ResponsiveContainer width="100%" height="100%" key={chartKey}>
+            <ComposedChart
+              data={chartData}
+              margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+              onMouseLeave={() => setHoveredTeam(null)}
+            >
+              <CartesianGrid 
+                strokeDasharray="3 3" 
+                stroke={isDarkMode ? '#374151' : '#e5e7eb'} 
+                vertical={false}
+              />
+              <XAxis 
+                dataKey="lap" 
+                label={{ 
+                  value: 'Lap', 
+                  position: 'insideBottomRight', 
+                  offset: -5,
+                  fill: isDarkMode ? '#9ca3af' : '#4b5563'
+                }}
+                tick={{ fill: isDarkMode ? '#9ca3af' : '#4b5563' }}
+              />
+              <YAxis 
+                domain={[minGap, maxGap]}
+                label={{ 
+                  value: 'Time Delta (s)', 
+                  angle: -90, 
+                  position: 'insideLeft',
+                  style: { textAnchor: 'middle', fill: isDarkMode ? '#9ca3af' : '#4b5563' }
+                }}
+                tick={{ fill: isDarkMode ? '#9ca3af' : '#4b5563' }}
+              />
+              
+              {/* Zero line represents your team's reference point */}
+              <ReferenceLine 
+                y={0} 
+                stroke={isDarkMode ? '#d1d5db' : '#6b7280'} 
+                strokeWidth={2}
+                strokeDasharray="3 3"
+              >
+                <Label 
+                  value="Your Team" 
+                  position="right" 
+                  fill={isDarkMode ? '#e5e7eb' : '#4b5563'}
+                />
+              </ReferenceLine>
+              
+              <Tooltip content={<CustomTooltip />} />
+              
+              <Legend 
+                onMouseEnter={(e) => {
+                  if (e.dataKey) {
+                    setHoveredTeam(e.dataKey.replace('kart_', ''));
+                  }
+                }}
+                onMouseLeave={() => setHoveredTeam(null)}
+                formatter={(value, entry) => {
+                  const kartNum = value.replace('kart_', '');
+                  const team = teams.find(t => t.Kart === kartNum);
+                  const position = team?.Position || '';
+                  return team ? `P${position} - ${team.Team} (#${kartNum})` : `Kart ${kartNum}`;
+                }}
+                iconType="circle"
+                wrapperStyle={{ paddingTop: 10 }}
+              />
+              
+              {monitoredTeams.map(kartNum => {
+                const key = `kart_${kartNum}`;
+                const color = teamColors[kartNum];
+                const isHighlighted = hoveredTeam === kartNum;
+                const team = teams.find(t => t.Kart === kartNum);
+                const isInPits = team?.Status === 'Pit-in';
+                
+                if (isInPits) {
+                  // For pit stops, render a special highlighted area
+                  return (
+                    <Area
+                      key={`${key}_area`}
+                      type="monotone"
+                      dataKey={key}
+                      name={key}
+                      fill={`${color}30`} // Semi-transparent fill
+                      stroke={color}
+                      strokeWidth={isHighlighted ? 3 : 2}
+                      strokeDasharray="5 2"
+                      activeDot={{
+                        r: 8,
+                        fill: color,
+                        stroke: isDarkMode ? '#1f2937' : '#ffffff'
+                      }}
+                    />
+                  );
+                }
+                
+                return (
+                  <Line
+                    key={key}
+                    type="monotone"
+                    dataKey={key}
+                    name={key}
+                    stroke={color}
+                    strokeWidth={isHighlighted ? 3 : 2}
+                    dot={{ 
+                      r: isHighlighted ? 6 : 4,
+                      strokeWidth: isHighlighted ? 2 : 1,
+                      fill: isDarkMode ? '#1f2937' : '#ffffff',
+                      stroke: color
+                    }}
+                    activeDot={{ 
+                      r: 8, 
+                      stroke: isDarkMode ? '#1f2937' : '#ffffff',
+                      strokeWidth: 2,
+                      fill: color
+                    }}
+                    connectNulls
+                    animateNewValues
+                    isAnimationActive={true}
+                  />
+                );
+              })}
+            </ComposedChart>
+          </ResponsiveContainer>
         </div>
-        <div className={`text-xs mt-2 text-center ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-          <div className="flex items-center justify-center gap-1">
-            <div className={`h-px w-8 ${isDarkMode ? 'bg-gray-500' : 'bg-gray-400'}`}></div>
-            <span>Lines show time delta compared to your team (horizontal line at 0s)</span>
-            <div className={`h-px w-8 ${isDarkMode ? 'bg-gray-500' : 'bg-gray-400'}`}></div>
+        
+        <div className={`text-xs mt-3 flex flex-wrap justify-center gap-3 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center">
+              <div className="h-px w-5 bg-gray-400"></div>
+              <div className="h-3 w-3 rounded-full bg-gray-400"></div>
+            </div>
+            <span>Teams on track</span>
           </div>
-          <div className="mt-1 flex justify-center items-center gap-4">
-            <div className="flex items-center gap-1">
-              <span className="text-green-500">↓</span>
-              <span>Getting closer</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center">
+              <div className="h-px w-5 bg-gray-400 dashed-line"></div>
+              <div className="h-3 w-3 rounded-full bg-red-400"></div>
             </div>
-            <div className="flex items-center gap-1">
-              <span className="text-red-500">↑</span>
-              <span>Falling behind</span>
-            </div>
+            <span>Teams in pits</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-green-500">▼</span>
+            <span>Getting closer</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-red-500">▲</span>
+            <span>Falling behind</span>
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 
