@@ -87,28 +87,26 @@ class ApexTimingParser:
     def setup_driver(self):
         """Setup Chrome WebDriver with appropriate options"""
         try:
-            chrome_options = Options()
+            import undetected_chromedriver as uc
+            
+            # Create options
+            chrome_options = uc.ChromeOptions()
             chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--remote-debugging-port=9222")
-            chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-setuid-sandbox")
-            chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--disable-notifications")
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
             
-            # Use the system ChromeDriver (installed above)
-            self.driver = webdriver.Chrome(options=chrome_options)
+            # Use undetected_chromedriver instead of regular Chrome
+            self.driver = uc.Chrome(options=chrome_options)
             
             self.driver.set_page_load_timeout(30)
             self.wait = WebDriverWait(self.driver, 30)
-            self.logger.info("WebDriver setup successful")
+            self.logger.info("WebDriver setup successful with undetected_chromedriver")
         except Exception as e:
             self.logger.error(f"WebDriver setup error: {e}")
             raise
-    
+
     def get_page_content(self, url: str) -> tuple[str, str]:
         """Load page and wait for content to be available"""
         try:
