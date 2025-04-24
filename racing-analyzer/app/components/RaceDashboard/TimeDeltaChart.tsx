@@ -321,16 +321,19 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               
               <Legend 
                 onMouseEnter={(e) => {
-                  if (e.dataKey) {
+                  if (e.dataKey && typeof e.dataKey === 'string') {
                     setHoveredTeam(e.dataKey.replace('kart_', ''));
                   }
                 }}
                 onMouseLeave={() => setHoveredTeam(null)}
                 formatter={(value, entry) => {
-                  const kartNum = value.replace('kart_', '');
-                  const team = teams.find(t => t.Kart === kartNum);
-                  const position = team?.Position || '';
-                  return team ? `P${position} - ${team.Team} (#${kartNum})` : `Kart ${kartNum}`;
+                  if (typeof value === 'string') {
+                    const kartNum = value.replace('kart_', '');
+                    const team = teams.find(t => t.Kart === kartNum);
+                    const position = team?.Position || '';
+                    return team ? `P${position} - ${team.Team} (#${kartNum})` : `Kart ${kartNum}`;
+                  }
+                  return value;
                 }}
                 iconType="circle"
                 wrapperStyle={{ paddingTop: 10 }}
