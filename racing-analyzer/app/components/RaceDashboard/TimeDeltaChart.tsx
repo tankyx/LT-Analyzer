@@ -30,7 +30,8 @@ interface TimeDeltaChartProps {
   gapHistory: GapHistory;
   teams: Team[];
   monitoredTeams: string[];
-  isDarkMode?: boolean; 
+  isDarkMode?: boolean;
+  onColorAssignment?: (colors: Record<string, string>) => void;
 }
 
 const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({ 
@@ -69,13 +70,18 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   // Prepare data with sliding window of 15 laps
   useEffect(() => {
     if (!gapHistory || Object.keys(gapHistory).length === 0) return;
-
+  
     // Set team colors
     const colors: Record<string, string> = {};
     monitoredTeams.forEach(kart => {
       colors[kart] = generateColor(kart);
     });
     setTeamColors(colors);
+    
+    // Pass colors to parent component if callback exists
+    if (props.onColorAssignment) {
+      props.onColorAssignment(colors);
+    }
 
     // Prepare chart data
     const preparedData: any[] = [];
@@ -323,12 +329,10 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                   }
                 }}
                 onMouseLeave={() => setHoveredTeam(null)}
-                formatter={(value, entry) => {
+                formatter={(value) => {
                   if (typeof value === 'string') {
-                    const kartNum = value.replace('kart_', '');
-                    const team = teams.find(t => t.Kart === kartNum);
-                    const position = team?.Position || '';
-                    return team ? `P${position} - ${team.Team} (#${kartNum})` : `Kart ${kartNum}`;
+                    // Just return the kart number without team name
+                    return `Kart #${value.replace('kart_', '')}`;
                   }
                   return value;
                 }}
