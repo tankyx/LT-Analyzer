@@ -68,13 +68,8 @@ const TrendArrows = ({ trend }: { trend: Trend | undefined }) => {
   };
   
   const getColor = () => {
-    const data = trend.dataContext || {};
-    const gap = data.gap || 0;
-    
-    if ((gap > 0 && trend.value < 0) || (gap < 0 && trend.value < 0)) {
-      return 'text-green-600';
-    }
-    return 'text-red-600';
+    // Simplified logic based on trend direction
+    return trend.value < 0 ? 'text-green-600' : 'text-red-600';
   };
   
   return (
