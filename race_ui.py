@@ -96,7 +96,10 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                 try:
                     # Calculate gap between monitored team and my team
                     mon_pit_stops = int(monitored_team.get('Pit Stops', '0') or '0')
-                    mon_base_gap = float(monitored_team.get('Gap', '0').replace(',', '.') or '0')
+                    if monitored_team.get('Position') == '1':
+                        mon_base_gap = 0.0
+                    else:
+                        mon_base_gap = float(monitored_team.get('Gap', '0').replace(',', '.') or '0')
                     
                     # Calculate real gap including pit stop compensation
                     real_gap = (mon_base_gap - my_base_gap) + ((mon_pit_stops - my_pit_stops) * 150)
