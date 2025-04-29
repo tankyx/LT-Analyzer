@@ -63,12 +63,18 @@ const TrendArrows = ({ trend }: { trend: Trend | undefined }) => {
   }
   
   const getArrows = () => {
-    const arrow = trend.value < 0 ? '↓' : '↑';  // Down arrow if catching up
+    const arrow = trend.value < 0 ? '↓' : '↑';
     return arrow.repeat(trend.arrow);
   };
   
   const getColor = () => {
-    return trend.value < 0 ? 'text-green-600' : 'text-red-600';
+    const data = trend.dataContext || {};
+    const gap = data.gap || 0;
+    
+    if ((gap > 0 && trend.value < 0) || (gap < 0 && trend.value < 0)) {
+      return 'text-green-600';
+    }
+    return 'text-red-600';
   };
   
   return (
