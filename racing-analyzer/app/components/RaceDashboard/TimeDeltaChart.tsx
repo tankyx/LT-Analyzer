@@ -32,6 +32,7 @@ interface TimeDeltaChartProps {
   monitoredTeams: string[];
   isDarkMode?: boolean;
   onColorAssignment?: (colors: Record<string, string>) => void;
+  onTeamHover?: (kartNum: string | null) => void;  // Add this line
 }
 
 const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({ 
@@ -39,7 +40,8 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   teams, 
   monitoredTeams,
   isDarkMode = false,
-  onColorAssignment
+  onColorAssignment,
+  onTeamHover
 }) => {
   const [chartData, setChartData] = useState<any[]>([]);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
@@ -326,10 +328,15 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               <Legend 
                 onMouseEnter={(e) => {
                   if (e.dataKey && typeof e.dataKey === 'string') {
-                    setHoveredTeam(e.dataKey.replace('kart_', ''));
+                    const kartNum = e.dataKey.replace('kart_', '');
+                    setHoveredTeam(kartNum);
+                    if (onTeamHover) onTeamHover(kartNum);
                   }
                 }}
-                onMouseLeave={() => setHoveredTeam(null)}
+                onMouseLeave={() => {
+                  setHoveredTeam(null);
+                  if (onTeamHover) onTeamHover(null);
+                }}
                 formatter={(value) => {
                   if (typeof value === 'string') {
                     // Just return the kart number without team name
