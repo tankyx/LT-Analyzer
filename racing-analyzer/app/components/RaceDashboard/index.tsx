@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import TimeDeltaChart from './TimeDeltaChart';
 import SimulationControls from './SimulationControls';
-import TabbedInterface from '../TabbedInterface';
+import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
 import StatusImageIndicator from './StatusImageIndicator';
 
