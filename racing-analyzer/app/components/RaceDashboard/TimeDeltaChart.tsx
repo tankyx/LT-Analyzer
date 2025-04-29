@@ -51,19 +51,19 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
 
   // Generate team colors
   const generateColor = useCallback((kartNumber: string): string => {
-    // Simple hash function to generate consistent colors
-    const hash = kartNumber.split('').reduce((acc, char) => {
-      return char.charCodeAt(0) + ((acc << 5) - acc);
-    }, 0);
+    const kartId = parseInt(kartNumber);
     
-    // Generate a hue from 0 to 360
-    const hue = Math.abs(hash) % 360;
+    const goldenRatioConjugate = 0.618033988749895;
+    let hue = (kartId * goldenRatioConjugate) % 1;
+    hue = Math.round(hue * 360);
     
-    // Use different saturation/lightness based on dark mode
-    const saturation = isDarkMode ? '80%' : '70%';
-    const lightness = isDarkMode ? '60%' : '45%';
+    // Vary saturation and lightness further based on kart number
+    const saturation = 70 + ((kartId % 3) * 10); // 70%, 80%, or 90%
+    const lightness = isDarkMode ? 
+      (50 + ((kartId % 5) * 5)) : // 50-70% for dark mode
+      (40 - ((kartId % 3) * 5));  // 30-40% for light mode
     
-    return `hsl(${hue}, ${saturation}, ${lightness})`;
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
   }, [isDarkMode]);
 
   // Prepare data with sliding window of 15 laps
@@ -88,19 +88,15 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
       }
     });
 
-    // Determine the window start (for sliding window of 15 laps)
     const MAX_VISIBLE_LAPS = 15;
     const windowStart = Math.max(0, maxLaps - MAX_VISIBLE_LAPS);
     
-    // Create data structure for the most recent 15 laps
     for (let i = windowStart; i < maxLaps; i++) {
-      // Use relative lap numbers so they always start at 1 within the window
-      const relativeLapNumber = i - windowStart + 1;
-      const absoluteLapNumber = i + 1;
+      const lapNumber = i + 1;
       
       const lapData: any = { 
-        lap: relativeLapNumber,
-        absoluteLap: absoluteLapNumber
+        lap: lapNumber,
+        absoluteLap: lapNumber
       };
       
       monitoredTeams.forEach(kartNum => {
@@ -284,6 +280,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               />
               <XAxis 
                 dataKey="lap" 
+                domain={[chartData[0]?.lap || 0, chartData[chartData.length-1]?.lap || 15]}
                 label={{ 
                   value: 'Lap', 
                   position: 'insideBottomRight', 
