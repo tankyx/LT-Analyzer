@@ -115,6 +115,7 @@ const RaceDashboard = () => {
   const [simulating, setSimulating] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
+  const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
   
   const handleTeamHover = (kartNum: string | null) => {
     setHoveredTeam(kartNum);
