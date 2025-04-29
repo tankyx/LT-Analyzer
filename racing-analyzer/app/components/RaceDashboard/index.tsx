@@ -504,7 +504,11 @@ const RaceDashboard = () => {
                     teams.find(t => t.Kart === kart)?.Status === 'Pit-in' 
                       ? (isDarkMode ? 'bg-red-900/50 hover:bg-red-800/50 border border-red-700' : 'bg-red-50 hover:bg-red-100 border border-red-200')
                       : (isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-50 hover:bg-gray-100')
-                  }`}>
+                    } ${hoveredTeam === kart ? 'ring-2 ring-blue-500' : ''}`}
+                    style={{
+                      borderLeft: `4px solid ${teamColors[kart] || 'transparent'}`
+                    }}
+                  >
                     <div className="flex justify-between items-center mb-1">
                       <div className="flex items-center gap-2">
                         <div className={`text-center min-w-6 rounded-md py-1 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-200'}`}>
