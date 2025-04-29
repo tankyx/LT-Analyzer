@@ -115,6 +115,10 @@ const RaceDashboard = () => {
   const [simulating, setSimulating] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
+  
+  const handleTeamHover = (kartNum: string | null) => {
+    setHoveredTeam(kartNum);
+  };
 
   const handleColorAssignment = (colors: Record<string, string>) => {
     setTeamColors(colors);
@@ -484,6 +488,7 @@ const RaceDashboard = () => {
               monitoredTeams={monitoredTeams}
               isDarkMode={isDarkMode}
               onColorAssignment={handleColorAssignment}
+              onTeamHover={handleTeamHover}
             />
             
             {/* Monitored Teams Panel */}
