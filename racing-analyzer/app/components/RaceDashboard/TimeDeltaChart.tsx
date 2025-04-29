@@ -38,7 +38,8 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   gapHistory, 
   teams, 
   monitoredTeams,
-  isDarkMode = false
+  isDarkMode = false,
+  onColorAssignment
 }) => {
   const [chartData, setChartData] = useState<any[]>([]);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
