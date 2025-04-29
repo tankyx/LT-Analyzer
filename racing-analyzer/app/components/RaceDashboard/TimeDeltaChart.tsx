@@ -79,8 +79,8 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     setTeamColors(colors);
     
     // Pass colors to parent component if callback exists
-    if (props.onColorAssignment) {
-      props.onColorAssignment(colors);
+    if (onColorAssignment) {
+      onColorAssignment(colors);
     }
 
     // Prepare chart data
