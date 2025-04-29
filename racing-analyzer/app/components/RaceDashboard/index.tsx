@@ -119,7 +119,12 @@ const RaceDashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [simulating, setSimulating] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [teamColors, setTeamColors] = useState<Record<string, string>>({});
 
+  const handleColorAssignment = (colors: Record<string, string>) => {
+    setTeamColors(colors);
+  };
+  
   const updateMonitoring = async () => {
     try {
       await ApiService.updateMonitoring({
@@ -483,6 +488,7 @@ const RaceDashboard = () => {
               teams={teams} 
               monitoredTeams={monitoredTeams}
               isDarkMode={isDarkMode}
+              onColorAssignment={handleColorAssignment}
             />
             
             {/* Monitored Teams Panel */}
@@ -605,17 +611,20 @@ const RaceDashboard = () => {
                   {[...teams]
                     .sort((a, b) => parseInt(a.Position) - parseInt(b.Position))
                     .map(team => (
-                    <tr 
-                      id={`team-${team.Kart}`}
-                      key={team.Kart} 
-                      className={`
-                        transition-colors
-                        ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'} 
-                        ${team.Kart === myTeam ? (isDarkMode ? 'bg-blue-900 hover:bg-blue-800' : 'bg-blue-50 hover:bg-blue-100') : ''}
-                        ${team.Status === 'Pit-in' ? (isDarkMode ? 'bg-red-900/40 hover:bg-red-800/40' : 'bg-red-50 hover:bg-red-100') : ''}
-                        ${monitoredTeams.includes(team.Kart) && team.Status === 'Pit-in' ? 'pit-alert' : ''}
-                      `}
-                    >
+                      <tr 
+                        id={`team-${team.Kart}`}
+                        key={team.Kart} 
+                        className={`
+                          transition-colors
+                          ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'} 
+                          ${team.Kart === myTeam ? (isDarkMode ? 'bg-blue-900 hover:bg-blue-800' : 'bg-blue-50 hover:bg-blue-100') : ''}
+                          ${team.Status === 'Pit-in' ? (isDarkMode ? 'bg-red-900/40 hover:bg-red-800/40' : 'bg-red-50 hover:bg-red-100') : ''}
+                          ${monitoredTeams.includes(team.Kart) && team.Status === 'Pit-in' ? 'pit-alert' : ''}
+                        `}
+                        style={monitoredTeams.includes(team.Kart) ? { 
+                          borderLeft: `4px solid ${teamColors[team.Kart] || 'transparent'}`
+                        } : {}}
+                      >
                       <td className="px-4 py-3">
                         <div className={`font-medium text-center rounded-full w-8 h-8 flex items-center justify-center ${parseInt(team.Position) <= 3 ? (isDarkMode ? 'bg-yellow-700 text-yellow-100' : 'bg-yellow-100 text-yellow-800') : (isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-800')}`}>
                           {team.Position}
@@ -623,7 +632,15 @@ const RaceDashboard = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col">
-                          <div className="font-medium truncate max-w-[200px]">{team.Team}</div>
+                          <div className="font-medium truncate max-w-[200px] flex items-center">
+                            {monitoredTeams.includes(team.Kart) && (
+                              <div 
+                                className="w-3 h-3 rounded-full mr-2 flex-shrink-0" 
+                                style={{ backgroundColor: teamColors[team.Kart] || 'transparent' }}
+                              ></div>
+                            )}
+                            {team.Team}
+                          </div>
                           <div className="flex items-center gap-2">
                             <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Kart #{team.Kart}</span>
                             {team.Status && <StatusImageIndicator status={team.Status} size="sm" />}
