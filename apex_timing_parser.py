@@ -98,7 +98,8 @@ class ApexTimingParser:
             chrome_options.add_argument('--window-size=1920,1080')
             
             # Use undetected_chromedriver instead of regular Chrome
-            self.driver = uc.Chrome(options=chrome_options)
+            # Specify version_main=135 to match your Chrome version
+            self.driver = uc.Chrome(options=chrome_options, version_main=135)
             
             self.driver.set_page_load_timeout(30)
             self.wait = WebDriverWait(self.driver, 30)
