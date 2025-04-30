@@ -5,37 +5,27 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 
-// Types
-interface GapHistory {
-  [kart: string]: {
-    gaps: number[];
-    last_update: string;
-  };
-}
+// Toggle component for switching between regular and adjusted gap modes
+const ModeToggle = ({ mode, setMode, isDarkMode }) => (
+  <div className="flex items-center space-x-2">
+    <span className={`text-sm ${mode === 'regular' ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')}`}>
+      Regular Gap
+    </span>
+    <button 
+      onClick={() => setMode(mode === 'regular' ? 'adjusted' : 'regular')}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${mode === 'adjusted' ? (isDarkMode ? 'bg-blue-600' : 'bg-blue-500') : (isDarkMode ? 'bg-gray-600' : 'bg-gray-300')}`}
+    >
+      <span 
+        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${mode === 'adjusted' ? 'translate-x-6' : 'translate-x-1'}`} 
+      />
+    </button>
+    <span className={`text-sm ${mode === 'adjusted' ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')}`}>
+      Adjusted for Pit Stops
+    </span>
+  </div>
+);
 
-interface Team {
-  Kart: string;
-  Team: string;
-  Position: string;
-  'Last Lap': string;
-  'Best Lap': string;
-  'Pit Stops': string;
-  Gap: string;
-  RunTime: string;
-  Status?: string;
-  lastPitCount?: number;
-}
-
-interface TimeDeltaChartProps {
-  gapHistory: GapHistory;
-  teams: Team[];
-  monitoredTeams: string[];
-  isDarkMode?: boolean;
-  onColorAssignment?: (colors: Record<string, string>) => void;
-  onTeamHover?: (kartNum: string | null) => void;  // Add this line
-}
-
-const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({ 
+const TimeDeltaChart = ({ 
   gapHistory, 
   teams, 
   monitoredTeams,
@@ -43,18 +33,19 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   onColorAssignment,
   onTeamHover
 }) => {
-  const [chartData, setChartData] = useState<any[]>([]);
-  const [teamColors, setTeamColors] = useState<Record<string, string>>({});
-  const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
-  const [chartKey, setChartKey] = useState<number>(0); // Used to force re-render when theme changes
+  const [chartData, setChartData] = useState([]);
+  const [teamColors, setTeamColors] = useState({});
+  const [hoveredTeam, setHoveredTeam] = useState(null);
+  const [chartKey, setChartKey] = useState(0);
+  const [gapMode, setGapMode] = useState('regular'); // 'regular' or 'adjusted'
   
-  // Force chart re-render when theme changes
+  // Force chart re-render when theme or mode changes
   useEffect(() => {
     setChartKey(prev => prev + 1);
-  }, [isDarkMode]);
+  }, [isDarkMode, gapMode]);
 
   // Generate team colors
-  const generateColor = useCallback((kartNumber: string): string => {
+  const generateColor = useCallback((kartNumber) => {
     const kartId = parseInt(kartNumber);
     
     const goldenRatioConjugate = 0.618033988749895;
@@ -75,7 +66,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     if (!gapHistory || Object.keys(gapHistory).length === 0) return;
   
     // Set team colors
-    const colors: Record<string, string> = {};
+    const colors = {};
     monitoredTeams.forEach(kart => {
       colors[kart] = generateColor(kart);
     });
@@ -87,7 +78,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     }
 
     // Prepare chart data
-    const preparedData: any[] = [];
+    const preparedData = [];
     let maxLaps = 0;
 
     // Find max number of laps
@@ -103,19 +94,32 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     for (let i = windowStart; i < maxLaps; i++) {
       const lapNumber = i + 1;
       
-      const lapData: any = { 
+      const lapData = { 
         lap: lapNumber,
         absoluteLap: lapNumber
       };
       
       monitoredTeams.forEach(kartNum => {
         const team = teams.find(t => t.Kart === kartNum);
-        if (gapHistory[kartNum] && gapHistory[kartNum].gaps && gapHistory[kartNum].gaps[i] !== undefined) {
-          lapData[`kart_${kartNum}`] = gapHistory[kartNum].gaps[i];
-          lapData[`kart_${kartNum}_team`] = team?.Team || `Kart ${kartNum}`;
+        
+        // Check if we have data for this team at this lap
+        if (gapHistory[kartNum]) {
+          // Get regular gap
+          if (gapHistory[kartNum].gaps && gapHistory[kartNum].gaps[i] !== undefined) {
+            lapData[`kart_${kartNum}`] = gapHistory[kartNum].gaps[i];
+          }
           
-          // Store additional lap info if available
+          // Get adjusted gap if available
+          if (gapHistory[kartNum].adjusted_gaps && gapHistory[kartNum].adjusted_gaps[i] !== undefined) {
+            lapData[`kart_${kartNum}_adjusted`] = gapHistory[kartNum].adjusted_gaps[i];
+          } else if (gapHistory[kartNum].gaps && gapHistory[kartNum].gaps[i] !== undefined) {
+            // Fallback if adjusted gaps aren't available yet
+            lapData[`kart_${kartNum}_adjusted`] = gapHistory[kartNum].gaps[i];
+          }
+          
+          // Store team info
           if (team) {
+            lapData[`kart_${kartNum}_team`] = team.Team || `Kart ${kartNum}`;
             lapData[`kart_${kartNum}_status`] = team.Status || 'On Track';
             lapData[`kart_${kartNum}_position`] = team.Position;
           }
@@ -129,14 +133,22 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   }, [gapHistory, teams, monitoredTeams, isDarkMode, generateColor]);
 
   // Custom tooltip component
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       // Get the actual lap number
       const dataIndex = label - 1;
       const absoluteLap = chartData[dataIndex]?.absoluteLap || label;
       
+      // Filter payload to only include the current mode's data
+      const filteredPayload = payload.filter(entry => {
+        const dataKey = entry.dataKey;
+        return gapMode === 'adjusted' 
+          ? dataKey.includes('_adjusted')
+          : !dataKey.includes('_adjusted');
+      });
+      
       // Sort data by gap value
-      const sortedPayload = [...payload].sort((a, b) => a.value - b.value);
+      const sortedPayload = [...filteredPayload].sort((a, b) => a.value - b.value);
       
       return (
         <div className={`p-4 rounded-lg shadow-lg border max-w-xs ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
@@ -148,13 +160,16 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
           </div>
           
           <div className="space-y-2 mt-2 max-h-60 overflow-y-auto">
-            {sortedPayload.map((entry: any) => {
-              const kartNum = entry.dataKey.replace('kart_', '');
+            {sortedPayload.map(entry => {
+              const kartNum = entry.dataKey.replace('kart_', '').replace('_adjusted', '');
               const teamName = chartData[dataIndex]?.[`kart_${kartNum}_team`] || `Kart ${kartNum}`;
               const gap = entry.value;
-              const color = entry.color;
+              const color = teamColors[kartNum] || entry.color;
               const status = chartData[dataIndex]?.[`kart_${kartNum}_status`];
               const position = chartData[dataIndex]?.[`kart_${kartNum}_position`];
+              
+              const team = teams.find(t => t.Kart === kartNum);
+              const pitStops = team?.['Pit Stops'] || '0';
               
               return (
                 <div key={entry.dataKey} className={`flex items-center p-2 rounded ${hoveredTeam === kartNum ? (isDarkMode ? 'bg-gray-700' : 'bg-gray-100') : ''}`}>
@@ -174,6 +189,11 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                       <span className={`text-sm ${status === 'Pit-in' ? 'text-red-500 font-semibold' : (isDarkMode ? 'text-gray-400' : 'text-gray-600')}`}>
                         {status === 'Pit-in' ? '🔴 In Pits' : status || 'On Track'}
                       </span>
+                      {gapMode === 'adjusted' && (
+                        <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                          {pitStops} Pit{parseInt(pitStops) !== 1 ? 's' : ''}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex-shrink-0 text-right">
@@ -204,7 +224,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     if (chartData.length > 0) {
       for (const lapData of chartData) {
         for (const kartNum of monitoredTeams) {
-          const key = `kart_${kartNum}`;
+          const key = gapMode === 'adjusted' ? `kart_${kartNum}_adjusted` : `kart_${kartNum}`;
           if (lapData[key] !== undefined) {
             min = Math.min(min, lapData[key]);
             max = Math.max(max, lapData[key]);
@@ -224,7 +244,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     }
     
     return { minGap: min, maxGap: max };
-  }, [chartData, monitoredTeams]);
+  }, [chartData, monitoredTeams, gapMode]);
 
   // Empty state when no teams are monitored
   if (!gapHistory || Object.keys(gapHistory).length === 0 || monitoredTeams.length === 0) {
@@ -260,7 +280,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
       className={`rounded-lg shadow overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}
     >
       <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
           <h2 className="font-bold text-lg flex items-center gap-2">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -268,8 +288,16 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
             Race Delta Analysis
           </h2>
           
-          <div className={`text-xs rounded-md px-2 py-1 ${isDarkMode ? 'bg-blue-900 text-blue-100' : 'bg-blue-50 text-blue-800'}`}>
-            <span>Showing last 15 laps</span>
+          <div className="flex items-center gap-4">
+            <ModeToggle 
+              mode={gapMode} 
+              setMode={setGapMode}
+              isDarkMode={isDarkMode}
+            />
+            
+            <div className={`text-xs rounded-md px-2 py-1 ${isDarkMode ? 'bg-blue-900 text-blue-100' : 'bg-blue-50 text-blue-800'}`}>
+              <span>Showing last 15 laps</span>
+            </div>
           </div>
         </div>
       </div>
@@ -280,7 +308,10 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
             <ComposedChart
               data={chartData}
               margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
-              onMouseLeave={() => setHoveredTeam(null)}
+              onMouseLeave={() => {
+                setHoveredTeam(null);
+                if (onTeamHover) onTeamHover(null);
+              }}
             >
               <CartesianGrid 
                 strokeDasharray="3 3" 
@@ -301,7 +332,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               <YAxis 
                 domain={[minGap, maxGap]}
                 label={{ 
-                  value: 'Time Delta (s)', 
+                  value: gapMode === 'adjusted' ? 'Adjusted Gap (s)' : 'Time Delta (s)', 
                   angle: -90, 
                   position: 'insideLeft',
                   style: { textAnchor: 'middle', fill: isDarkMode ? '#9ca3af' : '#4b5563' }
@@ -328,7 +359,9 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               <Legend 
                 onMouseEnter={(e) => {
                   if (e.dataKey && typeof e.dataKey === 'string') {
-                    const kartNum = e.dataKey.replace('kart_', '');
+                    // Remove the '_adjusted' suffix if present
+                    const dataKey = e.dataKey.replace('_adjusted', '');
+                    const kartNum = dataKey.replace('kart_', '');
                     setHoveredTeam(kartNum);
                     if (onTeamHover) onTeamHover(kartNum);
                   }
@@ -339,8 +372,8 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                 }}
                 formatter={(value) => {
                   if (typeof value === 'string') {
-                    // Just return the kart number without team name
-                    return `Kart #${value.replace('kart_', '')}`;
+                    // Just return the kart number without team name and remove '_adjusted' suffix
+                    return `Kart #${value.replace('kart_', '').replace('_adjusted', '')}`;
                   }
                   return value;
                 }}
@@ -349,20 +382,23 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               />
               
               {monitoredTeams.map(kartNum => {
-                const key = `kart_${kartNum}`;
                 const color = teamColors[kartNum];
                 const isHighlighted = hoveredTeam === kartNum;
                 const team = teams.find(t => t.Kart === kartNum);
                 const isInPits = team?.Status === 'Pit-in';
                 
+                // Determine which data key to use based on mode
+                const dataKey = gapMode === 'adjusted' ? `kart_${kartNum}_adjusted` : `kart_${kartNum}`;
+                const displayName = `kart_${kartNum}${gapMode === 'adjusted' ? '_adjusted' : ''}`;
+                
                 if (isInPits) {
                   // For pit stops, render a special highlighted area
                   return (
                     <Area
-                      key={`${key}_area`}
+                      key={dataKey}
                       type="monotone"
-                      dataKey={key}
-                      name={key}
+                      dataKey={dataKey}
+                      name={displayName}
                       fill={`${color}30`} // Semi-transparent fill
                       stroke={color}
                       strokeWidth={isHighlighted ? 3 : 2}
@@ -378,10 +414,10 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                 
                 return (
                   <Line
-                    key={key}
+                    key={dataKey}
                     type="monotone"
-                    dataKey={key}
-                    name={key}
+                    dataKey={dataKey}
+                    name={displayName}
                     stroke={color}
                     strokeWidth={isHighlighted ? 3 : 2}
                     dot={{ 
@@ -429,6 +465,11 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
             <span className="text-red-500">▲</span>
             <span>Falling behind</span>
           </div>
+          {gapMode === 'adjusted' && (
+            <div className="flex items-center gap-2 ml-4">
+              <span className="px-1 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Pit time: 2:38</span>
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
