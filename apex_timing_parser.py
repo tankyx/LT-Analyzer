@@ -98,42 +98,56 @@ class ApexTimingParser:
             from selenium import webdriver
             from selenium.webdriver.firefox.options import Options
             from selenium.webdriver.firefox.service import Service
-            from webdriver_manager.firefox import GeckoDriverManager
             
             # Create Firefox options
             firefox_options = Options()
             firefox_options.add_argument("--headless")
             firefox_options.add_argument("--no-sandbox")
             firefox_options.add_argument("--disable-dev-shm-usage")
-            firefox_options.add_argument('--width=1280')  # Reduced from 1920
-            firefox_options.add_argument('--height=720')  # Reduced from 1080
+            firefox_options.add_argument('--width=1280')
+            firefox_options.add_argument('--height=720')
             
             # Set page load timeout in Firefox browser preference
-            firefox_options.set_preference("dom.max_script_run_time", 30)  # Script execution timeout
-            firefox_options.set_preference("browser.tabs.remote.autostart", False)  # Disable content process
+            firefox_options.set_preference("dom.max_script_run_time", 30)
+            firefox_options.set_preference("browser.tabs.remote.autostart", False)
             firefox_options.set_preference("browser.tabs.remote.autostart.2", False)
-            firefox_options.set_preference("network.http.connection-timeout", 20)  # Connection timeout in seconds
+            firefox_options.set_preference("network.http.connection-timeout", 20)
             
-            # Use GeckoDriverManager to automatically download and manage the Firefox driver
-            self.logger.info("Downloading GeckoDriver...")
-            driver_path = GeckoDriverManager().install()
-            self.logger.info(f"Using GeckoDriver at: {driver_path}")
+            # Try to find geckodriver in the system
+            driver_path = None
+            possible_paths = [
+                "/home/ubuntu/.wdm/drivers/geckodriver/linux64/v0.36.0/geckodriver",
+                "/usr/local/bin/geckodriver",
+                "/usr/bin/geckodriver"
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    driver_path = path
+                    self.logger.info(f"Found geckodriver at: {driver_path}")
+                    break
+            
+            if not driver_path:
+                from webdriver_manager.firefox import GeckoDriverManager
+                driver_path = GeckoDriverManager().install()
             
             service = Service(driver_path)
             service.start()
             
-            # Initialize Firefox driver with reduced timeouts
+            # Initialize Firefox driver with reduced timeouts - IMPORTANT
+            # Use a direct approach to avoid the timeout in the selenium code
+            os.environ['MOZ_HEADLESS'] = '1'  # Ensure Firefox knows it's headless
             self.logger.info("Initializing Firefox WebDriver...")
             self.driver = webdriver.Firefox(
                 service=service,
                 options=firefox_options,
             )
             
-            # Set explicit timeouts
-            self.driver.set_page_load_timeout(30)  # 30 seconds for page load
-            self.driver.set_script_timeout(15)     # 15 seconds for script execution
+            # Set explicit timeouts - critical for stability
+            self.driver.set_page_load_timeout(30)
+            self.driver.set_script_timeout(15)
             
-            self.wait = WebDriverWait(self.driver, 15)  # Reduced from 30
+            self.wait = WebDriverWait(self.driver, 15)
             self.logger.info("WebDriver setup successful with Firefox headless")
         except Exception as e:
             self.logger.error(f"WebDriver setup error: {e}")
