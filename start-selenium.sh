@@ -9,4 +9,4 @@ source racing-venv/bin/activate
 export PYTHONUNBUFFERED=1
 
 # Start the Flask application with Playwright backend
-exec python race_ui_playwright.py
+exec python race_ui.py
