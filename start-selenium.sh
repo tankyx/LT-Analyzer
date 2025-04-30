@@ -1,18 +1,21 @@
 #!/bin/bash
 export DISPLAY=:99
+export DBUS_SESSION_BUS_ADDRESS=/dev/null
+export PYTHONUNBUFFERED=1
 
 # Start Xvfb if not running
 if ! pgrep -f "Xvfb :99" > /dev/null; then
-  ~/LT-Analyzer/start-xvfb.sh
+  Xvfb :99 -screen 0 1280x720x24 -ac +extension GLX +render -noreset &
+  sleep 2
+  echo "Xvfb started on display :99"
 fi
 
-# Activate virtual environment and run the app
+# Activate virtual environment
 cd ~/LT-Analyzer
 source racing-venv/bin/activate
 
-# Set Firefox options explicitly
-export MOZ_HEADLESS=1
-export MOZ_DBUS_REMOTE=1
+# Make sure we're using the system chromium
+export CHROME_PATH=/usr/bin/chromium-browser
 
-# Run with explicit timeouts
-python race_ui.py
+# Run the app
+exec python race_ui.py
