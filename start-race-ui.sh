@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Kill any existing Xvfb processes
-pkill Xvfb
+pkill Xvfb 2>/dev/null || true
 
 # Remove any stale lock files
 rm -f /tmp/.X*-lock
@@ -20,8 +20,10 @@ export DISPLAY=:${DISPLAY_NUM}
 
 echo "Starting race_ui.py with virtual display :${DISPLAY_NUM}"
 
-# Run your Python script
-python3 /home/ubuntu/LT-Analyzer/race_ui.py &
+# Activate the virtual environment and run your Python script
+# Make sure to use the correct path to your virtual environment
+source /home/ubuntu/LT-Analyzer/racing-venv/bin/activate
+python /home/ubuntu/LT-Analyzer/race_ui.py &
 APP_PID=$!
 
 # Setup trap to clean up
