@@ -1,6 +1,14 @@
 import React, { useState } from 'react';
 
-const PitStopConfig = ({ 
+interface PitStopConfigProps {
+  pitStopTime: number;
+  setPitStopTime: (time: number) => void;
+  requiredPitStops: number;
+  setRequiredPitStops: (stops: number) => void;
+  isDarkMode?: boolean;
+}
+
+const PitStopConfig: React.FC<PitStopConfigProps> = ({ 
   pitStopTime,
   setPitStopTime,
   requiredPitStops,
