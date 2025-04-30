@@ -71,6 +71,25 @@ export const ApiService = {
       console.error('Error stopping simulation:', error);
       throw error;
     }
+  },
+
+  updatePitStopConfig: async (data: { pitStopTime: number; requiredPitStops: number }) => {
+    try {
+      const response = await fetch(`/api/update-pit-config`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to update pit stop configuration');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error updating pit stop config:', error);
+      throw error;
+    }
   }
 };
 
