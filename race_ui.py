@@ -60,6 +60,10 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
     """Calculate delta times between my team and monitored teams"""
     global race_data
     
+    # Pit stop constants
+    PIT_STOP_TIME = 158  # 2:38 in seconds
+    REQUIRED_PIT_STOPS = 3  # Set this to your required number of pit stops
+    
     if not my_team_kart or not teams:
         return {}
 
@@ -70,8 +74,9 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
     deltas = {}
     try:
         my_pit_stops = int(my_team.get('Pit Stops', '0') or '0')
+        my_remaining_stops = max(0, REQUIRED_PIT_STOPS - my_pit_stops)
         
-        # Fix: Check if my team is in position 1
+        # Check if my team is in position 1
         if my_team.get('Position') == '1':
             my_base_gap = 0.0
         else:
@@ -82,6 +87,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
             if kart not in race_data['gap_history']:
                 race_data['gap_history'][kart] = {
                     'gaps': deque(maxlen=10),  # Store last 10 gaps
+                    'adjusted_gaps': deque(maxlen=10),  # Store adjusted gaps
                     'last_update': None
                 }
         
@@ -96,6 +102,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                 try:
                     # Calculate gap between monitored team and my team
                     mon_pit_stops = int(monitored_team.get('Pit Stops', '0') or '0')
+                    mon_remaining_stops = max(0, REQUIRED_PIT_STOPS - mon_pit_stops)
                     
                     # If position is 1, gap is 0
                     if monitored_team.get('Position') == '1':
@@ -103,9 +110,13 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                     else:
                         mon_base_gap = float(monitored_team.get('Gap', '0').replace(',', '.') or '0')
                     
-                    # Calculate real gap including pit stop compensation
+                    # Calculate regular gap with pit stop compensation for completed stops
                     real_gap = (mon_base_gap - my_base_gap) + ((mon_pit_stops - my_pit_stops) * 150)
                     real_gap = round(real_gap, 3)
+                    
+                    # Calculate adjusted gap accounting for remaining required pit stops
+                    adjusted_gap = real_gap + ((mon_remaining_stops - my_remaining_stops) * PIT_STOP_TIME)
+                    adjusted_gap = round(adjusted_gap, 3)
                     
                     # Update gap history
                     gap_history = race_data['gap_history'][kart]
@@ -114,27 +125,41 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                     # Only update history when we see a new lap
                     if last_lap and last_lap != gap_history['last_update']:
                         gap_history['gaps'].append(real_gap)
+                        gap_history['adjusted_gaps'].append(adjusted_gap)
                         gap_history['last_update'] = last_lap
                     
                     # Get gaps as list for calculations
                     gaps = list(gap_history['gaps'])
+                    adjusted_gaps = list(gap_history['adjusted_gaps'])
                     
-                    # Calculate trends
+                    # Calculate trends for regular gap
                     trend_1, arrow_1 = calculate_trend(real_gap, gaps[-2:] if len(gaps) >= 2 else [])
                     trend_5, arrow_5 = calculate_trend(real_gap, gaps[-5:] if len(gaps) >= 5 else [])
                     trend_10, arrow_10 = calculate_trend(real_gap, gaps[-10:] if len(gaps) >= 10 else [])
                     
+                    # Calculate trends for adjusted gap
+                    adj_trend_1, adj_arrow_1 = calculate_trend(adjusted_gap, adjusted_gaps[-2:] if len(adjusted_gaps) >= 2 else [])
+                    adj_trend_5, adj_arrow_5 = calculate_trend(adjusted_gap, adjusted_gaps[-5:] if len(adjusted_gaps) >= 5 else [])
+                    adj_trend_10, adj_arrow_10 = calculate_trend(adjusted_gap, adjusted_gaps[-10:] if len(adjusted_gaps) >= 10 else [])
+                    
                     deltas[kart] = {
                         'gap': real_gap,
+                        'adjusted_gap': adjusted_gap,
                         'team_name': monitored_team.get('Team', ''),
                         'position': int(monitored_team.get('Position', '0')),
                         'last_lap': last_lap,
                         'best_lap': monitored_team.get('Best Lap', ''),
                         'pit_stops': str(mon_pit_stops),
+                        'remaining_stops': mon_remaining_stops,
                         'trends': {
                             'lap_1': {'value': trend_1, 'arrow': arrow_1},
                             'lap_5': {'value': trend_5, 'arrow': arrow_5},
                             'lap_10': {'value': trend_10, 'arrow': arrow_10}
+                        },
+                        'adjusted_trends': {
+                            'lap_1': {'value': adj_trend_1, 'arrow': adj_arrow_1},
+                            'lap_5': {'value': adj_trend_5, 'arrow': adj_arrow_5},
+                            'lap_10': {'value': adj_trend_10, 'arrow': adj_arrow_10}
                         }
                     }
                 except (ValueError, TypeError, AttributeError) as e:
