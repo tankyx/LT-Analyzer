@@ -1,33 +1,80 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
-import pandas as pd
-import sqlite3
-from datetime import datetime
-import time
+import asyncio
 import logging
-from typing import Optional, Dict
-import traceback
 import os
+import sqlite3
+import time
+import traceback
+from datetime import datetime
+from typing import Optional, Dict, Tuple, List
+import pandas as pd
+from playwright.async_api import async_playwright, Page, Browser, Playwright
+from bs4 import BeautifulSoup
 
-class ApexTimingParser:
+class ApexTimingParserPlaywright:
     def __init__(self):
         self.setup_logging()
         self.setup_database()
-        self.setup_driver()
-        
+        self.browser = None
+        self.page = None
+        self.playwright = None
+
+    async def initialize(self):
+        """Initialize Playwright browser"""
+        try:
+            self.playwright = await asyncio.gather(async_playwright().start())[0]
+            self.logger.info("Starting Playwright browser...")
+            
+            # Launch browser with appropriate options
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,  # Run in headless mode
+                args=[
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--disable-setuid-sandbox",
+                    "--no-sandbox",
+                ]
+            )
+            
+            # Create a new page
+            self.page = await self.browser.new_page()
+            self.page.set_default_timeout(30000)  # 30 seconds timeout
+            
+            self.logger.info("Playwright browser started successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error initializing Playwright: {e}")
+            self.logger.error(traceback.format_exc())
+            await self.cleanup()
+            return False
+
+    async def cleanup(self):
+        """Clean up Playwright resources"""
+        try:
+            if self.page:
+                await self.page.close()
+                self.page = None
+            
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
+                
+            if self.playwright:
+                await self.playwright.stop()
+                self.playwright = None
+            
+            self.logger.info("Playwright resources cleaned up")
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {e}")
+
     def setup_logging(self):
+        """Setup logging configuration"""
         import logging.handlers
         
-        # Create a rotating file handler that limits the log size
+        # Create a rotating file handler
         file_handler = logging.handlers.RotatingFileHandler(
             'apex_timing.log',
-            maxBytes=10*1024*1024,  # 10MB max size
-            backupCount=3           # Keep 3 backup files
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=3
         )
         
         console_handler = logging.StreamHandler()
@@ -82,71 +129,17 @@ class ApexTimingParser:
                         team_name TEXT,
                         lap_number INTEGER,
                         lap_time TEXT,
-                        lap_type TEXT,
                         position_after_lap INTEGER,
                         pit_this_lap INTEGER,
                         FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                     )
                 ''')
+            self.logger.info("Database setup complete")
         except Exception as e:
             self.logger.error(f"Database setup error: {e}")
             raise
 
-    def setup_driver(self):
-        try:
-            from selenium import webdriver
-            from selenium.webdriver.chrome.options import Options
-            from selenium.webdriver.chrome.service import Service
-            from webdriver_manager.chrome import ChromeDriverManager
-            
-            # Create Chrome options with more robust settings
-            chrome_options = Options()
-            chrome_options.add_argument("--headless=new")  # Use new headless mode
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--window-size=1280,720")
-            
-            # These options help with stability in CI/server environments
-            chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-infobars")
-            chrome_options.add_argument("--disable-setuid-sandbox")
-            chrome_options.add_argument("--disable-dev-tools")
-            chrome_options.add_argument("--no-zygote")
-            chrome_options.add_argument("--single-process")
-            chrome_options.add_argument("--remote-debugging-port=9222")
-            
-            # Explicitly set binary location to system chromium
-            chrome_options.binary_location = "/usr/bin/chromium-browser"
-            
-            self.logger.info("Setting up ChromeDriver...")
-            
-            # Install the ChromeDriver
-            driver_manager = ChromeDriverManager()
-            driver_path = driver_manager.install()
-            self.logger.info(f"ChromeDriver installed at: {driver_path}")
-            
-            service = Service(executable_path=driver_path)
-            
-            # Initialize Chrome driver with explicit service path
-            self.logger.info("Initializing Chrome WebDriver...")
-            self.driver = webdriver.Chrome(
-                service=service,
-                options=chrome_options
-            )
-            
-            # Set explicit timeouts
-            self.driver.set_page_load_timeout(30)
-            self.driver.set_script_timeout(15)
-            
-            self.wait = WebDriverWait(self.driver, 15)
-            self.logger.info("WebDriver setup successful with Chrome headless")
-        except Exception as e:
-            self.logger.error(f"WebDriver setup error: {e}")
-            self.logger.error(traceback.format_exc())
-            raise
-
-    def get_page_content(self, url: str) -> tuple[str, str]:
+    async def get_page_content(self, url: str) -> Tuple[str, str]:
         """Load page and wait for content to be available"""
         retry_count = 0
         max_retries = 3
@@ -155,33 +148,18 @@ class ApexTimingParser:
             try:
                 self.logger.info(f"Loading URL: {url} (Attempt {retry_count + 1})")
                 
-                # Clear cookies and cache for a fresh session
-                if hasattr(self, 'driver') and self.driver:
-                    try:
-                        self.driver.delete_all_cookies()
-                        self.logger.debug("Cookies cleared")
-                    except:
-                        pass  # Ignore errors when clearing cookies
+                # Navigate to the URL with a timeout
+                await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 
-                # Load the page with a timeout
-                self.driver.get(url)
+                # Wait for the grid and dyna elements to be visible
+                self.logger.info("Waiting for elements to load...")
                 
-                # Wait for initial page load
-                self.logger.debug("Waiting for body to load...")
-                self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                self.logger.debug("Page body loaded")
+                await self.page.wait_for_selector("#grid", timeout=30000)
+                await self.page.wait_for_selector(".dyna", timeout=30000)
                 
-                # Use a shorter, more targeted approach
-                self.logger.debug("Locating grid element...")
-                grid = self.wait.until(EC.presence_of_element_located((By.ID, "grid")))
-                
-                self.logger.debug("Locating dyna element...")
-                dyna = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "dyna")))
-                
-                # Don't wait for table rows, just get what's available
-                self.logger.debug("Extracting HTML content...")
-                grid_html = grid.get_attribute('outerHTML')
-                dyna_html = dyna.get_attribute('outerHTML')
+                # Get the HTML content
+                grid_html = await self.page.locator("#grid").evaluate("el => el.outerHTML")
+                dyna_html = await self.page.locator(".dyna").evaluate("el => el.outerHTML")
                 
                 self.logger.info("Successfully retrieved HTML content")
                 return grid_html, dyna_html
@@ -189,31 +167,28 @@ class ApexTimingParser:
             except Exception as e:
                 retry_count += 1
                 self.logger.error(f"Error loading page (attempt {retry_count}): {e}")
+                self.logger.error(traceback.format_exc())
                 
-                # Try to recreate the driver on failure
                 if retry_count < max_retries:
-                    self.logger.info("Recreating WebDriver...")
-                    try:
-                        if hasattr(self, 'driver') and self.driver:
-                            self.driver.quit()
-                    except:
-                        pass  # Ignore errors when quitting the driver
+                    self.logger.info("Retrying in 2 seconds...")
+                    await asyncio.sleep(2)
                     
-                    try:
-                        self.setup_driver()
-                    except Exception as setup_error:
-                        self.logger.error(f"Failed to recreate WebDriver: {setup_error}")
-                
-                # Sleep before retrying
-                time.sleep(2)
+                    # Reinitialize browser if needed
+                    if not self.browser or not self.page:
+                        await self.initialize()
+                else:
+                    self.logger.error(f"All {max_retries} attempts to load page failed")
+                    return "", ""
         
-        # If all retries failed, return empty strings
-        self.logger.error(f"All {max_retries} attempts to load page failed")
+        # If all retries failed
         return "", ""
 
     def parse_dyna_info(self, html_content: str) -> Dict[str, str]:
         """Parse the dynamic information from the dyna table"""
         try:
+            if not html_content:
+                return {}
+                
             soup = BeautifulSoup(html_content, 'html.parser')
             dyna_table = soup.find('table', class_='dyna')
             
@@ -276,7 +251,7 @@ class ApexTimingParser:
                 
                 try:
                     row_data = {
-                        'Status' : None,
+                        'Status': None,
                         'Position': None,
                         'Kart': None,
                         'Team': None,
@@ -392,7 +367,7 @@ class ApexTimingParser:
 
             df = pd.DataFrame(data)
             # Ensure all expected columns exist with defaults if missing
-            for col in ['Position', 'Kart', 'Team', 'Last Lap', 'Best Lap', 'Gap', 'RunTime', 'Pit Stops', 'Status']:
+            for col in ['Status', 'Position', 'Kart', 'Team', 'Last Lap', 'Best Lap', 'Gap', 'RunTime', 'Pit Stops']:
                 if col not in df.columns:
                     df[col] = None
                     
@@ -414,7 +389,7 @@ class ApexTimingParser:
         
         try:
             with sqlite3.connect('race_data.db') as conn:
-                previous_state = pd.read_sql('''
+                previous_state = pd.read_sql_query('''
                     SELECT kart_number, RunTime, last_lap, best_lap, pit_stops
                     FROM lap_times 
                     WHERE session_id = ? 
@@ -427,7 +402,7 @@ class ApexTimingParser:
             try:
                 position = int(row['Position']) if row.get('Position', '').strip() else None
                 kart = int(row['Kart']) if row.get('Kart', '').strip() else None
-                RunTime = int(row.get('RunTime', '0')) if row.get('RunTime', '').strip() else 0
+                runtime = int(row.get('RunTime', '0')) if row.get('RunTime', '').strip() else 0
                 
                 current_records.append((
                     session_id,
@@ -438,7 +413,7 @@ class ApexTimingParser:
                     row.get('Last Lap', ''),
                     row.get('Best Lap', ''),
                     row.get('Gap', ''),
-                    RunTime,
+                    runtime,
                     int(row.get('Pit Stops', '0'))
                 ))
 
@@ -450,13 +425,13 @@ class ApexTimingParser:
                         prev_last_lap = prev_kart_state.iloc[0]['last_lap']
                         current_last_lap = row.get('Last Lap', '')
                         
-                        if RunTime != prev_runtime and current_last_lap and current_last_lap != prev_last_lap:
+                        if runtime != prev_runtime and current_last_lap and current_last_lap != prev_last_lap:
                             lap_history_records.append((
                                 session_id,
                                 timestamp,
                                 kart,
                                 row.get('Team', ''),
-                                RunTime,
+                                runtime,
                                 current_last_lap,
                                 position,
                                 int(row.get('Pit Stops', '0'))
@@ -472,7 +447,7 @@ class ApexTimingParser:
                     conn.executemany('''
                         INSERT INTO lap_times 
                         (session_id, timestamp, position, kart_number, team_name,
-                        last_lap, best_lap, gap, laps, pit_stops)
+                        last_lap, best_lap, gap, RunTime, pit_stops)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', current_records)
                     
@@ -498,7 +473,7 @@ class ApexTimingParser:
             )
             return cursor.lastrowid
 
-    def monitor_race(self, url: str, interval: int = 1):
+    async def monitor_race(self, url: str, interval: int = 5):
         """Continuously monitor race data"""
         pd.set_option('display.max_rows', None)
         pd.set_option('display.max_columns', None)
@@ -509,10 +484,15 @@ class ApexTimingParser:
         session_id = self.store_session_data("Live Session", "Karting Mariembourg")
         
         try:
+            # Initialize browser
+            if not await self.initialize():
+                self.logger.error("Failed to initialize browser. Exiting.")
+                return
+
             while True:
                 try:
                     self.logger.info("Fetching new data...")
-                    grid_html, dyna_html = self.get_page_content(url)
+                    grid_html, dyna_html = await self.get_page_content(url)
                     
                     if grid_html and dyna_html:
                         # Parse dynamic info
@@ -523,81 +503,35 @@ class ApexTimingParser:
                         if not df.empty:
                             self.store_lap_data(session_id, df)
                             
-                            # Clear screen
-                            os.system('cls' if os.name == 'nt' else 'clear')
+                            # Print status for debugging
+                            self.logger.info(f"Successfully updated data at {datetime.now().isoformat()}")
+                            self.logger.info(f"Current standings: {len(df)} teams")
                             
                             # Print dynamic info if available
                             if dyna_info:
-                                print("\nSession Information:")
-                                print("-" * 120)
-                                if 'dyn1' in dyna_info:
-                                    print(f"Status: {dyna_info['dyn1']}")
-                                if 'light' in dyna_info:
-                                    print(f"Light: {dyna_info['light']}")
-                                print("-" * 120)
-                            
-                            print("\nCurrent Standings:")
-                            print("-" * 120)
-                            
-                            try:
-                                # Rest of the standings display code remains the same
-                                display_columns = ['Status', 'Position', 'Kart', 'Team', 'Last Lap', 'Best Lap', 'Gap', 'RunTime', 'Pit Stops']
-                                standings_df = df[display_columns].copy()
-                                
-                                # Clean the data
-                                standings_df['Position'] = pd.to_numeric(standings_df['Position'], errors='coerce')
-                                standings_df['RunTime'] = standings_df['RunTime'].fillna('0')
-                                standings_df['Pit Stops'] = standings_df['Pit Stops'].fillna('0')
-                                
-                                # Sort by position
-                                standings_df = standings_df.sort_values('Position')
-                                
-                                # Rename for display
-                                standings_df = standings_df.rename(columns={'RunTime': 'Time'})
-                                standings_df = standings_df.rename(columns={'Position': 'Pos'})
-                                standings_df = standings_df.rename(columns={'Kart': '#'})
-                                standings_df = standings_df.rename(columns={'Pit Stops': 'Pits'})
-                                standings_df = standings_df.rename(columns={'Last Lap': 'Last'})
-                                standings_df = standings_df.rename(columns={'Best Lap': 'Best'})
-                                
-                                print(standings_df.to_string(
-                                    index=False,
-                                    justify='left',
-                                    col_space={
-                                        'Status': 8,
-                                        'Pos': 3,
-                                        '#': 3,
-                                        'Team': 20,
-                                        'Last': 12,
-                                        'Best': 12,
-                                        'Gap': 12,
-                                        'Time': 4,
-                                        'Pits': 2
-                                    }
-                                ))
-                            except Exception as e:
-                                self.logger.error(f"Error formatting display: {e}")
-                                print(df.to_string(index=False))
-                            
-                            print("-" * 120)
-                            print(f"Last Update: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                            
-                        else:
-                            self.logger.warning("No data parsed from HTML content")
-                    
-                    self.logger.info(f"Waiting {interval} seconds before next update...")
-                    time.sleep(interval)
+                                self.logger.info(f"Session info: {dyna_info}")
+                    else:
+                        self.logger.warning("Failed to fetch data, will retry")
+
+                    # Wait before next update
+                    await asyncio.sleep(interval)
                     
                 except Exception as e:
                     self.logger.error(f"Error in monitoring loop: {e}")
-                    self.logger.info("Attempting to reconnect...")
-                    self.setup_driver()
-                    time.sleep(interval)
+                    self.logger.error(traceback.format_exc())
+                    
+                    # Try to re-initialize browser if there was an error
+                    await self.cleanup()
+                    if not await self.initialize():
+                        self.logger.error("Failed to reinitialize browser. Exiting.")
+                        return
+                    
+                    await asyncio.sleep(interval)
                 
         except KeyboardInterrupt:
             self.logger.info("Stopping data collection...")
         finally:
-            self.cleanup()
+            await self.cleanup()
 
     def get_lap_statistics(self, session_id: int, kart_number: Optional[int] = None) -> pd.DataFrame:
         """Get lap statistics for a specific kart or all karts"""
@@ -631,30 +565,23 @@ class ApexTimingParser:
         """Print lap statistics for all karts"""
         stats_df = self.get_lap_statistics(session_id)
         if not stats_df.empty:
-            print("\nLap Statistics:")
-            print("-" * 120)
-            print(stats_df.to_string(index=False))
-            print("-" * 120)
+            self.logger.info("\nLap Statistics:")
+            self.logger.info("-" * 80)
+            self.logger.info(stats_df.to_string(index=False))
+            self.logger.info("-" * 80)
 
-    def cleanup(self):
-        """Clean up resources"""
-        try:
-            if hasattr(self, 'driver'):
-                self.driver.quit()
-        except:
-            pass
-
-def main():
-    parser = None
+# Main function to run the parser
+async def main():
+    parser = ApexTimingParserPlaywright()
     try:
-        parser = ApexTimingParser()
         url = "https://www.apex-timing.com/live-timing/karting-mariembourg/index.html"
-        parser.monitor_race(url)
+        await parser.monitor_race(url)
     except Exception as e:
         print(f"Error: {e}")
+        print(traceback.format_exc())
     finally:
-        if parser:
-            parser.cleanup()
+        await parser.cleanup()
 
+# Entry point
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
