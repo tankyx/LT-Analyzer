@@ -5,8 +5,45 @@ import {
 } from 'recharts';
 import { motion } from 'framer-motion';
 
+// Define types for our props
+interface TimeDeltaChartProps {
+  gapHistory: Record<string, {
+    gaps: number[];
+    adjusted_gaps?: number[];
+    last_update: string;
+  }>;
+  teams: Array<{
+    Kart: string;
+    Team: string;
+    Position: string;
+    Status?: string;
+    'Last Lap'?: string;
+    'Best Lap'?: string;
+    'Pit Stops'?: string;
+  }>;
+  monitoredTeams: string[];
+  isDarkMode?: boolean;
+  onColorAssignment?: (colors: Record<string, string>) => void;
+  onTeamHover?: (teamId: string | null) => void;
+  pitStopTime?: number;
+  requiredPitStops?: number;
+}
+
+interface ModeToggleProps {
+  mode: 'regular' | 'adjusted';
+  setMode: (mode: 'regular' | 'adjusted') => void;
+  isDarkMode: boolean;
+}
+
+// Type for chart data
+interface ChartDataPoint {
+  lap: number;
+  absoluteLap: number;
+  [key: string]: any; // For dynamic keys like kart_123, kart_123_team, etc.
+}
+
 // Toggle component for switching between regular and adjusted gap modes
-const ModeToggle = ({ mode, setMode, isDarkMode }) => (
+const ModeToggle: React.FC<ModeToggleProps> = ({ mode, setMode, isDarkMode }) => (
   <div className="flex items-center space-x-2">
     <span className={`text-sm ${mode === 'regular' ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')}`}>
       Regular Gap
@@ -25,19 +62,21 @@ const ModeToggle = ({ mode, setMode, isDarkMode }) => (
   </div>
 );
 
-const TimeDeltaChart = ({ 
+const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({ 
   gapHistory, 
   teams, 
   monitoredTeams,
   isDarkMode = false,
   onColorAssignment,
-  onTeamHover
+  onTeamHover,
+  pitStopTime = 158,  // Default 2:38
+  requiredPitStops = 3
 }) => {
-  const [chartData, setChartData] = useState([]);
-  const [teamColors, setTeamColors] = useState({});
-  const [hoveredTeam, setHoveredTeam] = useState(null);
-  const [chartKey, setChartKey] = useState(0);
-  const [gapMode, setGapMode] = useState('regular'); // 'regular' or 'adjusted'
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [teamColors, setTeamColors] = useState<Record<string, string>>({});
+  const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
+  const [chartKey, setChartKey] = useState<number>(0);
+  const [gapMode, setGapMode] = useState<'regular' | 'adjusted'>('regular'); // 'regular' or 'adjusted'
   
   // Force chart re-render when theme or mode changes
   useEffect(() => {
@@ -45,7 +84,7 @@ const TimeDeltaChart = ({
   }, [isDarkMode, gapMode]);
 
   // Generate team colors
-  const generateColor = useCallback((kartNumber) => {
+  const generateColor = useCallback((kartNumber: string): string => {
     const kartId = parseInt(kartNumber);
     
     const goldenRatioConjugate = 0.618033988749895;
@@ -66,7 +105,7 @@ const TimeDeltaChart = ({
     if (!gapHistory || Object.keys(gapHistory).length === 0) return;
   
     // Set team colors
-    const colors = {};
+    const colors: Record<string, string> = {};
     monitoredTeams.forEach(kart => {
       colors[kart] = generateColor(kart);
     });
@@ -78,7 +117,7 @@ const TimeDeltaChart = ({
     }
 
     // Prepare chart data
-    const preparedData = [];
+    const preparedData: ChartDataPoint[] = [];
     let maxLaps = 0;
 
     // Find max number of laps
@@ -94,7 +133,7 @@ const TimeDeltaChart = ({
     for (let i = windowStart; i < maxLaps; i++) {
       const lapNumber = i + 1;
       
-      const lapData = { 
+      const lapData: ChartDataPoint = { 
         lap: lapNumber,
         absoluteLap: lapNumber
       };
@@ -130,17 +169,17 @@ const TimeDeltaChart = ({
     }
 
     setChartData(preparedData);
-  }, [gapHistory, teams, monitoredTeams, isDarkMode, generateColor]);
+  }, [gapHistory, teams, monitoredTeams, isDarkMode, generateColor, onColorAssignment]);
 
   // Custom tooltip component
-  const CustomTooltip = ({ active, payload, label }) => {
+  const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       // Get the actual lap number
       const dataIndex = label - 1;
       const absoluteLap = chartData[dataIndex]?.absoluteLap || label;
       
       // Filter payload to only include the current mode's data
-      const filteredPayload = payload.filter(entry => {
+      const filteredPayload = payload.filter((entry: any) => {
         const dataKey = entry.dataKey;
         return gapMode === 'adjusted' 
           ? dataKey.includes('_adjusted')
@@ -160,7 +199,7 @@ const TimeDeltaChart = ({
           </div>
           
           <div className="space-y-2 mt-2 max-h-60 overflow-y-auto">
-            {sortedPayload.map(entry => {
+            {sortedPayload.map((entry: any) => {
               const kartNum = entry.dataKey.replace('kart_', '').replace('_adjusted', '');
               const teamName = chartData[dataIndex]?.[`kart_${kartNum}_team`] || `Kart ${kartNum}`;
               const gap = entry.value;
@@ -467,7 +506,9 @@ const TimeDeltaChart = ({
           </div>
           {gapMode === 'adjusted' && (
             <div className="flex items-center gap-2 ml-4">
-              <span className="px-1 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">Pit time: 2:38</span>
+              <span className="px-1 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                Pit time: {Math.floor(pitStopTime / 60)}:{(pitStopTime % 60).toString().padStart(2, '0')}
+              </span>
             </div>
           )}
         </div>
