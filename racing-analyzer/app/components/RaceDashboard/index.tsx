@@ -116,6 +116,7 @@ const RaceDashboard = () => {
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
   const [selectedClass, setSelectedClass] = useState<string>('all');
+  const [showAdjustedGap, setShowAdjustedGap] = useState(false);
 
   const getTeamClass = (teamName: string): string | null => {
     if (teamName.startsWith('1 - ')) return '1';
