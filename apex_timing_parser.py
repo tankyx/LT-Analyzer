@@ -105,20 +105,35 @@ class ApexTimingParser:
             firefox_options.add_argument("--headless")
             firefox_options.add_argument("--no-sandbox")
             firefox_options.add_argument("--disable-dev-shm-usage")
-            firefox_options.add_argument('--width=1920')
-            firefox_options.add_argument('--height=1080')
+            firefox_options.add_argument('--width=1280')  # Reduced from 1920
+            firefox_options.add_argument('--height=720')  # Reduced from 1080
+            
+            # Set page load timeout in Firefox browser preference
+            firefox_options.set_preference("dom.max_script_run_time", 30)  # Script execution timeout
+            firefox_options.set_preference("browser.tabs.remote.autostart", False)  # Disable content process
+            firefox_options.set_preference("browser.tabs.remote.autostart.2", False)
+            firefox_options.set_preference("network.http.connection-timeout", 20)  # Connection timeout in seconds
             
             # Use GeckoDriverManager to automatically download and manage the Firefox driver
-            service = Service(GeckoDriverManager().install())
+            self.logger.info("Downloading GeckoDriver...")
+            driver_path = GeckoDriverManager().install()
+            self.logger.info(f"Using GeckoDriver at: {driver_path}")
             
-            # Initialize Firefox driver
+            service = Service(driver_path)
+            service.start()
+            
+            # Initialize Firefox driver with reduced timeouts
+            self.logger.info("Initializing Firefox WebDriver...")
             self.driver = webdriver.Firefox(
                 service=service,
-                options=firefox_options
+                options=firefox_options,
             )
             
-            self.driver.set_page_load_timeout(30)
-            self.wait = WebDriverWait(self.driver, 30)
+            # Set explicit timeouts
+            self.driver.set_page_load_timeout(30)  # 30 seconds for page load
+            self.driver.set_script_timeout(15)     # 15 seconds for script execution
+            
+            self.wait = WebDriverWait(self.driver, 15)  # Reduced from 30
             self.logger.info("WebDriver setup successful with Firefox headless")
         except Exception as e:
             self.logger.error(f"WebDriver setup error: {e}")
