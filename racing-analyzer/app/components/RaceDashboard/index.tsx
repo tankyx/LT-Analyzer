@@ -41,12 +41,19 @@ interface Trend {
 
 interface DeltaData {
   gap: number;
+  adjusted_gap?: number;
   team_name: string;
   position: number;
   last_lap: string;
   best_lap: string;
   pit_stops: string;
+  remaining_stops?: number;
   trends: {
+    lap_1: Trend;
+    lap_5: Trend;
+    lap_10: Trend;
+  };
+  adjusted_trends?: {
     lap_1: Trend;
     lap_5: Trend;
     lap_10: Trend;
