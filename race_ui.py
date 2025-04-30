@@ -70,7 +70,12 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
     deltas = {}
     try:
         my_pit_stops = int(my_team.get('Pit Stops', '0') or '0')
-        my_base_gap = float(my_team.get('Gap', '0').replace(',', '.') or '0')
+        
+        # Fix: Check if my team is in position 1
+        if my_team.get('Position') == '1':
+            my_base_gap = 0.0
+        else:
+            my_base_gap = float(my_team.get('Gap', '0').replace(',', '.') or '0')
         
         # Initialize gap history for new karts
         for kart in monitored_karts:
