@@ -121,7 +121,7 @@ const RaceDashboard = () => {
   const [pitStopTime, setPitStopTime] = useState(158);
   const [requiredPitStops, setRequiredPitStops] = useState(7);
 
-    const updatePitStopConfig = useCallback(async () => {
+  const updatePitStopConfig = useCallback(async () => {
     try {
       await ApiService.updatePitStopConfig({
         pitStopTime,
