@@ -107,11 +107,12 @@ class ApexTimingParser:
             firefox_options.add_argument('--width=1280')
             firefox_options.add_argument('--height=720')
             
-            # Set page load timeout in Firefox browser preference
-            firefox_options.set_preference("dom.max_script_run_time", 30)
             firefox_options.set_preference("browser.tabs.remote.autostart", False)
             firefox_options.set_preference("browser.tabs.remote.autostart.2", False)
-            firefox_options.set_preference("network.http.connection-timeout", 20)
+            firefox_options.set_preference("dom.max_script_run_time", 30)
+            firefox_options.set_preference("browser.tabs.warnOnClose", False)
+            firefox_options.set_preference("network.http.connection-timeout", 10)
+            firefox_options.set_preference("network.http.response.timeout", 10)
             
             # Try to find geckodriver in the system
             driver_path = None
