@@ -15,7 +15,9 @@ from apex_timing_parser import ApexTimingParserPlaywright
 app = Flask(__name__)
 CORS(app)
 
-# Initialize global variables
+REQUIRED_PIT_STOPS = 7
+PIT_STOP_TIME = 158
+
 race_data = {
     'teams': [],
     'session_info': {},
@@ -23,7 +25,11 @@ race_data = {
     'my_team': None,
     'monitored_teams': [],
     'delta_times': {},
-    'gap_history': {}
+    'gap_history': {},
+    'pit_config': {
+        'required_stops': REQUIRED_PIT_STOPS,
+        'pit_time': PIT_STOP_TIME
+    }
 }
 
 # Create our parser
@@ -58,11 +64,7 @@ def calculate_trend(current_gap, previous_gaps):
 # Function to calculate delta times between teams
 def calculate_delta_times(teams, my_team_kart, monitored_karts):
     """Calculate delta times between my team and monitored teams"""
-    global race_data
-    
-    # Pit stop constants
-    PIT_STOP_TIME = 158  # 2:38 in seconds
-    REQUIRED_PIT_STOPS = 3  # Set this to your required number of pit stops
+    global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS
     
     if not my_team_kart or not teams:
         return {}
@@ -111,6 +113,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                         mon_base_gap = float(monitored_team.get('Gap', '0').replace(',', '.') or '0')
                     
                     # Calculate regular gap with pit stop compensation for completed stops
+                    # Using standard 150 second compensation as base (this is what Apex Timing shows)
                     real_gap = (mon_base_gap - my_base_gap) + ((mon_pit_stops - my_pit_stops) * 150)
                     real_gap = round(real_gap, 3)
                     
@@ -130,7 +133,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                     
                     # Get gaps as list for calculations
                     gaps = list(gap_history['gaps'])
-                    adjusted_gaps = list(gap_history['adjusted_gaps'])
+                    adjusted_gaps = list(gap_history['adjusted_gaps'] if 'adjusted_gaps' in gap_history else [])
                     
                     # Calculate trends for regular gap
                     trend_1, arrow_1 = calculate_trend(real_gap, gaps[-2:] if len(gaps) >= 2 else [])
@@ -169,6 +172,8 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
         print(f"Error calculating deltas: {e}")
         return {}
     
+    # Store the delta times in race_data for future reference
+    race_data['delta_times'] = deltas
     return deltas
 
 # Function to make gap_history serializable for JSON
@@ -332,6 +337,29 @@ def parser_status():
         'status': 'running' if is_running else 'stopped',
         'last_update': race_data['last_update']
     })
+
+@app.route('/api/update-pit-config', methods=['POST'])
+def update_pit_config():
+    """Update pit stop configuration"""
+    global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS
+    
+    data = request.json
+    print("Received pit config update:", data)
+    
+    if data:
+        # Update global variables
+        if 'pitStopTime' in data:
+            PIT_STOP_TIME = data['pitStopTime']
+            race_data['pit_config']['pit_time'] = PIT_STOP_TIME
+            
+        if 'requiredPitStops' in data:
+            REQUIRED_PIT_STOPS = data['requiredPitStops']
+            race_data['pit_config']['required_stops'] = REQUIRED_PIT_STOPS
+            
+        print(f"Updated pit config: time={PIT_STOP_TIME}s, required stops={REQUIRED_PIT_STOPS}")
+        return jsonify({'status': 'success', 'message': 'Pit stop configuration updated'})
+    
+    return jsonify({'status': 'error', 'message': 'Invalid configuration data'})
 
 # For debugging: simulate data
 @app.route('/api/simulate-data', methods=['POST'])
