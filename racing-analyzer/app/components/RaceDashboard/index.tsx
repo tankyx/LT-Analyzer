@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+emoimport React, { useState, useEffect, useMemo } from 'react';
 import TimeDeltaChart from './TimeDeltaChart';
 import SimulationControls from './SimulationControls';
 import TabbedInterface from './TabbedInterface';
