@@ -8,7 +8,7 @@ rm -f /tmp/.X*-lock
 rm -f /tmp/.X11-unix/X*
 
 # Start Xvfb with a unique display number
-DISPLAY_NUM=99
+DISPLAY_NUM=69
 Xvfb :${DISPLAY_NUM} -screen 0 1920x1080x24 &
 XVFB_PID=$!
 
