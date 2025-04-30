@@ -542,9 +542,9 @@ const RaceDashboard = () => {
                   <span className="font-bold truncate max-w-[160px]">{data.team_name}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`font-bold ${(showAdjustedGap ? data.adjusted_gap : data.gap) >= 0 ? 'text-red-600' : 'text-green-600'} flex items-center`}>
+                  <span className={`font-bold ${(showAdjustedGap ? (data.adjusted_gap ?? data.gap) : data.gap) >= 0 ? 'text-red-600' : 'text-green-600'} flex items-center`}>
                     <span className="w-16 text-right">
-                      {(showAdjustedGap ? data.adjusted_gap : data.gap).toFixed(3)}s
+                      {(showAdjustedGap ? (data.adjusted_gap ?? data.gap) : data.gap).toFixed(3)}s
                       {showAdjustedGap && (
                         <span className="ml-1 text-xs text-blue-500">*</span>
                       )}
