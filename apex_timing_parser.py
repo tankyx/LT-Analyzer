@@ -85,27 +85,36 @@ class ApexTimingParser:
             raise
 
     def setup_driver(self):
-        """Setup Chrome WebDriver with appropriate options"""
+        """Setup Firefox WebDriver with appropriate options"""
         try:
-            import undetected_chromedriver as uc
+            from selenium import webdriver
+            from selenium.webdriver.firefox.options import Options
+            from selenium.webdriver.firefox.service import Service
+            from webdriver_manager.firefox import GeckoDriverManager
             
-            # Create options
-            chrome_options = uc.ChromeOptions()
-            chrome_options.add_argument("--headless=new")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--window-size=1920,1080')
+            # Create Firefox options
+            firefox_options = Options()
+            firefox_options.add_argument("--headless")
+            firefox_options.add_argument("--no-sandbox")
+            firefox_options.add_argument("--disable-dev-shm-usage")
+            firefox_options.add_argument('--width=1920')
+            firefox_options.add_argument('--height=1080')
             
-            # Use undetected_chromedriver instead of regular Chrome
-            # Specify version_main=135 to match your Chrome version
-            self.driver = uc.Chrome(options=chrome_options, version_main=135)
+            # Use GeckoDriverManager to automatically download and manage the Firefox driver
+            service = Service(GeckoDriverManager().install())
+            
+            # Initialize Firefox driver
+            self.driver = webdriver.Firefox(
+                service=service,
+                options=firefox_options
+            )
             
             self.driver.set_page_load_timeout(30)
             self.wait = WebDriverWait(self.driver, 30)
-            self.logger.info("WebDriver setup successful with undetected_chromedriver")
+            self.logger.info("WebDriver setup successful with Firefox headless")
         except Exception as e:
             self.logger.error(f"WebDriver setup error: {e}")
+            self.logger.error(traceback.format_exc())
             raise
 
     def get_page_content(self, url: str) -> tuple[str, str]:
