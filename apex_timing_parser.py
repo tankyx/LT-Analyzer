@@ -142,36 +142,68 @@ class ApexTimingParser:
 
     def get_page_content(self, url: str) -> tuple[str, str]:
         """Load page and wait for content to be available"""
-        try:
-            self.logger.info(f"Loading URL: {url}")
-            self.driver.get(url)
-            
-            # Wait for initial page load
-            self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            self.logger.debug("Page body loaded")
-            
-            # Wait for the grid and dyna table to be present
-            self.logger.debug("Waiting for elements...")
-            grid = self.wait.until(EC.presence_of_element_located((By.ID, "grid")))
-            dyna = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "dyna")))
-            self.logger.debug("Elements found")
-            
-            # Wait for table to populate
-            self.logger.debug("Waiting for table rows...")
-            table = self.wait.until(EC.presence_of_element_located((By.ID, "tgrid")))
-            self.wait.until(lambda d: len(d.find_elements(By.CSS_SELECTOR, "#tgrid tr")) > 1)
-            self.logger.debug("Table rows found")
-            
-            # Get both table HTMLs
-            grid_html = grid.get_attribute('outerHTML')
-            dyna_html = dyna.get_attribute('outerHTML')
-            self.logger.info("Successfully retrieved HTML content")
-            
-            return grid_html, dyna_html
-            
-        except Exception as e:
-            self.logger.error(f"Error loading page content: {traceback.format_exc()}")
-            return "", ""
+        retry_count = 0
+        max_retries = 3
+        
+        while retry_count < max_retries:
+            try:
+                self.logger.info(f"Loading URL: {url} (Attempt {retry_count + 1})")
+                
+                # Clear cookies and cache for a fresh session
+                if hasattr(self, 'driver') and self.driver:
+                    try:
+                        self.driver.delete_all_cookies()
+                        self.logger.debug("Cookies cleared")
+                    except:
+                        pass  # Ignore errors when clearing cookies
+                
+                # Load the page with a timeout
+                self.driver.get(url)
+                
+                # Wait for initial page load
+                self.logger.debug("Waiting for body to load...")
+                self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                self.logger.debug("Page body loaded")
+                
+                # Use a shorter, more targeted approach
+                self.logger.debug("Locating grid element...")
+                grid = self.wait.until(EC.presence_of_element_located((By.ID, "grid")))
+                
+                self.logger.debug("Locating dyna element...")
+                dyna = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "dyna")))
+                
+                # Don't wait for table rows, just get what's available
+                self.logger.debug("Extracting HTML content...")
+                grid_html = grid.get_attribute('outerHTML')
+                dyna_html = dyna.get_attribute('outerHTML')
+                
+                self.logger.info("Successfully retrieved HTML content")
+                return grid_html, dyna_html
+                
+            except Exception as e:
+                retry_count += 1
+                self.logger.error(f"Error loading page (attempt {retry_count}): {e}")
+                
+                # Try to recreate the driver on failure
+                if retry_count < max_retries:
+                    self.logger.info("Recreating WebDriver...")
+                    try:
+                        if hasattr(self, 'driver') and self.driver:
+                            self.driver.quit()
+                    except:
+                        pass  # Ignore errors when quitting the driver
+                    
+                    try:
+                        self.setup_driver()
+                    except Exception as setup_error:
+                        self.logger.error(f"Failed to recreate WebDriver: {setup_error}")
+                
+                # Sleep before retrying
+                time.sleep(2)
+        
+        # If all retries failed, return empty strings
+        self.logger.error(f"All {max_retries} attempts to load page failed")
+        return "", ""
 
     def parse_dyna_info(self, html_content: str) -> Dict[str, str]:
         """Parse the dynamic information from the dyna table"""
