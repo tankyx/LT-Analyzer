@@ -21,13 +21,21 @@ class ApexTimingParser:
         self.setup_driver()
         
     def setup_logging(self):
+        import logging.handlers
+        
+        # Create a rotating file handler that limits the log size
+        file_handler = logging.handlers.RotatingFileHandler(
+            'apex_timing.log',
+            maxBytes=10*1024*1024,  # 10MB max size
+            backupCount=3           # Keep 3 backup files
+        )
+        
+        console_handler = logging.StreamHandler()
+        
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler('apex_timing.log'),
-                logging.StreamHandler()
-            ]
+            handlers=[file_handler, console_handler]
         )
         self.logger = logging.getLogger(__name__)
 
