@@ -19,25 +19,41 @@ class ApexTimingParserPlaywright:
         self.playwright = None
 
     async def initialize(self):
-        """Initialize Playwright browser"""
+        """Initialize Playwright browser with optimized settings"""
         try:
             self.playwright = await async_playwright().start()
             self.logger.info("Starting Playwright browser...")
             
-            # Launch browser with appropriate options
+            # Launch browser with improved options for stability
             self.browser = await self.playwright.chromium.launch(
-                headless=True,  # Run in headless mode
+                headless=True,
                 args=[
                     "--disable-gpu",
                     "--disable-dev-shm-usage",
                     "--disable-setuid-sandbox",
                     "--no-sandbox",
+                    "--disable-web-security",  # This might help with some CORS issues
+                    "--disable-features=IsolateOrigins,site-per-process",  # Helps with iframe content
+                    "--disable-site-isolation-trials"
                 ]
             )
             
-            # Create a new page
-            self.page = await self.browser.new_page()
-            self.page.set_default_timeout(30000)  # 30 seconds timeout
+            # Create a page with modified settings
+            self.page = await self.browser.new_page(
+                viewport={"width": 1920, "height": 1080},  # Larger viewport
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"  # Modern UA
+            )
+            
+            # Set a longer default timeout
+            self.page.set_default_timeout(45000)  # 45 seconds
+            
+            # Add additional page settings
+            await self.page.context.add_cookies([{
+                "name": "liveTiming_resolution",
+                "value": "big",
+                "url": "https://www.apex-timing.com/",
+                "domain": ".apex-timing.com"
+            }])
             
             self.logger.info("Playwright browser started successfully")
             return True
@@ -149,17 +165,41 @@ class ApexTimingParserPlaywright:
                 self.logger.info(f"Loading URL: {url} (Attempt {retry_count + 1})")
                 
                 # Navigate to the URL with a timeout
-                await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await self.page.goto(url, wait_until="networkidle", timeout=30000)
                 
-                # Wait for the grid and dyna elements to be visible
+                # Wait for the elements to load - more specific selectors
                 self.logger.info("Waiting for elements to load...")
                 
-                await self.page.wait_for_selector("#grid", timeout=30000)
-                await self.page.wait_for_selector(".dyna", timeout=30000)
+                # Wait for the grid to be visible - it may be inside a div with class 'div_tgrid'
+                await self.page.wait_for_selector("#tgrid, .div_tgrid #tgrid", timeout=30000)
                 
-                # Get the HTML content
-                grid_html = await self.page.locator("#grid").evaluate("el => el.outerHTML")
-                dyna_html = await self.page.locator(".dyna").evaluate("el => el.outerHTML")
+                # Wait for the dyna table - it might have specific content
+                await self.page.wait_for_selector("table.dyna", timeout=30000)
+                
+                # Get the HTML content with more specific approach
+                grid_html = await self.page.evaluate("""
+                    () => {
+                        const gridElement = document.querySelector('#grid');
+                        if (gridElement) return gridElement.outerHTML;
+                        
+                        // Fallback if the structure is different
+                        const tgridElement = document.querySelector('#tgrid');
+                        if (tgridElement) {
+                            const parentDiv = tgridElement.closest('.div_tgrid');
+                            if (parentDiv) return parentDiv.parentElement.outerHTML;
+                            return tgridElement.parentElement.outerHTML;
+                        }
+                        
+                        return '';
+                    }
+                """)
+                
+                dyna_html = await self.page.evaluate("""
+                    () => {
+                        const dynaElement = document.querySelector('table.dyna');
+                        return dynaElement ? dynaElement.outerHTML : '';
+                    }
+                """)
                 
                 self.logger.info("Successfully retrieved HTML content")
                 return grid_html, dyna_html
@@ -235,23 +275,41 @@ class ApexTimingParserPlaywright:
             soup = BeautifulSoup(html_content, 'html.parser')
             data = []
             
-            # First find the header row to get the correct column mapping
-            header_row = soup.find('tr', {'class': 'head'})
+            # First try to find the grid table
+            grid_table = soup.find('table', {'id': 'tgrid'})
+            if not grid_table:
+                self.logger.error("Could not find grid table with id 'tgrid'")
+                return pd.DataFrame()
+    
+            # Find the header row
+            header_row = grid_table.find('tr', {'class': 'head'}) or grid_table.find('tr', {'data-id': 'r0'})
             if not header_row:
                 self.logger.error("Could not find header row")
                 return pd.DataFrame()
-
-            rows = soup.find_all('tr')
+    
+            # Create a mapping of column types based on the header
+            column_types = {}
+            for cell in header_row.find_all('td'):
+                if cell.get('data-type'):
+                    column_types[cell.get('data-id')] = cell.get('data-type')
+    
+            # Process rows
+            rows = grid_table.find_all('tr')
             self.logger.debug(f"Found {len(rows)} rows in table")
             
             for row in rows:
                 # Skip header row and progress lap rows
-                if 'head' in row.get('class', []) or 'progress_lap' in row.get('class', []):
+                if ('head' in row.get('class', []) or 
+                    'progress_lap' in row.get('class', []) or 
+                    row.get('data-id') == 'r0'):
                     continue
                 
                 try:
+                    # Extract row data id to get row number
+                    row_id = row.get('data-id', '')
+                    
                     row_data = {
-                        'Status': None,
+                        'Status': 'On Track',  # Default status
                         'Position': None,
                         'Kart': None,
                         'Team': None,
@@ -262,109 +320,67 @@ class ApexTimingParserPlaywright:
                         'Pit Stops': None
                     }
                     
-                    # Status (from td with data-type='sta')
-                    status_cell = row.find('td', {'data-type': 'sta'})
-                    if status_cell:
-                        # Define the status mappings
-                        status_classes = {
-                            'sf': 'Finished',  # finish
-                            'si': 'Pit-in',    # pit in
-                            'so': 'Pit-out',   # pit out
-                            'su': 'Up',        # moving up
-                            'sd': 'Down',      # moving down
-                            'ss': 'Stopped',   # stopped
-                            'sr': 'On Track',  # running
-                            'sl': 'Lapped'     # lapped
-                        }
+                    # Process each cell based on data-type
+                    for cell in row.find_all('td'):
+                        cell_type = cell.get('data-type')
+                        if not cell_type:
+                            continue
                         
-                        # Check if any status class exists directly on the status cell
-                        cell_classes = status_cell.get('class', [])
+                        # Handle different cell types
+                        if cell_type == 'sta':  # Status
+                            status_class = cell.get('class', [])
+                            if status_class:
+                                if 'si' in status_class:
+                                    row_data['Status'] = 'Pit-in'
+                                elif 'so' in status_class:
+                                    row_data['Status'] = 'Pit-out'
+                                elif 'sf' in status_class:
+                                    row_data['Status'] = 'Finished'
+                                elif 'ss' in status_class:
+                                    row_data['Status'] = 'Stopped'
+                                elif 'su' in status_class:
+                                    row_data['Status'] = 'Up'
+                                elif 'sd' in status_class:
+                                    row_data['Status'] = 'Down'
+                                elif 'sl' in status_class:
+                                    row_data['Status'] = 'Lapped'
                         
-                        # Try to find the status
-                        found_status = False
+                        elif cell_type == 'rk':  # Position
+                            p_tag = cell.find('p')
+                            if p_tag:
+                                row_data['Position'] = p_tag.text.strip()
                         
-                        # Check for status in cell's own classes
-                        if cell_classes:
-                            if isinstance(cell_classes, list):
-                                for cls in cell_classes:
-                                    if cls in status_classes:
-                                        row_data['Status'] = status_classes[cls]
-                                        found_status = True
-                                        break
-                            elif isinstance(cell_classes, str):
-                                # If it's a string, check each status class
-                                for cls, status in status_classes.items():
-                                    if cls in cell_classes:
-                                        row_data['Status'] = status
-                                        found_status = True
-                                        break
+                        elif cell_type == 'no':  # Kart Number
+                            div_tag = cell.find('div', {'class': 'no1'})
+                            if div_tag:
+                                row_data['Kart'] = div_tag.text.strip()
                         
-                        # If status not found in cell classes, look for child elements with status classes
-                        if not found_status:
-                            for cls, status in status_classes.items():
-                                # There might be a div or span with the class
-                                status_element = status_cell.find(class_=cls)
-                                if status_element:
-                                    row_data['Status'] = status
-                                    found_status = True
-                                    break
+                        elif cell_type == 'dr':  # Team/Driver Name
+                            row_data['Team'] = cell.text.strip()
                         
-                        # Default to 'On Track' if we couldn't determine status
-                        if not found_status:
-                            row_data['Status'] = 'On Track'
-                    else:
-                        # Couldn't find a status cell
-                        row_data['Status'] = 'Unknown'
-
-                    # Position (from p tag within rk cell)
-                    pos_cell = row.find('td', {'data-type': 'rk'})
-                    if pos_cell:
-                        pos_p = pos_cell.find('p')
-                        if pos_p:
-                            row_data['Position'] = pos_p.text.strip()
+                        elif cell_type == 'llp':  # Last Lap
+                            row_data['Last Lap'] = cell.text.strip()
+                        
+                        elif cell_type == 'blp':  # Best Lap
+                            row_data['Best Lap'] = cell.text.strip()
+                        
+                        elif cell_type == 'gap':  # Gap
+                            row_data['Gap'] = cell.text.strip()
+                        
+                        elif cell_type == 'otr':  # On Track (runtime)
+                            row_data['RunTime'] = cell.text.strip()
+                        
+                        elif cell_type == 'pit':  # Pit Stops
+                            row_data['Pit Stops'] = cell.text.strip() or '0'
                     
-                    # Kart number (from no1 class div)
-                    kart_div = row.find('div', class_='no1')
-                    if kart_div:
-                        row_data['Kart'] = kart_div.text.strip()
-                    
-                    # Team name
-                    team_cell = row.find('td', {'data-type': 'dr'})
-                    if team_cell:
-                        row_data['Team'] = team_cell.text.strip()
-                    
-                    # Last lap
-                    last_lap_cell = row.find('td', {'data-type': 'llp'})
-                    if last_lap_cell:
-                        row_data['Last Lap'] = last_lap_cell.text.strip()
-                    
-                    # Best lap
-                    best_lap_cell = row.find('td', {'data-type': 'blp'})
-                    if best_lap_cell:
-                        row_data['Best Lap'] = best_lap_cell.text.strip()
-                    
-                    # Gap
-                    gap_cell = row.find('td', {'data-type': 'gap'})
-                    if gap_cell:
-                        row_data['Gap'] = gap_cell.text.strip()
-                    
-                    # Running time
-                    laps_cell = row.find('td', {'data-type': 'otr'})
-                    if laps_cell:
-                        row_data['RunTime'] = laps_cell.text.strip()
-                    
-                    # Pit stops
-                    pit_cell = row.find('td', {'data-type': 'pit'})
-                    if pit_cell:
-                        row_data['Pit Stops'] = pit_cell.text.strip() or '0'
-                    
+                    # Only add rows with valid Position and Kart
                     if row_data['Position'] and row_data['Kart']:
                         data.append(row_data)
                         
                 except Exception as e:
-                    self.logger.warning(f"Error processing row: {e}")
+                    self.logger.warning(f"Error processing row {row.get('data-id', '')}: {e}")
                     continue
-
+    
             df = pd.DataFrame(data)
             # Ensure all expected columns exist with defaults if missing
             for col in ['Status', 'Position', 'Kart', 'Team', 'Last Lap', 'Best Lap', 'Gap', 'RunTime', 'Pit Stops']:
