@@ -21,7 +21,7 @@ class ApexTimingParserPlaywright:
     async def initialize(self):
         """Initialize Playwright browser"""
         try:
-            self.playwright = await asyncio.gather(async_playwright().start())[0]
+            self.playwright = await async_playwright().start()
             self.logger.info("Starting Playwright browser...")
             
             # Launch browser with appropriate options
