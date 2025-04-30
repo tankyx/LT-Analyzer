@@ -167,29 +167,39 @@ class ApexTimingParserPlaywright:
                 self.logger.info(f"Loading URL: {url} (Attempt {retry_count + 1})")
                 
                 # Navigate to the URL with a timeout
-                await self.page.goto(url, wait_until="networkidle", timeout=30000)
+                await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 
-                # Wait for the elements to load - more specific selectors
+                # Wait for the elements to load
                 self.logger.info("Waiting for elements to load...")
                 
-                # Wait for the grid to be visible - it may be inside a div with class 'div_tgrid'
-                await self.page.wait_for_selector("#tgrid, .div_tgrid #tgrid", timeout=30000)
+                # Wait for the #live element which should contain everything
+                await self.page.wait_for_selector("#live", timeout=30000, state="attached")
                 
-                # Wait for the dyna table - it might have specific content
-                await self.page.wait_for_selector("table.dyna", timeout=30000)
+                # Check if the page has loaded properly by waiting for key containers
+                await self.page.wait_for_selector("#global", timeout=10000, state="attached")
                 
-                # Get the HTML content with more specific approach
+                # Don't wait for visibility, just check if elements exist
+                # Give the page a moment to initialize JavaScript
+                await asyncio.sleep(2)
+                
+                # Get HTML using JavaScript evaluation to extract even hidden content
                 grid_html = await self.page.evaluate("""
                     () => {
-                        const gridElement = document.querySelector('#grid');
-                        if (gridElement) return gridElement.outerHTML;
+                        // First check if grid container exists
+                        const gridContainer = document.querySelector('#grid');
+                        if (gridContainer) {
+                            return gridContainer.outerHTML;
+                        }
                         
-                        // Fallback if the structure is different
+                        // Try to find tgrid anywhere in the document
                         const tgridElement = document.querySelector('#tgrid');
                         if (tgridElement) {
-                            const parentDiv = tgridElement.closest('.div_tgrid');
-                            if (parentDiv) return parentDiv.parentElement.outerHTML;
-                            return tgridElement.parentElement.outerHTML;
+                            // Walk up to find appropriate container
+                            let container = tgridElement.parentElement;
+                            while (container && !container.id && container.tagName !== 'BODY') {
+                                container = container.parentElement;
+                            }
+                            return container && container.id ? container.outerHTML : tgridElement.outerHTML;
                         }
                         
                         return '';
@@ -198,13 +208,62 @@ class ApexTimingParserPlaywright:
                 
                 dyna_html = await self.page.evaluate("""
                     () => {
-                        const dynaElement = document.querySelector('table.dyna');
-                        return dynaElement ? dynaElement.outerHTML : '';
+                        const dynaTable = document.querySelector('table.dyna');
+                        if (dynaTable) {
+                            return dynaTable.outerHTML;
+                        }
+                        
+                        // Try alternate approach
+                        const dynaCells = document.querySelectorAll('[data-id="dyn1"], [data-id="dyn2"], [data-id="light"]');
+                        if (dynaCells.length > 0) {
+                            // Find common ancestor
+                            let container = dynaCells[0].parentElement;
+                            while (container && container.tagName !== 'TABLE' && container.tagName !== 'BODY') {
+                                container = container.parentElement;
+                            }
+                            return container && container.tagName === 'TABLE' ? container.outerHTML : '';
+                        }
+                        
+                        return '';
                     }
                 """)
                 
-                self.logger.info("Successfully retrieved HTML content")
-                return grid_html, dyna_html
+                # Log the found HTML content length for debugging
+                self.logger.info(f"Retrieved HTML content: grid={len(grid_html)} chars, dyna={len(dyna_html)} chars")
+                
+                if grid_html and dyna_html:
+                    self.logger.info("Successfully retrieved HTML content")
+                    return grid_html, dyna_html
+                else:
+                    self.logger.warning("Failed to extract some content: " + 
+                                       (f"grid_html missing" if not grid_html else "") + 
+                                       (f"dyna_html missing" if not dyna_html else ""))
+                    
+                    # Take a screenshot for debugging if content is missing
+                    await self.page.screenshot(path=f"page_debug_{retry_count}.png")
+                    
+                    if retry_count >= max_retries - 1:
+                        # On last attempt, try to get any content we can
+                        full_html = await self.page.content()
+                        self.logger.info(f"Retrieved full page HTML as fallback ({len(full_html)} chars)")
+                        
+                        # Try to extract from full HTML if needed
+                        if not grid_html or not dyna_html:
+                            soup = BeautifulSoup(full_html, 'html.parser')
+                            
+                            if not grid_html:
+                                grid_element = soup.find(id='grid')
+                                if grid_element:
+                                    grid_html = str(grid_element)
+                                    self.logger.info("Extracted grid_html from full page content")
+                            
+                            if not dyna_html:
+                                dyna_element = soup.find('table', class_='dyna')
+                                if dyna_element:
+                                    dyna_html = str(dyna_element)
+                                    self.logger.info("Extracted dyna_html from full page content")
+                        
+                        return grid_html or "", dyna_html or ""
                 
             except Exception as e:
                 retry_count += 1
