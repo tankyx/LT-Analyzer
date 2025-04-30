@@ -1,18 +1,18 @@
 #!/bin/bash
-set -e
+export DISPLAY=:99
 
-cd /home/ubuntu/LT-Analyzer
+# Start Xvfb if not running
+if ! pgrep -f "Xvfb :99" > /dev/null; then
+  ~/LT-Analyzer/start-xvfb.sh
+fi
+
+# Activate virtual environment and run the app
+cd ~/LT-Analyzer
 source racing-venv/bin/activate
 
-# Install required packages if not present
-pip install selenium webdriver_manager flask flask-cors
-
-# Start Xvfb first
-./start-xvfb.sh
-
-# Set the display for the application
-export DISPLAY=:99
+# Set Firefox options explicitly
 export MOZ_HEADLESS=1
+export MOZ_DBUS_REMOTE=1
 
-# Run the application
-exec python race_ui.py
+# Run with explicit timeouts
+python race_ui.py
