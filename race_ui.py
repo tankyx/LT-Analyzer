@@ -70,12 +70,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
     deltas = {}
     try:
         my_pit_stops = int(my_team.get('Pit Stops', '0') or '0')
-        
-        # Fix: Check if my team is in position 1
-        if my_team.get('Position') == '1':
-            my_base_gap = 0.0
-        else:
-            my_base_gap = float(my_team.get('Gap', '0').replace(',', '.') or '0')
+        my_base_gap = float(my_team.get('Gap', '0').replace(',', '.') or '0')
         
         # Initialize gap history for new karts
         for kart in monitored_karts:
@@ -102,6 +97,49 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                         mon_base_gap = 0.0
                     else:
                         mon_base_gap = float(monitored_team.get('Gap', '0').replace(',', '.') or '0')
+                    
+                    # Calculate real gap including pit stop compensation
+                    real_gap = (mon_base_gap - my_base_gap) + ((mon_pit_stops - my_pit_stops) * 150)
+                    real_gap = round(real_gap, 3)
+                    
+                    # Update gap history
+                    gap_history = race_data['gap_history'][kart]
+                    last_lap = monitored_team.get('Last Lap')
+                    
+                    # Only update history when we see a new lap
+                    if last_lap and last_lap != gap_history['last_update']:
+                        gap_history['gaps'].append(real_gap)
+                        gap_history['last_update'] = last_lap
+                    
+                    # Get gaps as list for calculations
+                    gaps = list(gap_history['gaps'])
+                    
+                    # Calculate trends
+                    trend_1, arrow_1 = calculate_trend(real_gap, gaps[-2:] if len(gaps) >= 2 else [])
+                    trend_5, arrow_5 = calculate_trend(real_gap, gaps[-5:] if len(gaps) >= 5 else [])
+                    trend_10, arrow_10 = calculate_trend(real_gap, gaps[-10:] if len(gaps) >= 10 else [])
+                    
+                    deltas[kart] = {
+                        'gap': real_gap,
+                        'team_name': monitored_team.get('Team', ''),
+                        'position': int(monitored_team.get('Position', '0')),
+                        'last_lap': last_lap,
+                        'best_lap': monitored_team.get('Best Lap', ''),
+                        'pit_stops': str(mon_pit_stops),
+                        'trends': {
+                            'lap_1': {'value': trend_1, 'arrow': arrow_1},
+                            'lap_5': {'value': trend_5, 'arrow': arrow_5},
+                            'lap_10': {'value': trend_10, 'arrow': arrow_10}
+                        }
+                    }
+                except (ValueError, TypeError, AttributeError) as e:
+                    print(f"Error calculating delta for kart {kart}: {e}")
+                    continue
+    except Exception as e:
+        print(f"Error calculating deltas: {e}")
+        return {}
+    
+    return deltas
 
 # Function to make gap_history serializable for JSON
 def get_serializable_race_data():
