@@ -93,58 +93,46 @@ class ApexTimingParser:
             raise
 
     def setup_driver(self):
-        """Setup Chrome WebDriver with appropriate options"""
         try:
             from selenium import webdriver
             from selenium.webdriver.chrome.options import Options
             from selenium.webdriver.chrome.service import Service
+            from webdriver_manager.chrome import ChromeDriverManager
             
-            # Create Chrome options
+            # Create Chrome options with more robust settings
             chrome_options = Options()
-            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--headless=new")  # Use new headless mode
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--window-size=1280,720')
-            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1280,720")
             
-            # Set page load timeout
-            chrome_options.add_argument('--disable-web-security')
+            # These options help with stability in CI/server environments
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-infobars")
+            chrome_options.add_argument("--disable-setuid-sandbox")
+            chrome_options.add_argument("--disable-dev-tools")
+            chrome_options.add_argument("--no-zygote")
+            chrome_options.add_argument("--single-process")
+            chrome_options.add_argument("--remote-debugging-port=9222")
             
-            # Try to find chromedriver in the system or install it
-            try:
-                from webdriver_manager.chrome import ChromeDriverManager
-                driver_path = ChromeDriverManager().install()
-            except:
-                # Look for chromedriver in common locations
-                driver_path = None
-                possible_paths = [
-                    "/usr/local/bin/chromedriver",
-                    "/usr/bin/chromedriver"
-                ]
-                
-                for path in possible_paths:
-                    if os.path.exists(path):
-                        driver_path = path
-                        self.logger.info(f"Found chromedriver at: {driver_path}")
-                        break
-                
-                if not driver_path:
-                    self.logger.info("Installing chromedriver...")
-                    from webdriver_manager.chrome import ChromeDriverManager
-                    driver_path = ChromeDriverManager().install()
+            # Explicitly set binary location to system chromium
+            chrome_options.binary_location = "/usr/bin/chromium-browser"
             
-            # Install Chrome if needed
-            os.system("apt-get update && apt-get install -y chromium-browser")
+            self.logger.info("Setting up ChromeDriver...")
             
-            service = Service(driver_path)
-            service.start()
+            # Install the ChromeDriver
+            driver_manager = ChromeDriverManager()
+            driver_path = driver_manager.install()
+            self.logger.info(f"ChromeDriver installed at: {driver_path}")
             
-            # Initialize Chrome driver
+            service = Service(executable_path=driver_path)
+            
+            # Initialize Chrome driver with explicit service path
             self.logger.info("Initializing Chrome WebDriver...")
             self.driver = webdriver.Chrome(
                 service=service,
-                options=chrome_options,
+                options=chrome_options
             )
             
             # Set explicit timeouts
