@@ -5,6 +5,7 @@ import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
 import StatusImageIndicator from './StatusImageIndicator';
 import ClassFilter from './ClassFilter';
+import PitStopConfig from './PitStopConfig';
 
 // Types
 interface Team {
@@ -117,6 +118,36 @@ const RaceDashboard = () => {
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [showAdjustedGap, setShowAdjustedGap] = useState(false);
+  const [pitStopTime, setPitStopTime] = useState(158);
+  const [requiredPitStops, setRequiredPitStops] = useState(7);
+
+    const updatePitStopConfig = useCallback(async () => {
+    try {
+      await ApiService.updatePitStopConfig({
+        pitStopTime,
+        requiredPitStops
+      });
+      
+      setAlerts([...alerts, {
+        id: Date.now(),
+        message: 'Pit stop settings updated successfully',
+        type: 'success'
+      }]);
+    } catch (error) {
+      console.error('Error updating pit stop config:', error);
+      setAlerts([...alerts, {
+        id: Date.now(),
+        message: `Failed to update pit stop settings: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        type: 'error'
+      }]);
+    }
+  }, [pitStopTime, requiredPitStops, alerts]);
+
+  useEffect(() => {
+    if (simulating) {
+      updatePitStopConfig();
+    }
+  }, [pitStopTime, requiredPitStops, simulating, updatePitStopConfig]);
 
   const getTeamClass = (teamName: string): string | null => {
     if (teamName.startsWith('1 - ')) return '1';
@@ -606,6 +637,8 @@ const RaceDashboard = () => {
         isDarkMode={isDarkMode}
         onColorAssignment={handleColorAssignment}
         onTeamHover={handleTeamHover}
+        pitStopTime={pitStopTime}
+        requiredPitStops={requiredPitStops}
       />
       
       {/* Quick guide section for the chart */}
@@ -686,6 +719,17 @@ const RaceDashboard = () => {
           isSimulating={simulating}
           isDarkMode={isDarkMode}
         />
+        
+        {/* Pit Stop Config */}
+        {monitoredTeams.length > 0 && (
+          <PitStopConfig
+            pitStopTime={pitStopTime}
+            setPitStopTime={setPitStopTime}
+            requiredPitStops={requiredPitStops}
+            setRequiredPitStops={setRequiredPitStops}
+            isDarkMode={isDarkMode}
+          />
+        )}
 
         {/* Team Selection */}
         <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
