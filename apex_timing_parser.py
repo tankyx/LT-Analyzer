@@ -39,21 +39,23 @@ class ApexTimingParserPlaywright:
             )
             
             # Create a page with modified settings
-            self.page = await self.browser.new_page(
+            context = await self.browser.new_context(
                 viewport={"width": 1920, "height": 1080},  # Larger viewport
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"  # Modern UA
             )
             
-            # Set a longer default timeout
-            self.page.set_default_timeout(45000)  # 45 seconds
-            
-            # Add additional page settings
-            await self.page.context.add_cookies([{
+            # Set cookies properly - using domain instead of url
+            await context.add_cookies([{
                 "name": "liveTiming_resolution",
                 "value": "big",
-                "url": "https://www.apex-timing.com/",
-                "domain": ".apex-timing.com"
+                "domain": "www.apex-timing.com",
+                "path": "/"
             }])
+            
+            self.page = await context.new_page()
+            
+            # Set a longer default timeout
+            self.page.set_default_timeout(45000)  # 45 seconds
             
             self.logger.info("Playwright browser started successfully")
             return True
