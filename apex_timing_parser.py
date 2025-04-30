@@ -93,63 +93,66 @@ class ApexTimingParser:
             raise
 
     def setup_driver(self):
-        """Setup Firefox WebDriver with appropriate options"""
+        """Setup Chrome WebDriver with appropriate options"""
         try:
             from selenium import webdriver
-            from selenium.webdriver.firefox.options import Options
-            from selenium.webdriver.firefox.service import Service
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.chrome.service import Service
             
-            # Create Firefox options
-            firefox_options = Options()
-            firefox_options.add_argument("--headless")
-            firefox_options.add_argument("--no-sandbox")
-            firefox_options.add_argument("--disable-dev-shm-usage")
-            firefox_options.add_argument('--width=1280')
-            firefox_options.add_argument('--height=720')
+            # Create Chrome options
+            chrome_options = Options()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1280,720')
+            chrome_options.add_argument('--disable-extensions')
             
-            firefox_options.set_preference("browser.tabs.remote.autostart", False)
-            firefox_options.set_preference("browser.tabs.remote.autostart.2", False)
-            firefox_options.set_preference("dom.max_script_run_time", 30)
-            firefox_options.set_preference("browser.tabs.warnOnClose", False)
-            firefox_options.set_preference("network.http.connection-timeout", 10)
-            firefox_options.set_preference("network.http.response.timeout", 10)
+            # Set page load timeout
+            chrome_options.add_argument('--disable-web-security')
             
-            # Try to find geckodriver in the system
-            driver_path = None
-            possible_paths = [
-                "/home/ubuntu/.wdm/drivers/geckodriver/linux64/v0.36.0/geckodriver",
-                "/usr/local/bin/geckodriver",
-                "/usr/bin/geckodriver"
-            ]
+            # Try to find chromedriver in the system or install it
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                driver_path = ChromeDriverManager().install()
+            except:
+                # Look for chromedriver in common locations
+                driver_path = None
+                possible_paths = [
+                    "/usr/local/bin/chromedriver",
+                    "/usr/bin/chromedriver"
+                ]
+                
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        driver_path = path
+                        self.logger.info(f"Found chromedriver at: {driver_path}")
+                        break
+                
+                if not driver_path:
+                    self.logger.info("Installing chromedriver...")
+                    from webdriver_manager.chrome import ChromeDriverManager
+                    driver_path = ChromeDriverManager().install()
             
-            for path in possible_paths:
-                if os.path.exists(path):
-                    driver_path = path
-                    self.logger.info(f"Found geckodriver at: {driver_path}")
-                    break
-            
-            if not driver_path:
-                from webdriver_manager.firefox import GeckoDriverManager
-                driver_path = GeckoDriverManager().install()
+            # Install Chrome if needed
+            os.system("apt-get update && apt-get install -y chromium-browser")
             
             service = Service(driver_path)
             service.start()
             
-            # Initialize Firefox driver with reduced timeouts - IMPORTANT
-            # Use a direct approach to avoid the timeout in the selenium code
-            os.environ['MOZ_HEADLESS'] = '1'  # Ensure Firefox knows it's headless
-            self.logger.info("Initializing Firefox WebDriver...")
-            self.driver = webdriver.Firefox(
+            # Initialize Chrome driver
+            self.logger.info("Initializing Chrome WebDriver...")
+            self.driver = webdriver.Chrome(
                 service=service,
-                options=firefox_options,
+                options=chrome_options,
             )
             
-            # Set explicit timeouts - critical for stability
+            # Set explicit timeouts
             self.driver.set_page_load_timeout(30)
             self.driver.set_script_timeout(15)
             
             self.wait = WebDriverWait(self.driver, 15)
-            self.logger.info("WebDriver setup successful with Firefox headless")
+            self.logger.info("WebDriver setup successful with Chrome headless")
         except Exception as e:
             self.logger.error(f"WebDriver setup error: {e}")
             self.logger.error(traceback.format_exc())
