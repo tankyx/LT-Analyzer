@@ -9,7 +9,7 @@ from collections import deque
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
-from apex_timing_playwright import ApexTimingParserPlaywright
+from apex_timing import ApexTimingParserPlaywright
 
 # Initialize Flask app
 app = Flask(__name__)
