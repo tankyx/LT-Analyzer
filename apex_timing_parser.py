@@ -17,6 +17,7 @@ class ApexTimingParserPlaywright:
         self.browser = None
         self.page = None
         self.playwright = None
+        self.last_data_hash = None  # Track data changes
 
     async def initialize(self):
         """Initialize Playwright browser with optimized settings"""
@@ -41,18 +42,24 @@ class ApexTimingParserPlaywright:
             # Create a page with modified settings
             context = await self.browser.new_context(
                 viewport={"width": 1920, "height": 1080},  # Larger viewport
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"  # Modern UA
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",  # Updated UA
+                ignore_https_errors=True,  # In case of certificate issues
+                java_script_enabled=True
             )
             
-            # Set cookies properly - using domain instead of url
-            await context.add_cookies([{
-                "name": "liveTiming_resolution",
-                "value": "big",
-                "domain": "www.apex-timing.com",
-                "path": "/"
-            }])
+            # Set extra HTTP headers to appear more like a real browser
+            await context.set_extra_http_headers({
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache"
+            })
             
             self.page = await context.new_page()
+            
+            # Enable console message logging for debugging
+            self.page.on("console", lambda msg: self.logger.debug(f"Browser console: {msg.text}"))
+            self.page.on("pageerror", lambda msg: self.logger.error(f"Page error: {msg}"))
             
             # Set a longer default timeout
             self.page.set_default_timeout(45000)  # 45 seconds
@@ -166,8 +173,34 @@ class ApexTimingParserPlaywright:
             try:
                 self.logger.info(f"Loading URL: {url} (Attempt {retry_count + 1})")
                 
+                # Set up network monitoring to detect data updates
+                data_received = False
+                
+                async def handle_response(response):
+                    nonlocal data_received
+                    # Check if this is a data update request
+                    if ('grid' in response.url or 'update' in response.url or 
+                        'refresh' in response.url or 'data' in response.url):
+                        data_received = True
+                        self.logger.debug(f"Data response received: {response.url}")
+                
+                self.page.on("response", handle_response)
+                
                 # Navigate to the URL with a timeout
-                await self.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await self.page.goto(url, wait_until="networkidle", timeout=30000)
+                
+                # Wait a bit for any redirects or additional navigation
+                await self.page.wait_for_timeout(1000)
+                
+                # Set cookie after navigation to ensure correct domain
+                try:
+                    await self.page.evaluate("""
+                        () => {
+                            document.cookie = "liveTiming_resolution=big; path=/";
+                        }
+                    """)
+                except Exception as e:
+                    self.logger.warning(f"Could not set cookie: {e}")
                 
                 # Wait for the elements to load
                 self.logger.info("Waiting for elements to load...")
@@ -178,9 +211,73 @@ class ApexTimingParserPlaywright:
                 # Check if the page has loaded properly by waiting for key containers
                 await self.page.wait_for_selector("#global", timeout=10000, state="attached")
                 
-                # Don't wait for visibility, just check if elements exist
-                # Give the page a moment to initialize JavaScript
-                await asyncio.sleep(2)
+                # First check if there's "No Live Timing" message early
+                no_live_timing_early = await self.page.evaluate("""
+                    () => {
+                        const noLiveElement = document.querySelector('p.no_live');
+                        return noLiveElement && noLiveElement.textContent.includes('No Live Timing');
+                    }
+                """)
+                
+                if no_live_timing_early:
+                    self.logger.info("No Live Timing currently available (early check)")
+                    return "NO_LIVE_TIMING", ""
+                
+                # Wait for JavaScript to populate the data
+                # First wait for any loading indicators to disappear
+                try:
+                    await self.page.wait_for_function(
+                        """() => {
+                            // Check if there are any loading indicators
+                            const loadingElements = document.querySelectorAll('.loading, .spinner, [class*="load"]');
+                            return loadingElements.length === 0;
+                        }""",
+                        timeout=10000
+                    )
+                except:
+                    pass  # Continue even if no loading indicators found
+                
+                # Wait for actual data to be populated in the grid OR no live timing message
+                try:
+                    await self.page.wait_for_function(
+                        """() => {
+                            // Check for no live timing message
+                            const noLiveElement = document.querySelector('p.no_live');
+                            if (noLiveElement && noLiveElement.textContent.includes('No Live Timing')) {
+                                return true;
+                            }
+                            
+                            // Check for grid data
+                            const gridRows = document.querySelectorAll('#tgrid tr[data-id^="r"]:not([data-id="r0"])');
+                            const hasData = gridRows.length > 0;
+                            
+                            // Also check if at least one row has actual content
+                            if (hasData) {
+                                const firstRow = gridRows[0];
+                                const cells = firstRow.querySelectorAll('td');
+                                return cells.length > 3 && cells[0].textContent.trim() !== '';
+                            }
+                            return false;
+                        }""",
+                        timeout=15000
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Timeout waiting for data: {e}")
+                
+                # Additional wait to ensure all dynamic content is loaded
+                await asyncio.sleep(1)
+                
+                # First check if there's "No Live Timing" message
+                no_live_timing = await self.page.evaluate("""
+                    () => {
+                        const noLiveElement = document.querySelector('p.no_live');
+                        return noLiveElement && noLiveElement.textContent.includes('No Live Timing');
+                    }
+                """)
+                
+                if no_live_timing:
+                    self.logger.info("No Live Timing currently available")
+                    return "NO_LIVE_TIMING", ""
                 
                 # Get HTML using JavaScript evaluation to extract even hidden content
                 grid_html = await self.page.evaluate("""
@@ -559,6 +656,7 @@ class ApexTimingParserPlaywright:
         pd.set_option('display.precision', 3)
         
         session_id = self.store_session_data("Live Session", "Karting Mariembourg")
+        consecutive_failures = 0
         
         try:
             # Initialize browser
@@ -571,24 +669,49 @@ class ApexTimingParserPlaywright:
                     self.logger.info("Fetching new data...")
                     grid_html, dyna_html = await self.get_page_content(url)
                     
+                    # Check if no live timing is available
+                    if grid_html == "NO_LIVE_TIMING":
+                        self.logger.info("No live timing available, waiting 30 seconds...")
+                        await asyncio.sleep(30)
+                        continue
+                    
                     if grid_html and dyna_html:
-                        # Parse dynamic info
-                        dyna_info = self.parse_dyna_info(dyna_html)
+                        # Calculate hash of current data to detect changes
+                        import hashlib
+                        data_hash = hashlib.md5((grid_html + dyna_html).encode()).hexdigest()
                         
-                        # Parse grid data
-                        df = self.parse_grid_data(grid_html)
-                        if not df.empty:
-                            self.store_lap_data(session_id, df)
+                        if data_hash != self.last_data_hash:
+                            self.last_data_hash = data_hash
+                            consecutive_failures = 0  # Reset failure counter
                             
-                            # Print status for debugging
-                            self.logger.info(f"Successfully updated data at {datetime.now().isoformat()}")
-                            self.logger.info(f"Current standings: {len(df)} teams")
+                            # Parse dynamic info
+                            dyna_info = self.parse_dyna_info(dyna_html)
                             
-                            # Print dynamic info if available
-                            if dyna_info:
-                                self.logger.info(f"Session info: {dyna_info}")
+                            # Parse grid data
+                            df = self.parse_grid_data(grid_html)
+                            if not df.empty:
+                                self.store_lap_data(session_id, df)
+                                
+                                # Print status for debugging
+                                self.logger.info(f"Successfully updated data at {datetime.now().isoformat()}")
+                                self.logger.info(f"Current standings: {len(df)} teams")
+                                
+                                # Print dynamic info if available
+                                if dyna_info:
+                                    self.logger.info(f"Session info: {dyna_info}")
+                            else:
+                                self.logger.warning("Parsed data was empty")
+                        else:
+                            self.logger.debug("No data changes detected, skipping update")
                     else:
-                        self.logger.warning("Failed to fetch data, will retry")
+                        consecutive_failures += 1
+                        self.logger.warning(f"Failed to fetch data (attempt {consecutive_failures}), will retry")
+                        
+                        # If we fail too many times, try refreshing the page
+                        if consecutive_failures >= 3:
+                            self.logger.warning("Multiple failures detected, refreshing page...")
+                            await self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                            consecutive_failures = 0
 
                     # Wait before next update
                     await asyncio.sleep(interval)
