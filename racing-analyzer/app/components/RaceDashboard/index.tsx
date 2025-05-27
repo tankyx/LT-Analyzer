@@ -127,34 +127,29 @@ const RaceDashboard = () => {
   const [showAdjustedGap, setShowAdjustedGap] = useState(false);
   const [pitStopTime, setPitStopTime] = useState(158);
   const [requiredPitStops, setRequiredPitStops] = useState(7);
+  const [isSimulationMode, setIsSimulationMode] = useState(false);
 
-  const updatePitStopConfig = useCallback(async () => {
+  const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number) => {
     try {
       await ApiService.updatePitStopConfig({
-        pitStopTime,
-        requiredPitStops
+        pitStopTime: newPitTime,
+        requiredPitStops: newRequiredStops
       });
       
-      setAlerts([...alerts, {
+      setAlerts(prev => [...prev, {
         id: Date.now(),
         message: 'Pit stop settings updated successfully',
         type: 'success'
       }]);
     } catch (error) {
       console.error('Error updating pit stop config:', error);
-      setAlerts([...alerts, {
+      setAlerts(prev => [...prev, {
         id: Date.now(),
         message: `Failed to update pit stop settings: ${error instanceof Error ? error.message : 'Unknown error'}`,
         type: 'error'
       }]);
     }
-  }, [pitStopTime, requiredPitStops, alerts]);
-
-  useEffect(() => {
-    if (simulating) {
-      updatePitStopConfig();
-    }
-  }, [pitStopTime, requiredPitStops, simulating, updatePitStopConfig]);
+  }, []);
 
   const getTeamClass = (teamName: string): string | null => {
     if (teamName.startsWith('1 - ')) return '1';
@@ -206,22 +201,22 @@ const RaceDashboard = () => {
     }
   };
 
-  const startSimulation = async () => {
+  const startSimulation = async (isSimulationMode: boolean = false) => {
     try {
-      const response = await ApiService.startSimulation();
+      const response = await ApiService.startSimulation(isSimulationMode);
     
       setSimulating(true);
       setAlerts([...alerts, {
         id: Date.now(),
-        message: 'Simulation started successfully',
+        message: isSimulationMode ? 'Simulation mode started successfully' : 'Real data collection started successfully',
         type: 'success'
       }]);
       return response;
     } catch (error) {
-      console.error('Error starting simulation:', error);
+      console.error('Error starting:', error);
       setAlerts([...alerts, {
         id: Date.now(),
-        message: `Failed to start simulation: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        message: `Failed to start: ${error instanceof Error ? error.message : 'Unknown error'}`,
         type: 'error'
       }]);
       throw error;
@@ -254,6 +249,16 @@ const RaceDashboard = () => {
     setIsDarkMode(!isDarkMode);
   };
 
+  // Auto-dismiss alerts after 5 seconds
+  useEffect(() => {
+    if (alerts.length > 0) {
+      const timer = setTimeout(() => {
+        setAlerts(prev => prev.slice(1)); // Remove oldest alert
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [alerts]);
+
   useEffect(() => {
     updateMonitoring();
   }, [myTeam, monitoredTeams]);
@@ -262,16 +267,29 @@ const RaceDashboard = () => {
     const fetchData = async () => {
       try {
         const data = await ApiService.getRaceData();
-        setTeams(data.teams);
-        setSessionInfo(data.session_info);
-        setLastUpdate(data.last_update);
+        setTeams(data.teams || []);
+        setSessionInfo(data.session_info || {});
+        setLastUpdate(data.last_update || '');
         setDeltaData(data.delta_times || {});
         setGapHistory(data.gap_history || {});
+        setIsSimulationMode(data.simulation_mode || false);
         setIsLoading(false);
-        checkPitStops(data.teams);
+        setError(null); // Clear any previous errors
+        if (data.teams && data.teams.length > 0) {
+          checkPitStops(data.teams);
+        }
       } catch (error) {
-        setError(error instanceof Error ? error.message : 'An error occurred');
+        // Only show error if it's a real error, not just empty data
+        console.error('Error fetching race data:', error);
+        // Still set empty data to show the UI
+        setTeams([]);
+        setSessionInfo({});
+        setLastUpdate('');
+        setDeltaData({});
+        setGapHistory({});
         setIsLoading(false);
+        // Don't show error for normal operation without data
+        setError(null);
       }
     };
 
@@ -362,22 +380,8 @@ const RaceDashboard = () => {
     );
   }
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="bg-white rounded-lg shadow-lg p-6 max-w-md">
-          <div className="text-red-600 text-xl mb-2">Error</div>
-          <p className="text-gray-700">{error}</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="mt-4 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // Don't show error screen - we'll handle empty data gracefully in the UI
+  // if (error) { ... }
 
   const StandingsTab = (
     <div className="p-4">
@@ -470,16 +474,38 @@ const RaceDashboard = () => {
             <tr className={`${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
               <td colSpan={6} className="px-4 py-8 text-center">
                 <div className="flex flex-col items-center">
-                  <svg className="w-12 h-12 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                  </svg>
-                  <p className="text-lg font-medium">No teams found in this class</p>
-                  <button 
-                    onClick={() => setSelectedClass('all')}
-                    className={`mt-4 px-4 py-2 rounded-md transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'}`}
-                  >
-                    Show all teams
-                  </button>
+                  {teams.length === 0 ? (
+                    // No data at all
+                    <>
+                      <svg className="w-16 h-16 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p className="text-lg font-medium mb-2">No race data available</p>
+                      <p className="text-sm mb-4">Click "Start Simulation" to begin loading race data</p>
+                      {!simulating && (
+                        <button 
+                          onClick={startSimulation}
+                          className={`px-6 py-2 rounded-md transition-colors font-medium ${isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
+                        >
+                          Start Simulation
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    // No teams in selected class
+                    <>
+                      <svg className="w-12 h-12 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                      </svg>
+                      <p className="text-lg font-medium">No teams found in this class</p>
+                      <button 
+                        onClick={() => setSelectedClass('all')}
+                        className={`mt-4 px-4 py-2 rounded-md transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'}`}
+                      >
+                        Show all teams
+                      </button>
+                    </>
+                  )}
                 </div>
               </td>
             </tr>
@@ -698,8 +724,14 @@ const RaceDashboard = () => {
           
           <div className="flex items-center gap-4">
             <div className="text-sm flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse"></span>
-              Last Update: {lastUpdate || 'N/A'}
+              {teams.length > 0 ? (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse"></span>
+                  Last Update: {lastUpdate || 'N/A'}
+                </>
+              ) : (
+                <span className="text-gray-500">No active session</span>
+              )}
             </div>
             <button 
               onClick={toggleDarkMode}
@@ -725,15 +757,22 @@ const RaceDashboard = () => {
           onStop={stopSimulation}
           isSimulating={simulating}
           isDarkMode={isDarkMode}
+          isSimulationMode={isSimulationMode}
         />
         
         {/* Pit Stop Config */}
         {monitoredTeams.length > 0 && (
           <PitStopConfig
             pitStopTime={pitStopTime}
-            setPitStopTime={setPitStopTime}
+            setPitStopTime={(newTime) => {
+              setPitStopTime(newTime);
+              updatePitStopConfig(newTime, requiredPitStops);
+            }}
             requiredPitStops={requiredPitStops}
-            setRequiredPitStops={setRequiredPitStops}
+            setRequiredPitStops={(newStops) => {
+              setRequiredPitStops(newStops);
+              updatePitStopConfig(pitStopTime, newStops);
+            }}
             isDarkMode={isDarkMode}
           />
         )}
@@ -750,11 +789,15 @@ const RaceDashboard = () => {
               className={`w-full md:w-1/2 p-2 border rounded-lg ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
             >
               <option value="">Select Your Team</option>
-              {teams.map(team => (
-                <option key={team.Kart} value={team.Kart}>
-                  {team.Team} (Kart #{team.Kart})
-                </option>
-              ))}
+              {teams.length > 0 ? (
+                teams.map(team => (
+                  <option key={team.Kart} value={team.Kart}>
+                    {team.Team} (Kart #{team.Kart})
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>No teams available - Start simulation to load data</option>
+              )}
             </select>
             
             {myTeam && (
@@ -774,7 +817,7 @@ const RaceDashboard = () => {
             <h2 className="font-semibold">Session Information</h2>
           </div>
           <div className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-blue-800'}`}>
-            {sessionInfo.dyn1 || 'No session information available'}
+            {sessionInfo.dyn1 || (teams.length === 0 ? 'No active session - Start simulation to begin' : 'No session information available')}
           </div>
           {sessionInfo.dyn2 && (
             <div className={`mt-1 ${isDarkMode ? 'text-gray-300' : 'text-blue-600'}`}>

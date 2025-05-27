@@ -1,10 +1,13 @@
 // racing-analyzer/app/services/ApiService.ts
 
+// Use the backend URL - adjust if running on different host/port
+const API_BASE_URL = 'http://localhost:5000';
+
 export const ApiService = {
   // Get race data
   getRaceData: async () => {
     try {
-      const response = await fetch(`/api/race-data`);
+      const response = await fetch(`${API_BASE_URL}/api/race-data`);
       if (!response.ok) {
         throw new Error('Failed to fetch race data');
       }
@@ -18,7 +21,7 @@ export const ApiService = {
   // Update monitoring settings
   updateMonitoring: async (data: { myTeam: string; monitoredTeams: string[] }) => {
     try {
-      const response = await fetch(`/api/update-monitoring`, {
+      const response = await fetch(`${API_BASE_URL}/api/update-monitoring`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -36,20 +39,31 @@ export const ApiService = {
   },
 
   // Start simulation
-  startSimulation: async () => {
+  startSimulation: async (isSimulationMode: boolean = false) => {
     try {
-      const response = await fetch(`/api/start-simulation`, {
+      console.log(`Calling ${API_BASE_URL}/api/start-simulation with mode:`, isSimulationMode);
+      const response = await fetch(`${API_BASE_URL}/api/start-simulation`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ simulation: isSimulationMode }),
       });
+      
       if (!response.ok) {
-        throw new Error('Failed to start simulation');
+        const errorText = await response.text();
+        console.error('Response not OK:', response.status, errorText);
+        throw new Error(`Failed to start simulation: ${response.status} ${errorText}`);
       }
-      return await response.json();
+      
+      const result = await response.json();
+      console.log('Start simulation response:', result);
+      return result;
     } catch (error) {
       console.error('Error starting simulation:', error);
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        throw new Error('Cannot connect to backend server at ' + API_BASE_URL);
+      }
       throw error;
     }
   },
@@ -57,7 +71,7 @@ export const ApiService = {
   // Stop simulation
   stopSimulation: async () => {
     try {
-      const response = await fetch(`/api/stop-simulation`, {
+      const response = await fetch(`${API_BASE_URL}/api/stop-simulation`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -75,7 +89,7 @@ export const ApiService = {
 
   updatePitStopConfig: async (data: { pitStopTime: number; requiredPitStops: number }) => {
     try {
-      const response = await fetch(`/api/update-pit-config`, {
+      const response = await fetch(`${API_BASE_URL}/api/update-pit-config`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -2,22 +2,25 @@
 import React, { useState, useEffect } from 'react';
 
 interface SimulationControlsProps {
-  onStart: () => void;
+  onStart: (isSimulation?: boolean) => void;
   onStop: () => void;
   isSimulating?: boolean;
   isDarkMode?: boolean;
+  isSimulationMode?: boolean;
 }
 
 const SimulationControls: React.FC<SimulationControlsProps> = ({ 
   onStart, 
   onStop, 
   isSimulating = false,
-  isDarkMode = false
+  isDarkMode = false,
+  isSimulationMode = false
 }) => {
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [timer, setTimer] = useState<number>(0);
+  const [showModeSelector, setShowModeSelector] = useState(false);
 
   // Start a timer when simulation is running
   useEffect(() => {
@@ -45,15 +48,17 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleStart = async () => {
+  const handleStart = async (mode?: 'real' | 'simulation') => {
     setIsStarting(true);
-    setStatus('Starting simulation...');
+    const isSimulation = mode === 'simulation';
+    setStatus(isSimulation ? 'Starting simulation...' : 'Starting real data collection...');
     
     try {
-      await onStart();
-      setStatus('Simulation running');
+      await onStart(isSimulation);
+      setStatus(isSimulation ? 'Simulation running' : 'Real data collection running');
+      setShowModeSelector(false);
     } catch (error) {
-      setStatus(`Error starting simulation: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setStatus(`Error starting: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsStarting(false);
     }
@@ -87,43 +92,80 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
         {isSimulating && (
           <div className={`text-sm rounded-full px-3 py-1 flex items-center ${isDarkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800'}`}>
             <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse mr-2"></span>
-            Simulation Active - {formatTime(timer)}
+            {isSimulationMode ? 'Simulation' : 'Real Data'} Active - {formatTime(timer)}
           </div>
         )}
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className={`rounded-lg p-4 border ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
-          <div className="flex space-x-4">
-            <button
-              onClick={handleStart}
-              disabled={isStarting || isStopping || isSimulating}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded font-medium transition-all
-                ${isStarting ? 'opacity-70 cursor-wait' : ''}
-                ${isSimulating ? 'opacity-50 cursor-not-allowed' : ''}
-                ${isDarkMode 
-                  ? 'bg-green-700 hover:bg-green-600 text-white disabled:bg-gray-700 disabled:text-gray-400' 
-                  : 'bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-500'
-                }
-              `}
-            >
-              {isStarting ? (
-                <>
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Starting...
-                </>
-              ) : (
-                <>
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M5 3l14 9-14 9V3z" />
-                  </svg>
-                  Start Simulation
-                </>
-              )}
-            </button>
+          <div className="flex flex-col space-y-4">
+            {!isSimulating && showModeSelector && (
+              <div className={`p-4 rounded-lg border ${isDarkMode ? 'border-gray-600 bg-gray-800' : 'border-gray-300 bg-white'}`}>
+                <p className={`text-sm mb-3 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Choose data source:</p>
+                <div className="flex space-x-3">
+                  <button
+                    onClick={() => handleStart('real')}
+                    disabled={isStarting}
+                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all
+                      ${isDarkMode 
+                        ? 'bg-blue-700 hover:bg-blue-600 text-white' 
+                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                      }
+                    `}
+                  >
+                    Real Data
+                  </button>
+                  <button
+                    onClick={() => handleStart('simulation')}
+                    disabled={isStarting}
+                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all
+                      ${isDarkMode 
+                        ? 'bg-purple-700 hover:bg-purple-600 text-white' 
+                        : 'bg-purple-500 hover:bg-purple-600 text-white'
+                      }
+                    `}
+                  >
+                    Simulation
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            <div className="flex space-x-4">
+              <button
+                onClick={() => {
+                  if (!isSimulating) {
+                    setShowModeSelector(!showModeSelector);
+                  }
+                }}
+                disabled={isStarting || isStopping || isSimulating}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded font-medium transition-all
+                  ${isStarting ? 'opacity-70 cursor-wait' : ''}
+                  ${isSimulating ? 'opacity-50 cursor-not-allowed' : ''}
+                  ${isDarkMode 
+                    ? 'bg-green-700 hover:bg-green-600 text-white disabled:bg-gray-700 disabled:text-gray-400' 
+                    : 'bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-500'
+                  }
+                `}
+              >
+                {isStarting ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Starting...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 3l14 9-14 9V3z" />
+                    </svg>
+                    Start Collection
+                  </>
+                )}
+              </button>
             
             <button
               onClick={handleStop}
@@ -155,6 +197,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
               )}
             </button>
           </div>
+          </div>
         </div>
         
         <div className={`rounded-lg p-4 border ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
@@ -184,10 +227,10 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
             {isSimulating ? (
               <div className="flex items-center gap-1">
                 <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                The simulation is running at 4x real-time speed
+                {isSimulationMode ? 'The simulation is running at 4x real-time speed' : 'Collecting real-time data from Apex Timing'}
               </div>
             ) : (
-              "Press Start to begin the race simulation"
+              "Press Start to begin data collection"
             )}
           </div>
         </div>
