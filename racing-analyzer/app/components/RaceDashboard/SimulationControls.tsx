@@ -30,7 +30,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
     if (currentTimingUrl && currentTimingUrl !== timingUrl) {
       setTimingUrl(currentTimingUrl);
     }
-  }, [currentTimingUrl]);
+  }, [currentTimingUrl, timingUrl]);
 
   // Start a timer when simulation is running
   useEffect(() => {

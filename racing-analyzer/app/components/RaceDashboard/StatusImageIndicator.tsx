@@ -54,6 +54,7 @@ const StatusImageIndicator: React.FC<StatusImageIndicatorProps> = ({ status = 'O
 
   return (
     <div className="flex items-center gap-1">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img 
         src={imageUrl} 
         alt={status}

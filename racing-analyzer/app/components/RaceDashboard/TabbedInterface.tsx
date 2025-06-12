@@ -31,7 +31,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
     <div className="rounded-lg shadow overflow-hidden">
       {/* Tab Navigation */}
       <div className={`flex border-b ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
-        {tabs.map((tab, index) => (
+        {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => handleTabChange(tab.id)}

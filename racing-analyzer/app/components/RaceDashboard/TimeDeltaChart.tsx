@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine, Label, Area, ComposedChart
 } from 'recharts';
 import { motion } from 'framer-motion';
@@ -39,7 +39,7 @@ interface ModeToggleProps {
 interface ChartDataPoint {
   lap: number;
   absoluteLap: number;
-  [key: string]: any; // For dynamic keys like kart_123, kart_123_team, etc.
+  [key: string]: number | string | undefined; // For dynamic keys like kart_123, kart_123_team, etc.
 }
 
 // Toggle component for switching between regular and adjusted gap modes
@@ -70,7 +70,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   onColorAssignment,
   onTeamHover,
   pitStopTime = 158,  // Default 2:38
-  requiredPitStops = 3
+  requiredPitStops = 3 // eslint-disable-line @typescript-eslint/no-unused-vars
 }) => {
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
@@ -172,14 +172,18 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   }, [gapHistory, teams, monitoredTeams, isDarkMode, generateColor, onColorAssignment]);
 
   // Custom tooltip component
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
+  const CustomTooltip = ({ active, payload, label }: {
+    active?: boolean;
+    payload?: Array<{ dataKey: string; value: number; color: string }>;
+    label?: number;
+  }) => {
+    if (active && payload && payload.length && label !== undefined) {
       // Get the actual lap number
       const dataIndex = label - 1;
       const absoluteLap = chartData[dataIndex]?.absoluteLap || label;
       
       // Filter payload to only include the current mode's data
-      const filteredPayload = payload.filter((entry: any) => {
+      const filteredPayload = payload.filter((entry) => {
         const dataKey = entry.dataKey;
         return gapMode === 'adjusted' 
           ? dataKey.includes('_adjusted')
@@ -199,7 +203,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
           </div>
           
           <div className="space-y-2 mt-2 max-h-60 overflow-y-auto">
-            {sortedPayload.map((entry: any) => {
+            {sortedPayload.map((entry) => {
               const kartNum = entry.dataKey.replace('kart_', '').replace('_adjusted', '');
               const teamName = chartData[dataIndex]?.[`kart_${kartNum}_team`] || `Kart ${kartNum}`;
               const gap = entry.value;
@@ -264,9 +268,10 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
       for (const lapData of chartData) {
         for (const kartNum of monitoredTeams) {
           const key = gapMode === 'adjusted' ? `kart_${kartNum}_adjusted` : `kart_${kartNum}`;
-          if (lapData[key] !== undefined) {
-            min = Math.min(min, lapData[key]);
-            max = Math.max(max, lapData[key]);
+          const value = lapData[key];
+          if (value !== undefined && typeof value === 'number') {
+            min = Math.min(min, value);
+            max = Math.max(max, value);
           }
         }
       }
