@@ -42,7 +42,7 @@ export const ApiService = {
   startSimulation: async (isSimulationMode: boolean = false, timingUrl?: string) => {
     try {
       console.log(`Calling ${API_BASE_URL}/api/start-simulation with mode:`, isSimulationMode, 'and URL:', timingUrl);
-      const payload: any = { simulation: isSimulationMode };
+      const payload: { simulation: boolean; timingUrl?: string } = { simulation: isSimulationMode };
       if (timingUrl) {
         payload.timingUrl = timingUrl;
       }

@@ -118,7 +118,7 @@ const RaceDashboard = () => {
   const [deltaData, setDeltaData] = useState<Record<string, DeltaData>>({});
   const [gapHistory, setGapHistory] = useState<GapHistory>({});
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [simulating, setSimulating] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
@@ -128,7 +128,10 @@ const RaceDashboard = () => {
   const [pitStopTime, setPitStopTime] = useState(158);
   const [requiredPitStops, setRequiredPitStops] = useState(7);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
-  const [raceData, setRaceData] = useState<any>(null);
+  const [raceData, setRaceData] = useState<{
+    timing_url?: string;
+    [key: string]: unknown;
+  } | null>(null);
 
   const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number) => {
     try {
@@ -191,7 +194,7 @@ const RaceDashboard = () => {
     setTeamColors(colors);
   };
   
-  const updateMonitoring = async () => {
+  const updateMonitoring = useCallback(async () => {
     try {
       await ApiService.updateMonitoring({
         myTeam,
@@ -200,7 +203,7 @@ const RaceDashboard = () => {
     } catch (error) {
       console.error('Error updating monitoring:', error);
     }
-  };
+  }, [myTeam, monitoredTeams]);
 
   const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string) => {
     try {
@@ -250,6 +253,66 @@ const RaceDashboard = () => {
     setIsDarkMode(!isDarkMode);
   };
 
+  const checkPitStops = useCallback((currentTeams: Team[]) => {
+    monitoredTeams.forEach(kartNum => {
+      const team = currentTeams.find(t => t.Kart === kartNum);
+      
+      // Check if pit count has increased
+      if (team && parseInt(team['Pit Stops']) > (team.lastPitCount || 0)) {
+        setAlerts(prev => [...prev, {
+          id: Date.now(),
+          message: `${team.Team} has entered the pits!`,
+          type: 'warning'
+        }]);
+        team.lastPitCount = parseInt(team['Pit Stops']);
+      }
+      
+      // Check if status has changed to Pit-in
+      if (team && team.Status === 'Pit-in') {
+        // Create a unique ID for this pit alert
+        // const pitAlertId = `pit-${team.Kart}-${Date.now()}`; // Currently unused
+        
+        // Check if we already have an active alert for this team's pit status
+        const existingPitAlert = alerts.find(
+          alert => alert.message.includes(team.Team) && alert.message.includes('in the pits')
+        );
+        
+        // Only add a new alert if we don't have one for this team already
+        if (!existingPitAlert) {
+          // Create a more prominent pit alert with custom styling and action buttons
+          setAlerts(prev => [...prev, {
+            id: Date.now(),
+            message: `🔴 ALERT: ${team.Team} is in the pits!`,
+            type: 'error', // Use error type for more visibility
+            // Adding extra data for styled rendering
+            customContent: (
+              <div className="flex flex-col">
+                <div className="flex items-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img 
+                    src="https://www.apex-timing.com/live-timing/commonv2/images/st_in.png" 
+                    alt="Pit In" 
+                    className="w-5 h-5 mr-2" 
+                  />
+                  <span className="font-bold">{team.Team} (Kart #{team.Kart})</span>
+                </div>
+                <div className="text-sm mt-1">Currently in the pits - Position: {team.Position}</div>
+              </div>
+            )
+          }]);
+          
+          // Play a sound alert if browser supports it
+          try {
+            const audio = new Audio('/notification.mp3');
+            audio.play().catch(e => console.log('Audio play prevented by browser', e));
+          } catch (e) {
+            console.log('Audio not supported', e);
+          }
+        }
+      }
+    });
+  }, [monitoredTeams, alerts]);
+
   // Auto-dismiss alerts after 5 seconds
   useEffect(() => {
     if (alerts.length > 0) {
@@ -262,7 +325,7 @@ const RaceDashboard = () => {
 
   useEffect(() => {
     updateMonitoring();
-  }, [myTeam, monitoredTeams]);
+  }, [myTeam, monitoredTeams, updateMonitoring]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -298,66 +361,7 @@ const RaceDashboard = () => {
     fetchData();
     const interval = setInterval(fetchData, 2000);
     return () => clearInterval(interval);
-  }, []); 
-
-  const checkPitStops = (currentTeams: Team[]) => {
-    monitoredTeams.forEach(kartNum => {
-      const team = currentTeams.find(t => t.Kart === kartNum);
-      
-      // Check if pit count has increased
-      if (team && parseInt(team['Pit Stops']) > (team.lastPitCount || 0)) {
-        setAlerts(prev => [...prev, {
-          id: Date.now(),
-          message: `${team.Team} has entered the pits!`,
-          type: 'warning'
-        }]);
-        team.lastPitCount = parseInt(team['Pit Stops']);
-      }
-      
-      // Check if status has changed to Pit-in
-      if (team && team.Status === 'Pit-in') {
-        // Create a unique ID for this pit alert
-        const pitAlertId = `pit-${team.Kart}-${Date.now()}`;
-        
-        // Check if we already have an active alert for this team's pit status
-        const existingPitAlert = alerts.find(
-          alert => alert.message.includes(team.Team) && alert.message.includes('in the pits')
-        );
-        
-        // Only add a new alert if we don't have one for this team already
-        if (!existingPitAlert) {
-          // Create a more prominent pit alert with custom styling and action buttons
-          setAlerts(prev => [...prev, {
-            id: Date.now(),
-            message: `🔴 ALERT: ${team.Team} is in the pits!`,
-            type: 'error', // Use error type for more visibility
-            // Adding extra data for styled rendering
-            customContent: (
-              <div className="flex flex-col">
-                <div className="flex items-center">
-                  <img 
-                    src="https://www.apex-timing.com/live-timing/commonv2/images/st_in.png" 
-                    alt="Pit In" 
-                    className="w-5 h-5 mr-2" 
-                  />
-                  <span className="font-bold">{team.Team} (Kart #{team.Kart})</span>
-                </div>
-                <div className="text-sm mt-1">Currently in the pits - Position: {team.Position}</div>
-              </div>
-            )
-          }]);
-          
-          // Play a sound alert if browser supports it
-          try {
-            const audio = new Audio('/notification.mp3');
-            audio.play().catch(e => console.log('Audio play prevented by browser', e));
-          } catch (e) {
-            console.log('Audio not supported', e);
-          }
-        }
-      }
-    });
-  };
+  }, [checkPitStops]);
 
   const toggleTeamMonitoring = (kartNum: string) => {
     setMonitoredTeams(prev => 
@@ -483,10 +487,10 @@ const RaceDashboard = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       <p className="text-lg font-medium mb-2">No race data available</p>
-                      <p className="text-sm mb-4">Click "Start Simulation" to begin loading race data</p>
+                      <p className="text-sm mb-4">Click &quot;Start Simulation&quot; to begin loading race data</p>
                       {!simulating && (
                         <button 
-                          onClick={startSimulation}
+                          onClick={() => startSimulation(false)}
                           className={`px-6 py-2 rounded-md transition-colors font-medium ${isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
                         >
                           Start Simulation
@@ -760,7 +764,7 @@ const RaceDashboard = () => {
           isSimulating={simulating}
           isDarkMode={isDarkMode}
           isSimulationMode={isSimulationMode}
-          currentTimingUrl={raceData?.timing_url}
+          currentTimingUrl={raceData?.timing_url as string | undefined}
         />
         
         {/* Pit Stop Config */}
