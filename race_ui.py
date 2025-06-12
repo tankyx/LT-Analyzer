@@ -46,7 +46,8 @@ race_data = {
     },
     'race_time': 0,
     'is_running': False,
-    'simulation_mode': SIMULATION_MODE
+    'simulation_mode': SIMULATION_MODE,
+    'timing_url': None  # Store the timing URL
 }
 
 # Create our parser
@@ -484,7 +485,8 @@ def get_serializable_race_data():
         'my_team': race_data['my_team'],
         'monitored_teams': race_data['monitored_teams'],
         'delta_times': race_data['delta_times'],
-        'simulation_mode': race_data.get('simulation_mode', False)
+        'simulation_mode': race_data.get('simulation_mode', False),
+        'timing_url': race_data.get('timing_url', None)
     }
     
     # Convert gap_history deques to lists
@@ -516,7 +518,12 @@ async def update_race_data():
     
     try:
         print("Background update thread started")
-        url = "https://www.apex-timing.com/live-timing/karting-mariembourg/index.html"
+        url = race_data.get('timing_url')
+        if not url:
+            print("No timing URL provided")
+            return
+        
+        print(f"Using timing URL: {url}")
         
         while not stop_event.is_set():
             try:
@@ -620,7 +627,13 @@ def start_simulation():
         # Get mode from request (default to real data)
         data = request.json or {}
         simulation_mode = data.get('simulation', False)
-        print(f"Starting with simulation mode: {simulation_mode}")
+        timing_url = data.get('timingUrl', None)
+        
+        # Validate URL if provided and not in simulation mode
+        if not simulation_mode and not timing_url:
+            return jsonify({'status': 'error', 'message': 'Timing URL is required for real data mode'}), 400
+        
+        print(f"Starting with simulation mode: {simulation_mode}, URL: {timing_url}")
         
         # Stop any existing thread
         if update_thread and update_thread.is_alive():
@@ -636,11 +649,12 @@ def start_simulation():
         race_data['monitored_teams'] = []
         race_data['simulation_mode'] = simulation_mode
         race_data['is_running'] = False
+        race_data['timing_url'] = timing_url  # Store the URL
         
         # Start a new thread
         start_update_thread()
         
-        mode_text = 'simulation' if simulation_mode else 'real data collection'
+        mode_text = 'simulation' if simulation_mode else f'real data collection from {timing_url}'
         return jsonify({'status': 'success', 'message': f'Started {mode_text}'})
     except Exception as e:
         print(f"Error in start_simulation: {e}")

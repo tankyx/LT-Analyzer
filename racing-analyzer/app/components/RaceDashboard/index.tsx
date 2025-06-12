@@ -128,6 +128,7 @@ const RaceDashboard = () => {
   const [pitStopTime, setPitStopTime] = useState(158);
   const [requiredPitStops, setRequiredPitStops] = useState(7);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
+  const [raceData, setRaceData] = useState<any>(null);
 
   const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number) => {
     try {
@@ -201,9 +202,9 @@ const RaceDashboard = () => {
     }
   };
 
-  const startSimulation = async (isSimulationMode: boolean = false) => {
+  const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string) => {
     try {
-      const response = await ApiService.startSimulation(isSimulationMode);
+      const response = await ApiService.startSimulation(isSimulationMode, timingUrl);
     
       setSimulating(true);
       setAlerts([...alerts, {
@@ -273,6 +274,7 @@ const RaceDashboard = () => {
         setDeltaData(data.delta_times || {});
         setGapHistory(data.gap_history || {});
         setIsSimulationMode(data.simulation_mode || false);
+        setRaceData(data); // Store full race data
         setIsLoading(false);
         setError(null); // Clear any previous errors
         if (data.teams && data.teams.length > 0) {
@@ -758,6 +760,7 @@ const RaceDashboard = () => {
           isSimulating={simulating}
           isDarkMode={isDarkMode}
           isSimulationMode={isSimulationMode}
+          currentTimingUrl={raceData?.timing_url}
         />
         
         {/* Pit Stop Config */}

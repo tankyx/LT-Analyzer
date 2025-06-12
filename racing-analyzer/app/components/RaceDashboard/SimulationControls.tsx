@@ -2,11 +2,12 @@
 import React, { useState, useEffect } from 'react';
 
 interface SimulationControlsProps {
-  onStart: (isSimulation?: boolean) => void;
+  onStart: (isSimulation?: boolean, timingUrl?: string) => void;
   onStop: () => void;
   isSimulating?: boolean;
   isDarkMode?: boolean;
   isSimulationMode?: boolean;
+  currentTimingUrl?: string;
 }
 
 const SimulationControls: React.FC<SimulationControlsProps> = ({ 
@@ -14,13 +15,22 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   onStop, 
   isSimulating = false,
   isDarkMode = false,
-  isSimulationMode = false
+  isSimulationMode = false,
+  currentTimingUrl = ''
 }) => {
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [timer, setTimer] = useState<number>(0);
   const [showModeSelector, setShowModeSelector] = useState(false);
+  const [timingUrl, setTimingUrl] = useState(currentTimingUrl || 'https://www.apex-timing.com/live-timing/karting-mariembourg/index.html');
+
+  // Update timing URL when currentTimingUrl changes
+  useEffect(() => {
+    if (currentTimingUrl && currentTimingUrl !== timingUrl) {
+      setTimingUrl(currentTimingUrl);
+    }
+  }, [currentTimingUrl]);
 
   // Start a timer when simulation is running
   useEffect(() => {
@@ -51,10 +61,18 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   const handleStart = async (mode?: 'real' | 'simulation') => {
     setIsStarting(true);
     const isSimulation = mode === 'simulation';
+    
+    // Validate URL for real mode
+    if (!isSimulation && !timingUrl.trim()) {
+      setStatus('Please enter a timing URL');
+      setIsStarting(false);
+      return;
+    }
+    
     setStatus(isSimulation ? 'Starting simulation...' : 'Starting real data collection...');
     
     try {
-      await onStart(isSimulation);
+      await onStart(isSimulation, isSimulation ? undefined : timingUrl);
       setStatus(isSimulation ? 'Simulation running' : 'Real data collection running');
       setShowModeSelector(false);
     } catch (error) {
@@ -103,6 +121,27 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
             {!isSimulating && showModeSelector && (
               <div className={`p-4 rounded-lg border ${isDarkMode ? 'border-gray-600 bg-gray-800' : 'border-gray-300 bg-white'}`}>
                 <p className={`text-sm mb-3 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Choose data source:</p>
+                
+                {/* URL Input for Real Data Mode */}
+                <div className="mb-3">
+                  <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Apex Timing URL:
+                  </label>
+                  <input
+                    type="text"
+                    value={timingUrl}
+                    onChange={(e) => setTimingUrl(e.target.value)}
+                    placeholder="https://www.apex-timing.com/live-timing/..."
+                    className={`w-full px-3 py-2 rounded border text-sm
+                      ${isDarkMode 
+                        ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
+                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                      }
+                      focus:outline-none focus:ring-2 focus:ring-blue-500
+                    `}
+                  />
+                </div>
+                
                 <div className="flex space-x-3">
                   <button
                     onClick={() => handleStart('real')}
@@ -225,9 +264,16 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
           
           <div className="mt-2 text-xs text-gray-500">
             {isSimulating ? (
-              <div className="flex items-center gap-1">
-                <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                {isSimulationMode ? 'The simulation is running at 4x real-time speed' : 'Collecting real-time data from Apex Timing'}
+              <div className="space-y-1">
+                <div className="flex items-center gap-1">
+                  <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                  {isSimulationMode ? 'The simulation is running at 4x real-time speed' : 'Collecting real-time data from Apex Timing'}
+                </div>
+                {!isSimulationMode && currentTimingUrl && (
+                  <div className="text-xs text-gray-400 truncate">
+                    URL: {currentTimingUrl}
+                  </div>
+                )}
               </div>
             ) : (
               "Press Start to begin data collection"

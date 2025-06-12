@@ -39,15 +39,20 @@ export const ApiService = {
   },
 
   // Start simulation
-  startSimulation: async (isSimulationMode: boolean = false) => {
+  startSimulation: async (isSimulationMode: boolean = false, timingUrl?: string) => {
     try {
-      console.log(`Calling ${API_BASE_URL}/api/start-simulation with mode:`, isSimulationMode);
+      console.log(`Calling ${API_BASE_URL}/api/start-simulation with mode:`, isSimulationMode, 'and URL:', timingUrl);
+      const payload: any = { simulation: isSimulationMode };
+      if (timingUrl) {
+        payload.timingUrl = timingUrl;
+      }
+      
       const response = await fetch(`${API_BASE_URL}/api/start-simulation`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ simulation: isSimulationMode }),
+        body: JSON.stringify(payload),
       });
       
       if (!response.ok) {
