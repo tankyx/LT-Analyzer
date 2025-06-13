@@ -26,13 +26,12 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   const [timingUrl, setTimingUrl] = useState(currentTimingUrl || 'https://www.apex-timing.com/live-timing/karting-mariembourg/index.html');
   const [urlChanged, setUrlChanged] = useState(false);
 
-  // Update timing URL when currentTimingUrl changes
+  // Update timing URL when currentTimingUrl changes (only on mount)
   useEffect(() => {
-    if (currentTimingUrl && currentTimingUrl !== timingUrl) {
+    if (currentTimingUrl) {
       setTimingUrl(currentTimingUrl);
-      setUrlChanged(false);
     }
-  }, [currentTimingUrl, timingUrl]);
+  }, [currentTimingUrl]);
 
   // Start a timer when simulation is running
   useEffect(() => {
