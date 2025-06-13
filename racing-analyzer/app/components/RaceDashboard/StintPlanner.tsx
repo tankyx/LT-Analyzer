@@ -85,16 +85,12 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     
     // Goal: Maximize the number of special stints (jokers + longs)
     // Constraint: Total time must equal available race time
-    // Strategy: Try to balance time saved by jokers with time used by longs
     
     let maxJokers = 0;
     let maxLongs = 0;
-    
-    const timeSavedPerJoker = baseStintTime - minStintTime;
-    const timeUsedPerLong = maxStintTime - baseStintTime;
+    let bestTimeDiff = Infinity;
     
     // Try different combinations, maximizing total special stints
-    // Don't limit by number of drivers - that's a separate concern
     for (let jokers = 0; jokers <= numStints; jokers++) {
       for (let longs = 0; longs <= (numStints - jokers); longs++) {
         const normalStints = numStints - jokers - longs;
@@ -104,40 +100,40 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                          (longs * maxStintTime) + 
                          (normalStints * baseStintTime);
         
-        // Check if this combination fits the available time
-        if (Math.abs(totalTime - availableRaceTime) <= 0.5) {
-          // If this gives us more total special stints, use it
-          if ((jokers + longs) > (maxJokers + maxLongs)) {
+        const timeDiff = Math.abs(totalTime - availableRaceTime);
+        
+        // Accept combinations within 2 minutes of target
+        if (timeDiff <= 2) {
+          // Prefer combinations with more special stints
+          if ((jokers + longs) > (maxJokers + maxLongs) || 
+              ((jokers + longs) === (maxJokers + maxLongs) && timeDiff < bestTimeDiff)) {
             maxJokers = jokers;
             maxLongs = longs;
+            bestTimeDiff = timeDiff;
           }
         }
       }
     }
     
-    // If we didn't find an exact match, try to get close
+    // If we still didn't find any combination, relax the tolerance
     if (maxJokers === 0 && maxLongs === 0) {
-      // For balanced time: jokers * timeSaved ≈ longs * timeUsed
-      // This gives us the ratio: jokers/longs ≈ timeUsed/timeSaved
-      
-      const idealRatio = timeUsedPerLong / timeSavedPerJoker;
-      
-      // Try combinations based on this ratio
-      for (let total = Math.min(numStints, 6); total >= 2; total--) {
-        // Distribute between jokers and longs based on ratio
-        const jokers = Math.round(total / (1 + idealRatio));
-        const longs = total - jokers;
-        
-        if (jokers > 0 && longs > 0 && jokers + longs <= numStints) {
+      // Try with more relaxed tolerance (5 minutes)
+      for (let jokers = 0; jokers <= numStints; jokers++) {
+        for (let longs = 0; longs <= (numStints - jokers); longs++) {
           const normalStints = numStints - jokers - longs;
+          
           const totalTime = (jokers * minStintTime) + 
                            (longs * maxStintTime) + 
                            (normalStints * baseStintTime);
           
-          if (Math.abs(totalTime - availableRaceTime) <= 2) {
-            maxJokers = jokers;
-            maxLongs = longs;
-            break;
+          const timeDiff = Math.abs(totalTime - availableRaceTime);
+          
+          if (timeDiff <= 5) {
+            if ((jokers + longs) > (maxJokers + maxLongs)) {
+              maxJokers = jokers;
+              maxLongs = longs;
+              bestTimeDiff = timeDiff;
+            }
           }
         }
       }
