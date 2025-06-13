@@ -7,7 +7,6 @@ import StatusImageIndicator from './StatusImageIndicator';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
 import StintPlanner from './StintPlanner';
-import RaceStintTracker from './RaceStintTracker';
 
 // Types
 interface Team {
@@ -955,15 +954,6 @@ const RaceDashboard = () => {
                   <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               )
-            },
-            {
-              id: 'tracker',
-              label: 'Stint Tracker',
-              icon: (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 6v6l4 2m-4-8a8 8 0 100 16 8 8 0 000-16z" />
-                </svg>
-              )
             }
           ]}
           defaultTab="standings"
@@ -972,8 +962,7 @@ const RaceDashboard = () => {
           {StandingsTab}
           {MonitoredTeamsTab}
           {ChartTab}
-          <StintPlanner isDarkMode={isDarkMode} />
-          <RaceStintTracker 
+          <StintPlanner 
             isDarkMode={isDarkMode} 
             myTeam={myTeam}
             teams={teams}

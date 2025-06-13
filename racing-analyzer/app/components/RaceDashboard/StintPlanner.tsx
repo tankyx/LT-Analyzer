@@ -1,7 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 
 interface StintPlannerProps {
   isDarkMode?: boolean;
+  myTeam?: string;
+  teams?: Array<{
+    Team: string;
+    Status?: string;
+  }>;
+  isSimulating?: boolean;
+  sessionInfo?: {
+    light?: string;
+  };
 }
 
 interface StintConfig {
@@ -25,13 +34,27 @@ interface StintAssignment {
 
 interface DriverStats {
   driver: number;
+  name: string;
   totalTime: number;
   numStints: number;
   jokerStints: number;
   longStints: number;
 }
 
-const StintPlanner: React.FC<StintPlannerProps> = ({ isDarkMode = false }) => {
+interface ActiveStint {
+  driverIndex: number;
+  startTime: Date;
+  elapsedTime: number;
+  isPitStop: boolean;
+}
+
+const StintPlanner: React.FC<StintPlannerProps> = ({ 
+  isDarkMode = false, 
+  myTeam,
+  teams = [],
+  isSimulating = false,
+  sessionInfo
+}) => {
   const [config, setConfig] = useState<StintConfig>({
     numStints: 8,
     minStintTime: 25,
@@ -42,117 +65,215 @@ const StintPlanner: React.FC<StintPlannerProps> = ({ isDarkMode = false }) => {
   });
 
   const [stintAssignments, setStintAssignments] = useState<StintAssignment[]>([]);
+  const [driverNames, setDriverNames] = useState<string[]>(['Driver 1', 'Driver 2', 'Driver 3', 'Driver 4']);
+  const [currentDriverIndex, setCurrentDriverIndex] = useState<number>(0);
+  const [activeStint, setActiveStint] = useState<ActiveStint | null>(null);
+  const [stintHistory, setStintHistory] = useState<{driver: number, duration: number, timestamp: Date}[]>([]);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastPitStatusRef = useRef<string>('');
 
-  const calculateStints = useMemo(() => {
-    const assignments: StintAssignment[] = [];
+  // Calculate available jokers and long stints
+  const availableSpecialStints = useMemo(() => {
     const { numStints, minStintTime, maxStintTime, pitDuration, numDrivers, totalRaceTime } = config;
-
+    
     // Calculate available race time (excluding pit stops)
     const totalPitTime = pitDuration * (numStints - 1);
     const availableRaceTime = totalRaceTime - totalPitTime;
-
+    
     // Calculate base stint time
-    const baseStintTime = Math.floor(availableRaceTime / numStints);
+    const baseStintTime = availableRaceTime / numStints;
     
-    // Define joker stint (minimum time)
-    const jokerTime = minStintTime;
+    // Define joker and long stint ranges
+    const jokerMinTime = minStintTime;
+    const jokerMaxTime = minStintTime + 3;
+    const longMinTime = maxStintTime - 3;
+    const longMaxTime = maxStintTime;
     
-    // Define long stint (maximum time)
-    const longTime = Math.min(maxStintTime, baseStintTime + 10);
-
-    // Calculate how many joker and long stints we can have
-    const maxJokerStints = Math.floor(numDrivers / 2); // Each driver gets at most 1 joker
-    const maxLongStints = Math.floor(numDrivers / 2); // Each driver gets at most 1 long
-
-    // Initialize driver tracking
-    const driverStints: { [key: number]: number } = {};
-    const driverJokers: { [key: number]: number } = {};
-    const driverLongs: { [key: number]: number } = {};
-    const driverTotalTime: { [key: number]: number } = {};
-
-    for (let i = 1; i <= numDrivers; i++) {
-      driverStints[i] = 0;
-      driverJokers[i] = 0;
-      driverLongs[i] = 0;
-      driverTotalTime[i] = 0;
-    }
-
-    let currentTime = 0;
-    let remainingRaceTime = availableRaceTime;
-    let jokerSintsUsed = 0;
-    let longStintsUsed = 0;
-
-    // Assign stints
-    for (let stint = 1; stint <= numStints; stint++) {
-      // Find driver with least total time
-      let selectedDriver = 1;
-      let minTime = driverTotalTime[1];
+    // For jokers: we save time by using joker instead of base stint
+    // Average joker time vs base stint time
+    const avgJokerTime = (jokerMinTime + jokerMaxTime) / 2;
+    const timeSavedPerJoker = baseStintTime - avgJokerTime;
+    
+    // For longs: we use extra time by using long instead of base stint  
+    // Average long time vs base stint time
+    const avgLongTime = (longMinTime + longMaxTime) / 2;
+    const extraTimePerLong = avgLongTime - baseStintTime;
+    
+    // Calculate maximum possible jokers and longs that balance out
+    let maxJokers = 0;
+    let maxLongs = 0;
+    
+    // If base stint is longer than joker max, we can use jokers
+    if (baseStintTime > jokerMaxTime) {
+      // Each joker saves time that can be used for longs
+      const maxJokersFromTime = Math.floor((baseStintTime - jokerMaxTime) * numStints / timeSavedPerJoker);
+      maxJokers = Math.min(maxJokersFromTime, numDrivers, numStints);
       
-      for (let d = 2; d <= numDrivers; d++) {
-        if (driverTotalTime[d] < minTime) {
-          minTime = driverTotalTime[d];
-          selectedDriver = d;
+      // Calculate how many longs we can fit with the saved time
+      const totalTimeSaved = maxJokers * timeSavedPerJoker;
+      maxLongs = Math.min(
+        Math.floor(totalTimeSaved / extraTimePerLong),
+        numDrivers,
+        numStints - maxJokers
+      );
+    }
+    // If base stint is shorter than long min, we need to check if we can do any longs
+    else if (baseStintTime < longMinTime) {
+      // We might not be able to do any special stints
+      maxJokers = 0;
+      maxLongs = 0;
+    }
+    // Base stint is in the middle range
+    else {
+      // Try different combinations to maximize special stints
+      for (let j = 0; j <= Math.min(numDrivers, numStints); j++) {
+        const timeSaved = j * timeSavedPerJoker;
+        const possibleLongs = Math.floor(timeSaved / extraTimePerLong);
+        const l = Math.min(possibleLongs, numDrivers, numStints - j);
+        
+        // Check if this combination is valid
+        const totalSpecialStints = j + l;
+        const normalStints = numStints - totalSpecialStints;
+        const totalTime = j * avgJokerTime + l * avgLongTime + normalStints * baseStintTime;
+        
+        if (Math.abs(totalTime - availableRaceTime) < 1 && totalSpecialStints > (maxJokers + maxLongs)) {
+          maxJokers = j;
+          maxLongs = l;
         }
       }
+    }
+    
+    return {
+      maxJokers: Math.max(0, maxJokers),
+      maxLongs: Math.max(0, maxLongs),
+      baseStintTime: Math.round(baseStintTime),
+      jokerRange: `${jokerMinTime}-${jokerMaxTime}`,
+      longRange: `${longMinTime}-${longMaxTime}`
+    };
+  }, [config]);
 
-      // Determine stint type and duration
-      let duration = baseStintTime;
-      let isJoker = false;
-      let isLong = false;
-
-      // Assign joker stints early in the race
-      if (stint <= maxJokerStints && jokerSintsUsed < maxJokerStints && driverJokers[selectedDriver] === 0) {
-        duration = jokerTime;
-        isJoker = true;
-        jokerSintsUsed++;
-        driverJokers[selectedDriver]++;
-      }
-      // Assign long stints in the middle
-      else if (stint > maxJokerStints && stint <= numStints - maxJokerStints && 
-               longStintsUsed < maxLongStints && driverLongs[selectedDriver] === 0) {
-        duration = longTime;
-        isLong = true;
-        longStintsUsed++;
-        driverLongs[selectedDriver]++;
-      }
-      // Last stint gets remaining time
-      else if (stint === numStints) {
-        duration = remainingRaceTime;
-      }
-
-      // Ensure duration is within bounds
-      duration = Math.max(minStintTime, Math.min(maxStintTime, duration));
+  // Initialize stints with 0 duration
+  const initializeStints = useMemo(() => {
+    const assignments: StintAssignment[] = [];
+    let currentTime = 0;
+    
+    for (let stint = 1; stint <= config.numStints; stint++) {
+      // Assign driver in rotation
+      const driverIndex = (stint - 1) % config.numDrivers;
       
-      // Update remaining time
-      remainingRaceTime -= duration;
-
       assignments.push({
-        driver: selectedDriver,
+        driver: driverIndex + 1,
         stint,
-        duration,
-        isJoker,
-        isLong,
+        duration: 0, // Initialize with 0
+        isJoker: false,
+        isLong: false,
         startTime: currentTime,
-        endTime: currentTime + duration,
+        endTime: currentTime,
       });
-
-      // Update tracking
-      driverStints[selectedDriver]++;
-      driverTotalTime[selectedDriver] += duration;
       
       // Add pit stop time (except for last stint)
-      currentTime += duration;
-      if (stint < numStints) {
-        currentTime += pitDuration;
+      if (stint < config.numStints) {
+        currentTime += config.pitDuration;
       }
     }
-
+    
     return assignments;
   }, [config]);
 
   useEffect(() => {
-    setStintAssignments(calculateStints);
-  }, [calculateStints]);
+    setStintAssignments(initializeStints);
+  }, [initializeStints]);
+
+  // Update driver names array when number of drivers changes
+  useEffect(() => {
+    const newNames = [...driverNames];
+    while (newNames.length < config.numDrivers) {
+      newNames.push(`Driver ${newNames.length + 1}`);
+    }
+    while (newNames.length > config.numDrivers) {
+      newNames.pop();
+    }
+    setDriverNames(newNames);
+  }, [config.numDrivers, driverNames]);
+
+  // Auto-detect pit stops and manage stint timer
+  useEffect(() => {
+    if (!myTeam || !teams || !isSimulating) {
+      return;
+    }
+
+    const myTeamData = teams.find(t => t.Team === myTeam);
+    if (!myTeamData) return;
+
+    const currentStatus = myTeamData.Status || '';
+    const previousStatus = lastPitStatusRef.current;
+
+    // Detect pit in
+    if (currentStatus === 'Pit In' && previousStatus !== 'Pit In' && activeStint && !activeStint.isPitStop) {
+      // End current stint
+      const duration = Math.round((Date.now() - activeStint.startTime.getTime()) / 60000); // Convert to minutes
+      setStintHistory(prev => [...prev, {
+        driver: activeStint.driverIndex + 1,
+        duration,
+        timestamp: new Date()
+      }]);
+      
+      // Start pit stop timer
+      setActiveStint({
+        ...activeStint,
+        isPitStop: true,
+        startTime: new Date()
+      });
+    }
+    // Detect pit out
+    else if (currentStatus === 'Pit Out' && previousStatus === 'Pit In' && activeStint?.isPitStop) {
+      // Start new stint with current driver
+      setActiveStint({
+        driverIndex: currentDriverIndex,
+        startTime: new Date(),
+        elapsedTime: 0,
+        isPitStop: false
+      });
+    }
+    // Detect race start (green flag)
+    else if (!activeStint && sessionInfo?.light === 'green' && currentStatus !== 'Pit In') {
+      // Start first stint
+      setActiveStint({
+        driverIndex: currentDriverIndex,
+        startTime: new Date(),
+        elapsedTime: 0,
+        isPitStop: false
+      });
+    }
+
+    lastPitStatusRef.current = currentStatus;
+  }, [myTeam, teams, isSimulating, activeStint, currentDriverIndex, sessionInfo]);
+
+  // Update stint timer
+  useEffect(() => {
+    if (activeStint && !activeStint.isPitStop) {
+      intervalRef.current = setInterval(() => {
+        setActiveStint(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            elapsedTime: Math.round((Date.now() - prev.startTime.getTime()) / 1000) // Seconds
+          };
+        });
+      }, 1000);
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [activeStint]);
 
   const driverStats = useMemo(() => {
     const stats: DriverStats[] = [];
@@ -161,6 +282,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({ isDarkMode = false }) => {
       const driverStints = stintAssignments.filter(s => s.driver === driver);
       stats.push({
         driver,
+        name: driverNames[driver - 1],
         totalTime: driverStints.reduce((sum, s) => sum + s.duration, 0),
         numStints: driverStints.length,
         jokerStints: driverStints.filter(s => s.isJoker).length,
@@ -169,7 +291,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({ isDarkMode = false }) => {
     }
     
     return stats;
-  }, [stintAssignments, config.numDrivers]);
+  }, [stintAssignments, config.numDrivers, driverNames]);
 
   const formatTime = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
@@ -177,13 +299,88 @@ const StintPlanner: React.FC<StintPlannerProps> = ({ isDarkMode = false }) => {
     return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
   };
 
+  const formatSeconds = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const handleConfigChange = (field: keyof StintConfig, value: number) => {
     setConfig(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleDriverNameChange = (index: number, name: string) => {
+    const newNames = [...driverNames];
+    newNames[index] = name;
+    setDriverNames(newNames);
+  };
+
+  const handleStintDurationChange = (stintIndex: number, duration: number) => {
+    const newAssignments = [...stintAssignments];
+    const assignment = newAssignments[stintIndex];
+    assignment.duration = duration;
+    
+    // Determine if it's a joker or long stint
+    assignment.isJoker = duration > 0 && duration <= config.minStintTime;
+    assignment.isLong = duration >= config.maxStintTime;
+    
+    // Recalculate times
+    let currentTime = 0;
+    for (let i = 0; i < newAssignments.length; i++) {
+      newAssignments[i].startTime = currentTime;
+      currentTime += newAssignments[i].duration;
+      newAssignments[i].endTime = currentTime;
+      
+      if (i < newAssignments.length - 1) {
+        currentTime += config.pitDuration;
+      }
+    }
+    
+    setStintAssignments(newAssignments);
+  };
+
+  const handleStintDriverChange = (stintIndex: number, driverNum: number) => {
+    const newAssignments = [...stintAssignments];
+    newAssignments[stintIndex].driver = driverNum;
+    setStintAssignments(newAssignments);
   };
 
   return (
     <div className={`p-6 ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
       <h2 className="text-2xl font-bold mb-6">Stint Planner</h2>
+      
+      {/* Active Stint Timer */}
+      {activeStint && (
+        <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-green-900' : 'bg-green-100'}`}>
+          <h3 className="text-lg font-semibold mb-2">Active Stint</h3>
+          <div className="flex items-center gap-4">
+            <span className="text-xl font-bold">
+              {driverNames[activeStint.driverIndex]} - {formatSeconds(activeStint.elapsedTime)}
+            </span>
+            {activeStint.isPitStop && <span className="text-sm">(In Pit)</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Current Driver Selection */}
+      <div className="mb-6">
+        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          Current Driver
+        </label>
+        <select
+          value={currentDriverIndex}
+          onChange={(e) => setCurrentDriverIndex(parseInt(e.target.value))}
+          className={`w-full md:w-64 p-2 rounded border ${
+            isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+          }`}
+        >
+          {driverNames.map((name, index) => (
+            <option key={index} value={index}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </div>
       
       {/* Configuration Form */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
@@ -241,10 +438,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({ isDarkMode = false }) => {
           </label>
           <input
             type="number"
-            min="1"
+            min="0.1"
             max="30"
+            step="0.1"
             value={config.pitDuration}
-            onChange={(e) => handleConfigChange('pitDuration', parseInt(e.target.value) || 1)}
+            onChange={(e) => handleConfigChange('pitDuration', parseFloat(e.target.value) || 1)}
             className={`w-full p-2 rounded border ${
               isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
             }`}
@@ -284,13 +482,54 @@ const StintPlanner: React.FC<StintPlannerProps> = ({ isDarkMode = false }) => {
         </div>
       </div>
 
+      {/* Available Special Stints */}
+      <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+        <h3 className="text-lg font-semibold mb-3">Available Special Stints</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <span className="font-medium">Max Joker Stints: </span>
+            <span className="text-xl font-bold">{availableSpecialStints.maxJokers}</span>
+          </div>
+          <div>
+            <span className="font-medium">Max Long Stints: </span>
+            <span className="text-xl font-bold">{availableSpecialStints.maxLongs}</span>
+          </div>
+          <div>
+            <span className="font-medium">Base Stint Time: </span>
+            <span className="text-xl font-bold">{availableSpecialStints.baseStintTime}m</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Driver Names */}
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold mb-3">Driver Names</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {driverNames.map((name, index) => (
+            <div key={index}>
+              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                Driver {index + 1}
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => handleDriverNameChange(index, e.target.value)}
+                className={`w-full p-2 rounded border ${
+                  isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+                }`}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Driver Statistics */}
       <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
         <h3 className="text-lg font-semibold mb-3">Driver Statistics</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {driverStats.map(stat => (
             <div key={stat.driver} className={`p-3 rounded ${isDarkMode ? 'bg-gray-600' : 'bg-white'}`}>
-              <h4 className="font-medium mb-2">Driver {stat.driver}</h4>
+              <h4 className="font-medium mb-2">{stat.name}</h4>
               <div className="text-sm space-y-1">
                 <div>Total Time: {formatTime(stat.totalTime)}</div>
                 <div>Stints: {stat.numStints}</div>
@@ -310,73 +549,101 @@ const StintPlanner: React.FC<StintPlannerProps> = ({ isDarkMode = false }) => {
               <th className={`border p-2 text-left ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
                 Stint
               </th>
-              {Array.from({ length: config.numDrivers }, (_, i) => (
-                <th key={i + 1} className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
-                  Driver {i + 1}
-                </th>
-              ))}
+              <th className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                Driver
+              </th>
+              <th className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                Duration (min)
+              </th>
+              <th className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                Type
+              </th>
+              <th className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                Time Range
+              </th>
             </tr>
           </thead>
           <tbody>
-            {Array.from({ length: config.numStints }, (_, stintIndex) => {
-              const stint = stintIndex + 1;
-              return (
-                <tr key={stint} className={isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
-                  <td className={`border p-2 font-medium ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
-                    {stint}
-                  </td>
-                  {Array.from({ length: config.numDrivers }, (_, driverIndex) => {
-                    const driver = driverIndex + 1;
-                    const assignment = stintAssignments.find(
-                      a => a.stint === stint && a.driver === driver
-                    );
-                    
-                    return (
-                      <td
-                        key={driver}
-                        className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'} ${
-                          assignment
-                            ? assignment.isJoker
-                              ? isDarkMode ? 'bg-yellow-900' : 'bg-yellow-100'
-                              : assignment.isLong
-                              ? isDarkMode ? 'bg-blue-900' : 'bg-blue-100'
-                              : ''
-                            : ''
-                        }`}
-                      >
-                        {assignment && (
-                          <div>
-                            <div className="font-medium">{assignment.duration}m</div>
-                            <div className="text-xs opacity-70">
-                              {formatTime(assignment.startTime)} - {formatTime(assignment.endTime)}
-                            </div>
-                            {assignment.isJoker && (
-                              <div className="text-xs font-semibold">JOKER</div>
-                            )}
-                            {assignment.isLong && (
-                              <div className="text-xs font-semibold">LONG</div>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
+            {stintAssignments.map((assignment, index) => (
+              <tr key={index} className={isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
+                <td className={`border p-2 font-medium ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                  {assignment.stint}
+                </td>
+                <td className={`border p-2 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                  <select
+                    value={assignment.driver}
+                    onChange={(e) => handleStintDriverChange(index, parseInt(e.target.value))}
+                    className={`w-full p-1 rounded border ${
+                      isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+                    }`}
+                  >
+                    {driverNames.map((name, driverIndex) => (
+                      <option key={driverIndex} value={driverIndex + 1}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className={`border p-2 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    value={assignment.duration}
+                    onChange={(e) => handleStintDurationChange(index, parseInt(e.target.value) || 0)}
+                    className={`w-full p-1 rounded border text-center ${
+                      isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+                    } ${
+                      assignment.isJoker
+                        ? isDarkMode ? 'bg-yellow-900' : 'bg-yellow-100'
+                        : assignment.isLong
+                        ? isDarkMode ? 'bg-blue-900' : 'bg-blue-100'
+                        : ''
+                    }`}
+                  />
+                </td>
+                <td className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                  {assignment.isJoker && <span className="font-semibold text-yellow-600">JOKER</span>}
+                  {assignment.isLong && <span className="font-semibold text-blue-600">LONG</span>}
+                  {!assignment.isJoker && !assignment.isLong && assignment.duration > 0 && <span>Normal</span>}
+                </td>
+                <td className={`border p-2 text-center text-sm ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                  {assignment.duration > 0 && (
+                    <span>{formatTime(assignment.startTime)} - {formatTime(assignment.endTime)}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+
+      {/* Stint History */}
+      {stintHistory.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-lg font-semibold mb-3">Completed Stints</h3>
+          <div className="space-y-2">
+            {stintHistory.map((stint, index) => (
+              <div key={index} className={`p-2 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                {driverNames[stint.driver - 1]} - {stint.duration} minutes
+                <span className="text-sm ml-2 opacity-70">
+                  ({stint.timestamp.toLocaleTimeString()})
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Legend */}
       <div className="mt-4 flex gap-4 text-sm">
         <div className="flex items-center gap-2">
           <div className={`w-4 h-4 ${isDarkMode ? 'bg-yellow-900' : 'bg-yellow-100'} border ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
-          <span>Joker Stint (Minimum)</span>
+          <span>Joker Stint (≤ Min Time)</span>
         </div>
         <div className="flex items-center gap-2">
           <div className={`w-4 h-4 ${isDarkMode ? 'bg-blue-900' : 'bg-blue-100'} border ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
-          <span>Long Stint (Maximum)</span>
+          <span>Long Stint (≥ Max Time)</span>
         </div>
       </div>
     </div>
