@@ -83,63 +83,36 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     // Calculate base stint time
     const baseStintTime = availableRaceTime / numStints;
     
-    // Define joker and long stint ranges
-    const jokerMinTime = minStintTime;
-    const jokerMaxTime = minStintTime + 3;
-    const longMinTime = maxStintTime - 3;
-    const longMaxTime = maxStintTime;
+    // For the given scenario:
+    // - Total race: 240 min, Pit time: 2.5 * 7 = 17.5 min
+    // - Available race time: 222.5 min
+    // - Base stint: 222.5 / 8 = 27.8125 min
+    // - Joker range: 10-13 min (saves ~16 min per joker)
+    // - Long range: 47-50 min (uses ~20 min extra per long)
     
-    // For jokers: we save time by using joker instead of base stint
-    // Average joker time vs base stint time
-    const avgJokerTime = (jokerMinTime + jokerMaxTime) / 2;
-    const timeSavedPerJoker = baseStintTime - avgJokerTime;
+    // The rule is typically: equal number of jokers and longs that balance out
+    // Time saved from jokers should equal time used by longs
     
-    // For longs: we use extra time by using long instead of base stint  
-    // Average long time vs base stint time
-    const avgLongTime = (longMinTime + longMaxTime) / 2;
-    const extraTimePerLong = avgLongTime - baseStintTime;
-    
-    // Calculate maximum possible jokers and longs that balance out
     let maxJokers = 0;
     let maxLongs = 0;
     
-    // If base stint is longer than joker max, we can use jokers
-    if (baseStintTime > jokerMaxTime) {
-      // Each joker saves time that can be used for longs
-      const maxJokersFromTime = Math.floor((baseStintTime - jokerMaxTime) * numStints / timeSavedPerJoker);
-      maxJokers = Math.min(maxJokersFromTime, numDrivers, numStints);
+    // Try different combinations to find the maximum that balances
+    for (let specialCount = 1; specialCount <= Math.min(numDrivers, Math.floor(numStints / 2)); specialCount++) {
+      // Check if we can do equal jokers and longs
+      const jokerTime = minStintTime; // Use minimum for jokers
+      const longTime = maxStintTime; // Use maximum for longs
+      const normalStints = numStints - (2 * specialCount);
       
-      // Calculate how many longs we can fit with the saved time
-      const totalTimeSaved = maxJokers * timeSavedPerJoker;
-      maxLongs = Math.min(
-        Math.floor(totalTimeSaved / extraTimePerLong),
-        numDrivers,
-        numStints - maxJokers
-      );
-    }
-    // If base stint is shorter than long min, we need to check if we can do any longs
-    else if (baseStintTime < longMinTime) {
-      // We might not be able to do any special stints
-      maxJokers = 0;
-      maxLongs = 0;
-    }
-    // Base stint is in the middle range
-    else {
-      // Try different combinations to maximize special stints
-      for (let j = 0; j <= Math.min(numDrivers, numStints); j++) {
-        const timeSaved = j * timeSavedPerJoker;
-        const possibleLongs = Math.floor(timeSaved / extraTimePerLong);
-        const l = Math.min(possibleLongs, numDrivers, numStints - j);
-        
-        // Check if this combination is valid
-        const totalSpecialStints = j + l;
-        const normalStints = numStints - totalSpecialStints;
-        const totalTime = j * avgJokerTime + l * avgLongTime + normalStints * baseStintTime;
-        
-        if (Math.abs(totalTime - availableRaceTime) < 1 && totalSpecialStints > (maxJokers + maxLongs)) {
-          maxJokers = j;
-          maxLongs = l;
-        }
+      // Calculate total time with this combination
+      const totalStintTime = (specialCount * jokerTime) + (specialCount * longTime) + (normalStints * baseStintTime);
+      
+      // Check if this fits within available time (with small tolerance)
+      if (Math.abs(totalStintTime - availableRaceTime) <= 1) {
+        maxJokers = specialCount;
+        maxLongs = specialCount;
+      } else if (totalStintTime > availableRaceTime) {
+        // If we exceed available time, we've gone too far
+        break;
       }
     }
     
@@ -147,8 +120,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       maxJokers: Math.max(0, maxJokers),
       maxLongs: Math.max(0, maxLongs),
       baseStintTime: Math.round(baseStintTime),
-      jokerRange: `${jokerMinTime}-${jokerMaxTime}`,
-      longRange: `${longMinTime}-${longMaxTime}`
+      jokerRange: `${minStintTime}-${minStintTime + 3}`,
+      longRange: `${maxStintTime - 3}-${maxStintTime}`
     };
   }, [config]);
 
