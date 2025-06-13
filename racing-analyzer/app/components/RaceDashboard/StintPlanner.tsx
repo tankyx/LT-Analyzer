@@ -74,7 +74,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
   // Calculate available jokers and long stints
   const availableSpecialStints = useMemo(() => {
-    const { numStints, minStintTime, maxStintTime, pitDuration, numDrivers, totalRaceTime } = config;
+    const { numStints, minStintTime, maxStintTime, pitDuration, totalRaceTime } = config;
     
     // Calculate available race time (excluding pit stops)
     const totalPitTime = pitDuration * (numStints - 1);
@@ -83,51 +83,63 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     // Calculate base stint time
     const baseStintTime = availableRaceTime / numStints;
     
-    // Try different combinations of jokers and longs
+    // Goal: Maximize the number of special stints (jokers + longs)
+    // Constraint: Total time must equal available race time
+    // Strategy: Try to balance time saved by jokers with time used by longs
+    
     let maxJokers = 0;
     let maxLongs = 0;
-    
-    // The typical rule: time saved by jokers = time used by longs
-    // Joker saves: baseStint - minStint
-    // Long uses: maxStint - baseStint
     
     const timeSavedPerJoker = baseStintTime - minStintTime;
     const timeUsedPerLong = maxStintTime - baseStintTime;
     
-    // Try equal numbers of jokers and longs
-    for (let count = 1; count <= Math.min(numDrivers, Math.floor(numStints / 2)); count++) {
-      const totalTimeSaved = count * timeSavedPerJoker;
-      const totalTimeUsed = count * timeUsedPerLong;
-      
-      // Check if they approximately balance
-      if (Math.abs(totalTimeSaved - totalTimeUsed) <= 5) {
-        // Verify this combination fits in total race time
-        const specialStints = count * minStintTime + count * maxStintTime;
-        const normalStints = (numStints - 2 * count) * baseStintTime;
-        const totalTime = specialStints + normalStints;
+    // Try different combinations, maximizing total special stints
+    // Don't limit by number of drivers - that's a separate concern
+    for (let jokers = 0; jokers <= numStints; jokers++) {
+      for (let longs = 0; longs <= (numStints - jokers); longs++) {
+        const normalStints = numStints - jokers - longs;
         
-        if (Math.abs(totalTime - availableRaceTime) <= 2) {
-          maxJokers = count;
-          maxLongs = count;
+        // Calculate total race time with this combination
+        const totalTime = (jokers * minStintTime) + 
+                         (longs * maxStintTime) + 
+                         (normalStints * baseStintTime);
+        
+        // Check if this combination fits the available time
+        if (Math.abs(totalTime - availableRaceTime) <= 0.5) {
+          // If this gives us more total special stints, use it
+          if ((jokers + longs) > (maxJokers + maxLongs)) {
+            maxJokers = jokers;
+            maxLongs = longs;
+          }
         }
       }
     }
     
-    // If no equal combination works, try to find any valid combination
+    // If we didn't find an exact match, try to get close
     if (maxJokers === 0 && maxLongs === 0) {
-      // Check if we can at least do some jokers and longs
-      const canDoJoker = baseStintTime > minStintTime;
-      const canDoLong = baseStintTime < maxStintTime;
+      // For balanced time: jokers * timeSaved ≈ longs * timeUsed
+      // This gives us the ratio: jokers/longs ≈ timeUsed/timeSaved
       
-      if (canDoJoker && canDoLong) {
-        // For your example: base = 27.8, min = 10, max = 50
-        // Joker saves: 17.8 min, Long uses: 22.2 min
-        // Ratio is roughly 17.8:22.2 or about 4:5
-        // So we might need 4 jokers for every 3 longs (approximately)
+      const idealRatio = timeUsedPerLong / timeSavedPerJoker;
+      
+      // Try combinations based on this ratio
+      for (let total = Math.min(numStints, 6); total >= 2; total--) {
+        // Distribute between jokers and longs based on ratio
+        const jokers = Math.round(total / (1 + idealRatio));
+        const longs = total - jokers;
         
-        // Try a 1:1 ratio first as it's most common
-        maxJokers = Math.min(3, numDrivers, Math.floor(numStints / 2));
-        maxLongs = maxJokers;
+        if (jokers > 0 && longs > 0 && jokers + longs <= numStints) {
+          const normalStints = numStints - jokers - longs;
+          const totalTime = (jokers * minStintTime) + 
+                           (longs * maxStintTime) + 
+                           (normalStints * baseStintTime);
+          
+          if (Math.abs(totalTime - availableRaceTime) <= 2) {
+            maxJokers = jokers;
+            maxLongs = longs;
+            break;
+          }
+        }
       }
     }
     
