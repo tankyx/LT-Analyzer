@@ -186,15 +186,17 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
   // Update driver names array when number of drivers changes
   useEffect(() => {
-    const newNames = [...driverNames];
-    while (newNames.length < config.numDrivers) {
-      newNames.push(`Driver ${newNames.length + 1}`);
-    }
-    while (newNames.length > config.numDrivers) {
-      newNames.pop();
-    }
-    setDriverNames(newNames);
-  }, [config.numDrivers, driverNames]);
+    setDriverNames(prevNames => {
+      const newNames = [...prevNames];
+      while (newNames.length < config.numDrivers) {
+        newNames.push(`Driver ${newNames.length + 1}`);
+      }
+      while (newNames.length > config.numDrivers) {
+        newNames.pop();
+      }
+      return newNames;
+    });
+  }, [config.numDrivers]);
 
   // Auto-detect pit stops and manage stint timer
   useEffect(() => {
