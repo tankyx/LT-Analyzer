@@ -24,11 +24,13 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   const [timer, setTimer] = useState<number>(0);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [timingUrl, setTimingUrl] = useState(currentTimingUrl || 'https://www.apex-timing.com/live-timing/karting-mariembourg/index.html');
+  const [urlChanged, setUrlChanged] = useState(false);
 
   // Update timing URL when currentTimingUrl changes
   useEffect(() => {
     if (currentTimingUrl && currentTimingUrl !== timingUrl) {
       setTimingUrl(currentTimingUrl);
+      setUrlChanged(false);
     }
   }, [currentTimingUrl, timingUrl]);
 
@@ -123,21 +125,48 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
               <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                 Live Timing URL:
               </label>
-              <input
-                type="text"
-                value={timingUrl}
-                onChange={(e) => setTimingUrl(e.target.value)}
-                placeholder="https://www.apex-timing.com/live-timing/..."
-                disabled={isSimulating}
-                className={`w-full px-3 py-2 rounded border text-sm
-                  ${isDarkMode 
-                    ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
-                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
-                  }
-                  ${isSimulating ? 'opacity-60 cursor-not-allowed' : ''}
-                  focus:outline-none focus:ring-2 focus:ring-blue-500
-                `}
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={timingUrl}
+                  onChange={(e) => {
+                    setTimingUrl(e.target.value);
+                    if (isSimulating && !isSimulationMode && e.target.value !== currentTimingUrl) {
+                      setUrlChanged(true);
+                    }
+                  }}
+                  placeholder="https://www.apex-timing.com/live-timing/..."
+                  className={`flex-1 px-3 py-2 rounded border text-sm
+                    ${isDarkMode 
+                      ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
+                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                    }
+                    focus:outline-none focus:ring-2 focus:ring-blue-500
+                  `}
+                />
+                {isSimulating && !isSimulationMode && urlChanged && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await onStop();
+                        await onStart(false, timingUrl);
+                        setUrlChanged(false);
+                        setStatus('URL updated and collection restarted');
+                      } catch (error) {
+                        setStatus(`Error updating URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                      }
+                    }}
+                    className={`px-3 py-2 rounded text-sm font-medium transition-all
+                      ${isDarkMode 
+                        ? 'bg-blue-700 hover:bg-blue-600 text-white' 
+                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                      }
+                    `}
+                  >
+                    Apply
+                  </button>
+                )}
+              </div>
             </div>
 
             {!isSimulating && showModeSelector && (
