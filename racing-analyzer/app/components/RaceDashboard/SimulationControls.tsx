@@ -118,29 +118,31 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className={`rounded-lg p-4 border ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
           <div className="flex flex-col space-y-4">
+            {/* URL Input - Always visible */}
+            <div>
+              <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                Live Timing URL:
+              </label>
+              <input
+                type="text"
+                value={timingUrl}
+                onChange={(e) => setTimingUrl(e.target.value)}
+                placeholder="https://www.apex-timing.com/live-timing/..."
+                disabled={isSimulating}
+                className={`w-full px-3 py-2 rounded border text-sm
+                  ${isDarkMode 
+                    ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
+                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                  }
+                  ${isSimulating ? 'opacity-60 cursor-not-allowed' : ''}
+                  focus:outline-none focus:ring-2 focus:ring-blue-500
+                `}
+              />
+            </div>
+
             {!isSimulating && showModeSelector && (
               <div className={`p-4 rounded-lg border ${isDarkMode ? 'border-gray-600 bg-gray-800' : 'border-gray-300 bg-white'}`}>
                 <p className={`text-sm mb-3 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Choose data source:</p>
-                
-                {/* URL Input for Real Data Mode */}
-                <div className="mb-3">
-                  <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Apex Timing URL:
-                  </label>
-                  <input
-                    type="text"
-                    value={timingUrl}
-                    onChange={(e) => setTimingUrl(e.target.value)}
-                    placeholder="https://www.apex-timing.com/live-timing/..."
-                    className={`w-full px-3 py-2 rounded border text-sm
-                      ${isDarkMode 
-                        ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
-                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
-                      }
-                      focus:outline-none focus:ring-2 focus:ring-blue-500
-                    `}
-                  />
-                </div>
                 
                 <div className="flex space-x-3">
                   <button
@@ -269,11 +271,6 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
                   {isSimulationMode ? 'The simulation is running at 4x real-time speed' : 'Collecting real-time data from Apex Timing'}
                 </div>
-                {!isSimulationMode && currentTimingUrl && (
-                  <div className="text-xs text-gray-400 truncate">
-                    URL: {currentTimingUrl}
-                  </div>
-                )}
               </div>
             ) : (
               "Press Start to begin data collection"
