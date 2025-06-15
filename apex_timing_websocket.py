@@ -40,7 +40,7 @@ class ApexTimingWebSocketParser:
         console_handler = logging.StreamHandler()
         
         logging.basicConfig(
-            level=logging.INFO,
+            level=logging.DEBUG,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[file_handler, console_handler]
         )
@@ -382,12 +382,19 @@ class ApexTimingWebSocketParser:
                 # Listen for messages
                 async for message in self.websocket:
                     try:
+                        # Debug log raw message (truncate if too long)
+                        if len(message) > 200:
+                            self.logger.debug(f"WebSocket raw message: {message[:200]}... (truncated, total length: {len(message)})")
+                        else:
+                            self.logger.debug(f"WebSocket raw message: {message}")
+                        
                         # Parse the message
                         parsed = self.parse_websocket_message(message)
                         if not parsed:
                             continue
                             
                         command = parsed['command']
+                        self.logger.debug(f"WebSocket command: {command}, parameter: {parsed.get('parameter', 'N/A')}")
                         
                         # Process different message types
                         if command == 'init':
@@ -411,6 +418,12 @@ class ApexTimingWebSocketParser:
                         if not df.empty:
                             self.store_lap_data(session_id, df)
                             self.logger.debug(f"Processed {len(df)} teams")
+                            # Log sample data for debugging
+                            if len(df) > 0:
+                                first_team = df.iloc[0]
+                                self.logger.debug(f"Sample team data - Pos: {first_team.get('Position')}, "
+                                                f"Kart: {first_team.get('Kart')}, Team: {first_team.get('Team')}, "
+                                                f"Gap: {first_team.get('Gap')}, Status: {first_team.get('Status')}")
                             
                     except Exception as e:
                         self.logger.error(f"Error processing message: {e}")

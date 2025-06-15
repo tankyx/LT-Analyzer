@@ -192,14 +192,22 @@ class ApexTimingHybridParser:
             # For WebSocket, we need to return data in a format compatible with existing code
             df, session_info = await self.websocket_parser.get_current_data()
             
+            self.logger.debug(f"WebSocket data retrieved: {len(df)} teams, session_info: {session_info}")
+            
             # Convert DataFrame to HTML-like format that existing parser expects
             # This is a bit of a hack but maintains compatibility
             if not df.empty:
+                # Log first team for debugging
+                first_team = df.iloc[0]
+                self.logger.debug(f"First team from WebSocket: Pos {first_team.get('Position')}, "
+                                f"Kart {first_team.get('Kart')}, Team {first_team.get('Team')}")
+                
                 # Create a mock HTML structure
                 grid_html = self._dataframe_to_mock_html(df)
                 dyna_html = self._session_info_to_mock_html(session_info)
                 return grid_html, dyna_html
             else:
+                self.logger.debug("WebSocket returned empty DataFrame")
                 return "", ""
         else:
             # Use Playwright parser
