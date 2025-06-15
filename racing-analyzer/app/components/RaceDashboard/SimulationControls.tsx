@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 
 interface SimulationControlsProps {
-  onStart: (isSimulation?: boolean, timingUrl?: string) => void;
+  onStart: (isSimulation?: boolean, timingUrl?: string, parserMode?: string) => void;
   onStop: () => void;
   isSimulating?: boolean;
   isDarkMode?: boolean;
@@ -25,6 +25,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [timingUrl, setTimingUrl] = useState(currentTimingUrl || 'https://www.apex-timing.com/live-timing/karting-mariembourg/index.html');
   const [urlChanged, setUrlChanged] = useState(false);
+  const [parserMode, setParserMode] = useState<'playwright' | 'websocket' | 'hybrid'>('hybrid');
 
   // Update timing URL when currentTimingUrl changes (only on mount)
   useEffect(() => {
@@ -73,7 +74,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
     setStatus(isSimulation ? 'Starting simulation...' : 'Starting real data collection...');
     
     try {
-      await onStart(isSimulation, isSimulation ? undefined : timingUrl);
+      await onStart(isSimulation, isSimulation ? undefined : timingUrl, isSimulation ? undefined : parserMode);
       setStatus(isSimulation ? 'Simulation running' : 'Real data collection running');
       setShowModeSelector(false);
     } catch (error) {
@@ -109,9 +110,22 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
         </h2>
         
         {isSimulating && (
-          <div className={`text-sm rounded-full px-3 py-1 flex items-center ${isDarkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800'}`}>
-            <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse mr-2"></span>
-            {isSimulationMode ? 'Simulation' : 'Real Data'} Active - {formatTime(timer)}
+          <div className="flex items-center gap-2">
+            <div className={`text-sm rounded-full px-3 py-1 flex items-center ${isDarkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800'}`}>
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse mr-2"></span>
+              {isSimulationMode ? 'Simulation' : 'Real Data'} Active - {formatTime(timer)}
+            </div>
+            {!isSimulationMode && parserMode && (
+              <div className={`text-xs rounded-full px-2 py-1 ${
+                parserMode === 'websocket' 
+                  ? (isDarkMode ? 'bg-purple-900 text-purple-200' : 'bg-purple-100 text-purple-800')
+                  : parserMode === 'hybrid'
+                  ? (isDarkMode ? 'bg-blue-900 text-blue-200' : 'bg-blue-100 text-blue-800')
+                  : (isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700')
+              }`}>
+                {parserMode === 'websocket' ? '⚡ WebSocket' : parserMode === 'hybrid' ? '🔄 Hybrid' : '🌐 Playwright'}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -148,7 +162,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                     onClick={async () => {
                       try {
                         await onStop();
-                        await onStart(false, timingUrl);
+                        await onStart(false, timingUrl, parserMode);
                         setUrlChanged(false);
                         setStatus('URL updated and collection restarted');
                       } catch (error) {
@@ -167,6 +181,76 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Parser Mode Selector - Only show for real data mode */}
+            {!isSimulating && (
+              <div>
+                <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Parser Mode:
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setParserMode('hybrid')}
+                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                      ${parserMode === 'hybrid'
+                        ? (isDarkMode 
+                            ? 'bg-blue-700 text-white border-blue-600' 
+                            : 'bg-blue-100 text-blue-800 border-blue-300')
+                        : (isDarkMode 
+                            ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                      }
+                    `}
+                  >
+                    <div className="flex flex-col items-center">
+                      <span>Hybrid</span>
+                      <span className="text-xs opacity-70 mt-0.5">Auto-detect</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setParserMode('websocket')}
+                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                      ${parserMode === 'websocket'
+                        ? (isDarkMode 
+                            ? 'bg-blue-700 text-white border-blue-600' 
+                            : 'bg-blue-100 text-blue-800 border-blue-300')
+                        : (isDarkMode 
+                            ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                      }
+                    `}
+                  >
+                    <div className="flex flex-col items-center">
+                      <span>WebSocket</span>
+                      <span className="text-xs opacity-70 mt-0.5">Direct</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setParserMode('playwright')}
+                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                      ${parserMode === 'playwright'
+                        ? (isDarkMode 
+                            ? 'bg-blue-700 text-white border-blue-600' 
+                            : 'bg-blue-100 text-blue-800 border-blue-300')
+                        : (isDarkMode 
+                            ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                      }
+                    `}
+                  >
+                    <div className="flex flex-col items-center">
+                      <span>Playwright</span>
+                      <span className="text-xs opacity-70 mt-0.5">Original</span>
+                    </div>
+                  </button>
+                </div>
+                <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-600'}`}>
+                  {parserMode === 'hybrid' && 'Automatically selects the best method based on the timing page'}
+                  {parserMode === 'websocket' && 'Fast, direct WebSocket connection (if supported by the page)'}
+                  {parserMode === 'playwright' && 'Browser-based scraping (works with all pages)'}
+                </div>
+              </div>
+            )}
 
             {!isSimulating && showModeSelector && (
               <div className={`p-4 rounded-lg border ${isDarkMode ? 'border-gray-600 bg-gray-800' : 'border-gray-300 bg-white'}`}>

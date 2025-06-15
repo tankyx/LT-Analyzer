@@ -12,6 +12,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from apex_timing_parser import ApexTimingParserPlaywright
+from apex_timing_hybrid import ApexTimingHybridParser
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -510,9 +511,28 @@ async def update_race_data():
         await simulate_race()
         return
     
-    # Initialize the parser for real data
-    parser = ApexTimingParserPlaywright()
-    if not await parser.initialize():
+    # Select parser based on user's choice
+    parser_mode = race_data.get('parser_mode', 'hybrid')
+    
+    if parser_mode == 'hybrid':
+        parser = ApexTimingHybridParser()
+        print("Using hybrid parser (auto-detect WebSocket or Playwright)...")
+        init_result = await parser.initialize(race_data.get('timing_url', ''))
+    elif parser_mode == 'websocket':
+        # For WebSocket-only mode, we'll use the hybrid parser but force WebSocket
+        parser = ApexTimingHybridParser()
+        parser.force_websocket = True  # Add this flag to force WebSocket mode
+        print("Using WebSocket-only mode...")
+        init_result = await parser.initialize(race_data.get('timing_url', ''))
+        if not parser.use_websocket:
+            print("WARNING: WebSocket not available for this page, cannot proceed in WebSocket-only mode")
+            return
+    else:  # playwright
+        parser = ApexTimingParserPlaywright()
+        print("Using Playwright-only parser...")
+        init_result = await parser.initialize()
+        
+    if not init_result:
         print("Failed to initialize parser. Exiting update thread.")
         return
     
@@ -628,12 +648,13 @@ def start_simulation():
         data = request.json or {}
         simulation_mode = data.get('simulation', False)
         timing_url = data.get('timingUrl', None)
+        parser_mode = data.get('parserMode', 'hybrid')  # Default to hybrid
         
         # Validate URL if provided and not in simulation mode
         if not simulation_mode and not timing_url:
             return jsonify({'status': 'error', 'message': 'Timing URL is required for real data mode'}), 400
         
-        print(f"Starting with simulation mode: {simulation_mode}, URL: {timing_url}")
+        print(f"Starting with simulation mode: {simulation_mode}, URL: {timing_url}, Parser mode: {parser_mode}")
         
         # Stop any existing thread
         if update_thread and update_thread.is_alive():
@@ -650,11 +671,12 @@ def start_simulation():
         race_data['simulation_mode'] = simulation_mode
         race_data['is_running'] = False
         race_data['timing_url'] = timing_url  # Store the URL
+        race_data['parser_mode'] = parser_mode  # Store the parser mode
         
         # Start a new thread
         start_update_thread()
         
-        mode_text = 'simulation' if simulation_mode else f'real data collection from {timing_url}'
+        mode_text = 'simulation' if simulation_mode else f'real data collection from {timing_url} using {parser_mode} parser'
         return jsonify({'status': 'success', 'message': f'Started {mode_text}'})
     except Exception as e:
         print(f"Error in start_simulation: {e}")
@@ -678,12 +700,26 @@ def stop_simulation():
 @app.route('/api/parser-status')
 def parser_status():
     """Check if the parser is running"""
-    global update_thread
+    global update_thread, parser
     
     is_running = update_thread is not None and update_thread.is_alive()
+    
+    # Determine which parser is actually being used
+    parser_type = 'unknown'
+    if parser:
+        if hasattr(parser, 'use_websocket') and parser.use_websocket:
+            parser_type = 'websocket'
+        elif hasattr(parser, 'playwright_parser'):
+            parser_type = 'hybrid'
+        else:
+            parser_type = 'playwright'
+    
     return jsonify({
         'status': 'running' if is_running else 'stopped',
-        'last_update': race_data['last_update']
+        'last_update': race_data['last_update'],
+        'parser_mode': race_data.get('parser_mode', 'unknown'),
+        'actual_parser': parser_type,
+        'timing_url': race_data.get('timing_url', '')
     })
 
 @app.route('/api/update-pit-config', methods=['POST'])
@@ -708,6 +744,46 @@ def update_pit_config():
         return jsonify({'status': 'success', 'message': 'Pit stop configuration updated'})
     
     return jsonify({'status': 'error', 'message': 'Invalid configuration data'})
+
+@app.route('/api/set-parser-mode', methods=['POST'])
+def set_parser_mode():
+    """Set parser mode (hybrid or playwright-only)"""
+    global race_data
+    
+    data = request.json
+    if data and 'useHybrid' in data:
+        race_data['use_hybrid_parser'] = data['useHybrid']
+        mode = "hybrid (WebSocket + Playwright)" if data['useHybrid'] else "Playwright-only"
+        print(f"Parser mode set to: {mode}")
+        return jsonify({
+            'status': 'success', 
+            'message': f'Parser mode set to {mode}',
+            'useHybrid': race_data['use_hybrid_parser']
+        })
+    
+    return jsonify({'status': 'error', 'message': 'Invalid request'})
+
+@app.route('/api/parser-status', methods=['GET'])
+def get_parser_status():
+    """Get current parser status and type"""
+    global parser, race_data
+    
+    status = {
+        'is_running': race_data.get('is_running', False),
+        'use_hybrid_parser': race_data.get('use_hybrid_parser', True),
+        'parser_type': 'none'
+    }
+    
+    if parser:
+        if hasattr(parser, 'use_websocket'):
+            # It's a hybrid parser
+            status['parser_type'] = 'websocket' if parser.use_websocket else 'playwright'
+            status['websocket_url'] = parser.ws_url if parser.use_websocket else None
+        else:
+            # It's a playwright-only parser
+            status['parser_type'] = 'playwright'
+    
+    return jsonify(status)
 
 # For debugging: simulate data
 @app.route('/api/simulate-data', methods=['POST'])
