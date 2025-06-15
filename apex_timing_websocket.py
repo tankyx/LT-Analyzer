@@ -117,33 +117,82 @@ class ApexTimingWebSocketParser:
         value = data['value']
         
         if parameter == 'grid':
-            # Grid initialization contains column headers
-            # Format: position|header1|header2|...
-            headers = value.split('|')
-            for i, header in enumerate(headers):
-                if header:
-                    # Map column index to field name
-                    if 'Pos' in header:
+            # Grid initialization contains HTML table structure
+            # Parse the HTML to extract column mappings
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(value, 'html.parser')
+            
+            # Find header row
+            header_row = soup.find('tr', {'class': 'head'})
+            if header_row:
+                cells = header_row.find_all('td')
+                for i, cell in enumerate(cells):
+                    data_type = cell.get('data-type', '')
+                    text = cell.text.strip()
+                    
+                    # Map column based on data-type or text content
+                    if data_type == 'sta':
+                        self.column_map[i] = 'Status'
+                    elif data_type == 'rk' or 'Clt' in text or 'Pos' in text:
                         self.column_map[i] = 'Position'
-                    elif 'Kart' in header or 'No' in header:
+                    elif data_type == 'no' or 'Kart' in text:
                         self.column_map[i] = 'Kart'
-                    elif 'Team' in header or 'Driver' in header:
+                    elif data_type == 'dr' or 'Team' in text or 'Equipe' in text:
                         self.column_map[i] = 'Team'
-                    elif 'Last' in header:
+                    elif data_type == 'llp' or 'Dernier' in text or 'Last' in text:
                         self.column_map[i] = 'Last Lap'
-                    elif 'Best' in header:
+                    elif data_type == 'blp' or 'Meilleur' in text or 'Best' in text:
                         self.column_map[i] = 'Best Lap'
-                    elif 'Gap' in header:
+                    elif data_type == 'gap' or 'Ecart' in text or 'Gap' in text:
                         self.column_map[i] = 'Gap'
-                    elif 'Run' in header or 'Time' in header:
+                    elif data_type == 'otr' or 'piste' in text or 'RunTime' in text:
                         self.column_map[i] = 'RunTime'
-                    elif 'Pit' in header:
+                    elif data_type == 'pit' or 'Stands' in text or 'Pit' in text:
                         self.column_map[i] = 'Pit Stops'
+                        
+                self.logger.debug(f"Column map initialized: {self.column_map}")
+                
+            # Also process any initial grid data rows
+            data_rows = soup.find_all('tr', {'data-id': True})
+            for row in data_rows:
+                if row.get('class') and 'head' in row.get('class'):
+                    continue
+                    
+                row_id = row.get('data-id')
+                if row_id:
+                    self.grid_data[row_id] = {}
+                    cells = row.find_all('td')
+                    
+                    for i, cell in enumerate(cells):
+                        if i in self.column_map:
+                            field = self.column_map[i]
+                            
+                            # Special handling for different cell types
+                            if field == 'Kart':
+                                # Kart number might be in a div
+                                div = cell.find('div')
+                                value = div.text.strip() if div else cell.text.strip()
+                            elif field == 'Position':
+                                # Position might be in a p tag
+                                p = cell.find('p')
+                                value = p.text.strip() if p else cell.text.strip()
+                            else:
+                                value = cell.text.strip()
+                                
+                            self.grid_data[row_id][field] = value
+                            
+                            # Store kart mapping
+                            if field == 'Kart' and value:
+                                self.row_map[row_id] = value
+                                
+            self.logger.info(f"Grid initialized with {len(self.grid_data)} rows")
                         
     def process_grid_message(self, data: Dict):
         """Process grid data messages"""
         row_id = data['parameter']
         values = data['value'].split('|')
+        
+        self.logger.debug(f"Processing grid message for row {row_id}, {len(values)} values")
         
         if row_id not in self.grid_data:
             self.grid_data[row_id] = {}
@@ -160,29 +209,53 @@ class ApexTimingWebSocketParser:
                     
     def process_update_message(self, data: Dict):
         """Process cell update messages"""
+        # Update messages have format: cellId|classOrType|value
+        # Example: r900005625c1|su| or r900005625c2||13
+        parts = data['value'].split('|')
         cell_id = data['parameter']
-        value = data['value']
+        
+        # The actual value is the last part (could be empty)
+        value = parts[1] if len(parts) > 1 else ''
         
         # Parse cell ID (format: r{row}c{col})
         match = re.match(r'r(\d+)c(\d+)', cell_id)
         if not match:
+            self.logger.debug(f"Could not parse cell ID: {cell_id}")
             return
             
         row_id = f"r{match.group(1)}"
-        col_idx = int(match.group(2))
+        col_idx = int(match.group(2)) - 1  # Column index is 1-based, convert to 0-based
         
         # Initialize row if needed
         if row_id not in self.grid_data:
             self.grid_data[row_id] = {}
+            self.logger.debug(f"Created new row: {row_id}")
             
         # Update the specific cell
         if col_idx in self.column_map:
             field = self.column_map[col_idx]
             self.grid_data[row_id][field] = value.strip()
             
+            # Special handling for status updates
+            if col_idx == 0 and len(parts) > 0:
+                # First column is often status, parts[0] contains the status class
+                status_class = parts[0]
+                if status_class == 'si':
+                    self.grid_data[row_id]['Status'] = 'Pit-in'
+                elif status_class == 'so':
+                    self.grid_data[row_id]['Status'] = 'Pit-out'
+                elif status_class == 'su':
+                    self.grid_data[row_id]['Status'] = 'Up'
+                elif status_class == 'sd':
+                    self.grid_data[row_id]['Status'] = 'Down'
+                elif status_class == 'sr':
+                    self.grid_data[row_id]['Status'] = 'On Track'
+            
             # Update kart mapping if this is a kart number
             if field == 'Kart' and value.strip():
                 self.row_map[row_id] = value.strip()
+                
+            self.logger.debug(f"Updated {row_id}[{field}] = {value}")
                 
     def process_css_message(self, data: Dict):
         """Process CSS class update messages (used for status indicators)"""
@@ -225,6 +298,8 @@ class ApexTimingWebSocketParser:
     def get_current_standings(self) -> pd.DataFrame:
         """Convert current grid data to DataFrame format compatible with existing code"""
         teams = []
+        
+        self.logger.debug(f"get_current_standings: grid_data has {len(self.grid_data)} rows")
         
         for row_id, row_data in self.grid_data.items():
             if 'Kart' in row_data and row_data['Kart']:
@@ -345,12 +420,58 @@ class ApexTimingWebSocketParser:
         """Connect to the WebSocket endpoint"""
         try:
             self.logger.info(f"Connecting to WebSocket: {ws_url}")
-            self.websocket = await websockets.connect(ws_url)
+            
+            # Try connecting with different parameters
+            # Add headers that might be required
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+                "Origin": "https://www.apex-timing.com",
+                "Accept-Language": "en-US,en;q=0.9,fr-FR;q=0.8,fr;q=0.7",
+                "Pragma": "no-cache",
+                "Cache-Control": "no-cache",
+            }
+            
+            try:
+                # First try with default settings
+                self.websocket = await websockets.connect(
+                    ws_url,
+                    extra_headers=headers,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    close_timeout=10,
+                    compression="deflate"  # Enable compression
+                )
+            except Exception as e:
+                self.logger.warning(f"Default connection failed: {e}, trying with SSL context...")
+                # Try with custom SSL context if it's WSS
+                if ws_url.startswith('wss://'):
+                    import ssl
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                    self.websocket = await websockets.connect(
+                        ws_url,
+                        ssl=ssl_context,
+                        extra_headers=headers,
+                        ping_interval=20,
+                        ping_timeout=10,
+                        close_timeout=10,
+                        compression="deflate"  # Enable compression
+                    )
+                else:
+                    raise
+                    
             self.is_connected = True
             self.logger.info("WebSocket connected successfully")
+            
+            # Send a test message to verify connection
+            if self.websocket:
+                self.logger.debug("WebSocket state: open" if self.websocket.open else "WebSocket state: closed")
+                
             return True
         except Exception as e:
             self.logger.error(f"Failed to connect to WebSocket: {e}")
+            self.logger.error(f"WebSocket URL was: {ws_url}")
             self.is_connected = False
             return False
             
@@ -412,6 +533,22 @@ class ApexTimingWebSocketParser:
                             if parsed['parameter'] == 'grid':
                                 self.grid_data.clear()
                                 self.row_map.clear()
+                        elif command.startswith('r'):
+                            # Row update message (e.g., r35407|#|14)
+                            # These indicate position changes or other row-level updates
+                            row_id = command
+                            update_type = parsed['parameter']
+                            value = parsed['value']
+                            
+                            if update_type == '#':
+                                # Position update
+                                if row_id not in self.grid_data:
+                                    self.grid_data[row_id] = {}
+                                self.grid_data[row_id]['Position'] = value
+                                self.logger.debug(f"Position update: {row_id} -> position {value}")
+                            elif update_type == '*':
+                                # Some other update, possibly timing
+                                self.logger.debug(f"Row update: {row_id} type={update_type} value={value}")
                                 
                         # Periodically save to database
                         df = self.get_current_standings()

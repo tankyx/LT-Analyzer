@@ -52,6 +52,7 @@ class ApexTimingHybridParser:
         # Wait a bit for WebSocket connections
         await page.wait_for_timeout(3000)
         
+        
         # Method 2: Search for WebSocket URL in page scripts
         if not ws_url:
             try:
@@ -105,6 +106,19 @@ class ApexTimingHybridParser:
                     ws_url = test_url
                     self.logger.info(f"Trying common WebSocket endpoint: {ws_url}")
                     break
+        
+        # Fix WebSocket URL protocol and port based on main site protocol
+        if ws_url and self.base_url:
+            # If main site is HTTPS but WebSocket is WS, convert to WSS
+            if self.base_url.startswith('https://') and ws_url.startswith('ws://'):
+                original_url = ws_url
+                ws_url = ws_url.replace('ws://', 'wss://', 1)
+                self.logger.info(f"Converted WebSocket URL from {original_url} to {ws_url}")
+            
+            # Fix common port issues (8312 -> 8313 for wss)
+            if 'wss://' in ws_url and ':8312' in ws_url:
+                ws_url = ws_url.replace(':8312', ':8313')
+                self.logger.info(f"Fixed WebSocket port to 8313 for WSS")
                     
         return ws_url
         
