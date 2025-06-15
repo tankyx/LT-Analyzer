@@ -24,6 +24,7 @@ class ApexTimingHybridParser:
         self.ws_url = None
         self.base_url = None
         self.force_websocket = False  # Flag to force WebSocket-only mode
+        self.websocket_task = None  # Task for WebSocket monitoring
         
     def setup_logging(self):
         """Setup logging configuration"""
@@ -138,7 +139,14 @@ class ApexTimingHybridParser:
                         if test_connected:
                             self.use_websocket = True
                             self.logger.info("WebSocket connection successful - using WebSocket mode")
+                            # Disconnect the test connection
                             await self.websocket_parser.disconnect_websocket()
+                            
+                            # Start WebSocket monitoring in the background
+                            self.websocket_task = asyncio.create_task(
+                                self.websocket_parser.monitor_race_websocket(self.ws_url)
+                            )
+                            self.logger.info("Started WebSocket monitoring task")
                         else:
                             self.logger.warning("WebSocket connection failed - falling back to Playwright")
                     except Exception as e:
@@ -163,6 +171,13 @@ class ApexTimingHybridParser:
         
     async def cleanup(self):
         """Clean up resources"""
+        if self.websocket_task:
+            self.websocket_task.cancel()
+            try:
+                await self.websocket_task
+            except asyncio.CancelledError:
+                pass
+                
         if self.playwright_parser:
             await self.playwright_parser.cleanup()
         if self.websocket_parser and self.websocket_parser.is_connected:
