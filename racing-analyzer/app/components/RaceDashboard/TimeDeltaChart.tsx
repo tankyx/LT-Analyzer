@@ -246,7 +246,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                       {gap.toFixed(3)}s
                     </span>
                     <div className="text-xs mt-1">
-                      {gap < 0 ? '▼ Catching' : gap > 0 ? '▲ Falling back' : 'Same pace'}
+                      {gap < 0 ? '▲ Falling back' : gap > 0 ? '▼ Catching' : 'Same pace'}
                     </div>
                   </div>
                 </div>
