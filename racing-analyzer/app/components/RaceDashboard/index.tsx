@@ -358,7 +358,7 @@ const RaceDashboard = () => {
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 2000);
+    const interval = setInterval(fetchData, 1000);
     return () => clearInterval(interval);
   }, [checkPitStops]);
 
