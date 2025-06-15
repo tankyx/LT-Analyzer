@@ -33,6 +33,7 @@ interface Alert {
   message: string;
   type?: 'info' | 'warning' | 'success' | 'error';
   customContent?: React.ReactNode;
+  teamKart?: string; // Add team identifier for pit alerts
 }
 
 interface Trend {
@@ -127,6 +128,7 @@ const RaceDashboard = () => {
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [showAdjustedGap, setShowAdjustedGap] = useState(false);
   const [pitStopTime, setPitStopTime] = useState(158);
+  const [alertedPitTeams, setAlertedPitTeams] = useState<Set<string>>(new Set());
   const [requiredPitStops, setRequiredPitStops] = useState(7);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
   const [raceData, setRaceData] = useState<{
@@ -258,33 +260,19 @@ const RaceDashboard = () => {
     monitoredTeams.forEach(kartNum => {
       const team = currentTeams.find(t => t.Kart === kartNum);
       
-      // Check if pit count has increased
-      if (team && parseInt(team['Pit Stops']) > (team.lastPitCount || 0)) {
-        setAlerts(prev => [...prev, {
-          id: Date.now(),
-          message: `${team.Team} has entered the pits!`,
-          type: 'warning'
-        }]);
-        team.lastPitCount = parseInt(team['Pit Stops']);
-      }
-      
       // Check if status has changed to Pit-in
       if (team && team.Status === 'Pit-in') {
-        // Create a unique ID for this pit alert
-        // const pitAlertId = `pit-${team.Kart}-${Date.now()}`; // Currently unused
-        
-        // Check if we already have an active alert for this team's pit status
-        const existingPitAlert = alerts.find(
-          alert => alert.message.includes(team.Team) && alert.message.includes('in the pits')
-        );
-        
-        // Only add a new alert if we don't have one for this team already
-        if (!existingPitAlert) {
+        // Check if we already alerted for this team
+        if (!alertedPitTeams.has(team.Kart)) {
+          // Mark this team as alerted
+          setAlertedPitTeams(prev => new Set(prev).add(team.Kart));
+          
           // Create a more prominent pit alert with custom styling and action buttons
           setAlerts(prev => [...prev, {
             id: Date.now(),
             message: `🔴 ALERT: ${team.Team} is in the pits!`,
             type: 'error', // Use error type for more visibility
+            teamKart: team.Kart, // Add team identifier
             // Adding extra data for styled rendering
             customContent: (
               <div className="flex flex-col">
@@ -310,9 +298,19 @@ const RaceDashboard = () => {
             console.log('Audio not supported', e);
           }
         }
+      } else if (team && team.Status !== 'Pit-in') {
+        // Team is no longer in pit, remove from alerted set
+        setAlertedPitTeams(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(team.Kart);
+          return newSet;
+        });
+        
+        // Remove the pit alert for this team
+        setAlerts(prev => prev.filter(alert => alert.teamKart !== team.Kart));
       }
     });
-  }, [monitoredTeams, alerts]);
+  }, [monitoredTeams, alertedPitTeams]);
 
   // Auto-dismiss alerts after 5 seconds
   useEffect(() => {
