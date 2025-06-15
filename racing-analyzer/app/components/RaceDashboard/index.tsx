@@ -208,9 +208,9 @@ const RaceDashboard = () => {
     }
   }, [myTeam, monitoredTeams]);
 
-  const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string) => {
+  const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string, parserMode?: string) => {
     try {
-      const response = await ApiService.startSimulation(isSimulationMode, timingUrl);
+      const response = await ApiService.startSimulation(isSimulationMode, timingUrl, parserMode);
     
       setSimulating(true);
       setAlerts([...alerts, {
@@ -489,7 +489,7 @@ const RaceDashboard = () => {
                       <p className="text-sm mb-4">Click &quot;Start Simulation&quot; to begin loading race data</p>
                       {!simulating && (
                         <button 
-                          onClick={() => startSimulation(false)}
+                          onClick={() => startSimulation(false, undefined, 'hybrid')}
                           className={`px-6 py-2 rounded-md transition-colors font-medium ${isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
                         >
                           Start Simulation
