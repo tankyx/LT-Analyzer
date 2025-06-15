@@ -545,9 +545,15 @@ async def update_race_data():
         
         print(f"Using timing URL: {url}")
         
+        # Determine update interval based on parser type
+        update_interval = 1 if (hasattr(parser, 'use_websocket') and parser.use_websocket) else 5
+        print(f"Update interval: {update_interval} second(s)")
+        
         while not stop_event.is_set():
             try:
-                print("Fetching new data...")
+                # Only log fetching for Playwright mode or every 5th update for WebSocket
+                if not (hasattr(parser, 'use_websocket') and parser.use_websocket) or race_data.get('update_count', 0) % 5 == 0:
+                    print("Fetching new data...")
                 grid_html, dyna_html = await parser.get_page_content(url)
                 
                 if grid_html and dyna_html:
@@ -562,6 +568,7 @@ async def update_race_data():
                         teams_data = df.to_dict('records')
                         race_data['teams'] = teams_data
                         race_data['last_update'] = datetime.now().strftime('%H:%M:%S')
+                        race_data['update_count'] = race_data.get('update_count', 0) + 1
                         
                         # Update delta times for monitored teams
                         if race_data['my_team'] and race_data['monitored_teams']:
@@ -583,8 +590,11 @@ async def update_race_data():
                     print("Failed to reinitialize parser. Exiting update thread.")
                     return
             
-            # Wait before next update
-            await asyncio.sleep(5)
+            # Wait before next update - use shorter interval for WebSocket
+            if hasattr(parser, 'use_websocket') and parser.use_websocket:
+                await asyncio.sleep(1)  # 1 second for WebSocket mode
+            else:
+                await asyncio.sleep(5)  # 5 seconds for Playwright mode
     except Exception as e:
         print(f"Error in update thread: {e}")
         print(traceback.format_exc())
