@@ -42,15 +42,31 @@ class ApexTimingHybridParser:
         ws_url = None
         
         # Method 1: Listen for WebSocket connections
+        ws_connections = []
+        
         async def handle_websocket(ws):
             nonlocal ws_url
             ws_url = ws.url
+            ws_connections.append(ws)
             self.logger.info(f"Detected WebSocket connection: {ws_url}")
+            
+            # Listen for frames to verify it's the correct WebSocket
+            ws.on("framesent", lambda payload: self.logger.debug(f"WS sent: {payload[:100]}..."))
+            ws.on("framereceived", lambda payload: self.logger.debug(f"WS received: {payload[:100]}..."))
             
         page.on("websocket", handle_websocket)
         
+        # Method 1b: Also monitor network requests for WebSocket upgrades
+        async def handle_request(request):
+            nonlocal ws_url
+            if request.resource_type == "websocket" or "websocket" in request.headers.get("upgrade", "").lower():
+                ws_url = request.url
+                self.logger.info(f"Detected WebSocket upgrade request: {ws_url}")
+                
+        page.on("request", handle_request)
+        
         # Wait a bit for WebSocket connections
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(5000)  # Give more time for WebSocket to connect
         
         
         # Method 2: Search for WebSocket URL in page scripts
@@ -59,27 +75,61 @@ class ApexTimingHybridParser:
                 # Look for WebSocket URLs in JavaScript
                 ws_url = await page.evaluate("""
                     () => {
+                        // First check if there's already an active WebSocket
+                        for (let key in window) {
+                            if (window[key] && window[key] instanceof WebSocket) {
+                                console.log('Found WebSocket in window.' + key, window[key].url);
+                                return window[key].url;
+                            }
+                        }
+                        
                         // Search for WebSocket URLs in scripts
                         const scripts = Array.from(document.querySelectorAll('script'));
                         for (const script of scripts) {
                             const content = script.textContent || '';
-                            // Look for WebSocket URL patterns
-                            const wsMatch = content.match(/wss?:\\/\\/[^'"\\s]+/);
-                            if (wsMatch) {
-                                return wsMatch[0];
-                            }
-                            // Look for WebSocket constructor
-                            const wsConstructor = content.match(/new\\s+WebSocket\\s*\\(\\s*["']([^"']+)["']/);
-                            if (wsConstructor) {
-                                return wsConstructor[1];
+                            
+                            // Look for WebSocket URL patterns with port numbers
+                            const wsPatterns = [
+                                /wss?:\\/\\/[^'"\\s]+:\\d+/g,  // Match ws:// or wss:// with port
+                                /["'](wss?:\\/\\/[^"']+)["']/g,  // Match quoted WebSocket URLs
+                                /websocket.*?["'](wss?:\\/\\/[^"']+)["']/gi,  // Match WebSocket references
+                                /ws\\s*[:=]\\s*["'](wss?:\\/\\/[^"']+)["']/gi  // Match ws variables
+                            ];
+                            
+                            for (const pattern of wsPatterns) {
+                                const matches = content.match(pattern);
+                                if (matches) {
+                                    // Clean up the match and return the URL
+                                    let url = matches[0].replace(/["']/g, '');
+                                    if (url.includes('ws://') || url.includes('wss://')) {
+                                        console.log('Found WebSocket URL in script:', url);
+                                        return url;
+                                    }
+                                }
                             }
                         }
                         
-                        // Check global variables
-                        if (window.ws || window.websocket || window.socket) {
-                            const ws = window.ws || window.websocket || window.socket;
-                            if (ws && ws.url) {
-                                return ws.url;
+                        // Check for WebSocket port in configuration
+                        const portPatterns = [
+                            /websocket.*?port.*?[:=]\\s*(\\d+)/gi,
+                            /ws.*?port.*?[:=]\\s*(\\d+)/gi,
+                            /port.*?[:=]\\s*(\\d{4})/gi  // 4-digit ports
+                        ];
+                        
+                        for (const script of scripts) {
+                            const content = script.textContent || '';
+                            for (const pattern of portPatterns) {
+                                const match = content.match(pattern);
+                                if (match && match[1]) {
+                                    const port = match[1];
+                                    if (parseInt(port) > 8000 && parseInt(port) < 9000) {
+                                        // Likely a WebSocket port
+                                        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                                        const url = `${protocol}//${window.location.hostname}:${port}/`;
+                                        console.log('Constructed WebSocket URL from port:', url);
+                                        return url;
+                                    }
+                                }
                             }
                         }
                         
@@ -107,18 +157,13 @@ class ApexTimingHybridParser:
                     self.logger.info(f"Trying common WebSocket endpoint: {ws_url}")
                     break
         
-        # Fix WebSocket URL protocol and port based on main site protocol
+        # Fix WebSocket URL protocol based on main site protocol
         if ws_url and self.base_url:
             # If main site is HTTPS but WebSocket is WS, convert to WSS
             if self.base_url.startswith('https://') and ws_url.startswith('ws://'):
                 original_url = ws_url
                 ws_url = ws_url.replace('ws://', 'wss://', 1)
                 self.logger.info(f"Converted WebSocket URL from {original_url} to {ws_url}")
-            
-            # Fix common port issues (8312 -> 8313 for wss)
-            if 'wss://' in ws_url and ':8312' in ws_url:
-                ws_url = ws_url.replace(':8312', ':8313')
-                self.logger.info(f"Fixed WebSocket port to 8313 for WSS")
                     
         return ws_url
         
@@ -140,6 +185,7 @@ class ApexTimingHybridParser:
                 
                 # Try to detect WebSocket URL
                 self.ws_url = await self.detect_websocket_url(self.playwright_parser.page)
+                
                 
                 if self.ws_url:
                     self.logger.info(f"WebSocket URL detected: {self.ws_url}")
