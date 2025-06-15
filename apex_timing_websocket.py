@@ -433,14 +433,25 @@ class ApexTimingWebSocketParser:
             
             try:
                 # First try with default settings
-                self.websocket = await websockets.connect(
-                    ws_url,
-                    extra_headers=headers,
-                    ping_interval=20,
-                    ping_timeout=10,
-                    close_timeout=10,
-                    compression="deflate"  # Enable compression
-                )
+                import websockets
+                # Check websockets version and use appropriate parameters
+                if hasattr(websockets, '__version__') and websockets.__version__ >= '10.0':
+                    self.websocket = await websockets.connect(
+                        ws_url,
+                        additional_headers=headers,  # Use additional_headers for newer versions
+                        ping_interval=20,
+                        ping_timeout=10,
+                        close_timeout=10,
+                        compression="deflate"
+                    )
+                else:
+                    # For older versions, headers go in subprotocol
+                    self.websocket = await websockets.connect(
+                        ws_url,
+                        ping_interval=20,
+                        ping_timeout=10,
+                        close_timeout=10
+                    )
             except Exception as e:
                 self.logger.warning(f"Default connection failed: {e}, trying with SSL context...")
                 # Try with custom SSL context if it's WSS
@@ -449,15 +460,24 @@ class ApexTimingWebSocketParser:
                     ssl_context = ssl.create_default_context()
                     ssl_context.check_hostname = False
                     ssl_context.verify_mode = ssl.CERT_NONE
-                    self.websocket = await websockets.connect(
-                        ws_url,
-                        ssl=ssl_context,
-                        extra_headers=headers,
-                        ping_interval=20,
-                        ping_timeout=10,
-                        close_timeout=10,
-                        compression="deflate"  # Enable compression
-                    )
+                    if hasattr(websockets, '__version__') and websockets.__version__ >= '10.0':
+                        self.websocket = await websockets.connect(
+                            ws_url,
+                            ssl=ssl_context,
+                            additional_headers=headers,
+                            ping_interval=20,
+                            ping_timeout=10,
+                            close_timeout=10,
+                            compression="deflate"
+                        )
+                    else:
+                        self.websocket = await websockets.connect(
+                            ws_url,
+                            ssl=ssl_context,
+                            ping_interval=20,
+                            ping_timeout=10,
+                            close_timeout=10
+                        )
                 else:
                     raise
                     
