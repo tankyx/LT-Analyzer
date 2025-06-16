@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Edit2, Trash2, Check, AlertCircle } from 'lucide-react';
+import ApiService from '../../services/ApiService';
 
 interface Track {
   id: number;
@@ -37,8 +38,7 @@ const TrackManager: React.FC<TrackManagerProps> = ({ onSelectTrack, selectedTrac
   const fetchTracks = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:5000/api/tracks');
-      const data = await response.json();
+      const data = await ApiService.getTracks();
       setTracks(data.tracks || []);
       setError(null);
     } catch (err) {
@@ -56,20 +56,11 @@ const TrackManager: React.FC<TrackManagerProps> = ({ onSelectTrack, selectedTrac
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/tracks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          track_name: formData.track_name,
-          timing_url: formData.timing_url,
-          websocket_url: formData.websocket_url || null
-        })
+      await ApiService.addTrack({
+        track_name: formData.track_name,
+        timing_url: formData.timing_url,
+        websocket_url: formData.websocket_url || undefined
       });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to add track');
-      }
 
       await fetchTracks();
       setIsAddingTrack(false);
@@ -85,20 +76,11 @@ const TrackManager: React.FC<TrackManagerProps> = ({ onSelectTrack, selectedTrac
     if (!track) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/tracks/${trackId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          track_name: formData.track_name || track.track_name,
-          timing_url: formData.timing_url || track.timing_url,
-          websocket_url: formData.websocket_url || track.websocket_url
-        })
+      await ApiService.updateTrack(trackId, {
+        track_name: formData.track_name || track.track_name,
+        timing_url: formData.timing_url || track.timing_url,
+        websocket_url: formData.websocket_url || track.websocket_url || undefined
       });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to update track');
-      }
 
       await fetchTracks();
       setEditingTrackId(null);
@@ -113,15 +95,7 @@ const TrackManager: React.FC<TrackManagerProps> = ({ onSelectTrack, selectedTrac
     if (!confirm('Are you sure you want to delete this track?')) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/tracks/${trackId}`, {
-        method: 'DELETE'
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to delete track');
-      }
-
+      await ApiService.deleteTrack(trackId);
       await fetchTracks();
       setError(null);
     } catch (err) {
