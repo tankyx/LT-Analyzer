@@ -121,6 +121,89 @@ export const ApiService = {
       console.error('Error updating pit stop config:', error);
       throw error;
     }
+  },
+
+  // Track management API methods
+  getTracks: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tracks`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch tracks');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching tracks:', error);
+      throw error;
+    }
+  },
+
+  getTrack: async (id: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tracks/${id}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch track');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching track:', error);
+      throw error;
+    }
+  },
+
+  addTrack: async (data: { track_name: string; timing_url: string; websocket_url?: string }) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tracks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to add track');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error adding track:', error);
+      throw error;
+    }
+  },
+
+  updateTrack: async (id: number, data: { track_name?: string; timing_url?: string; websocket_url?: string }) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tracks/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to update track');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error updating track:', error);
+      throw error;
+    }
+  },
+
+  deleteTrack: async (id: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tracks/${id}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete track');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error deleting track:', error);
+      throw error;
+    }
   }
 };
 
