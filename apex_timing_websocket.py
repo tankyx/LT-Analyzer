@@ -484,9 +484,18 @@ class ApexTimingWebSocketParser:
             self.is_connected = True
             self.logger.info("WebSocket connected successfully")
             
-            # Send a test message to verify connection
+            # Check WebSocket state
             if self.websocket:
-                self.logger.debug("WebSocket state: open" if self.websocket.open else "WebSocket state: closed")
+                # For newer websockets library versions, check if connection is open differently
+                try:
+                    if hasattr(self.websocket, 'open'):
+                        self.logger.debug("WebSocket state: open" if self.websocket.open else "WebSocket state: closed")
+                    elif hasattr(self.websocket, 'state'):
+                        self.logger.debug(f"WebSocket state: {self.websocket.state}")
+                    else:
+                        self.logger.debug("WebSocket connected (state check not available)")
+                except Exception as e:
+                    self.logger.debug(f"Could not check WebSocket state: {e}")
                 
             return True
         except Exception as e:
