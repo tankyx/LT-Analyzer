@@ -23,6 +23,7 @@ class ApexTimingWebSocketParser:
         self.grid_data = {}  # Store grid data by row/column
         self.row_map = {}  # Map row IDs to kart numbers
         self.column_map = {}  # Map column indices to field names
+        self.custom_column_map = None  # Custom column mappings from track config
         self.session_info = {}
         self.is_connected = False
         
@@ -94,6 +95,30 @@ class ApexTimingWebSocketParser:
         except Exception as e:
             self.logger.error(f"Database setup error: {e}")
             raise
+            
+    def set_column_mappings(self, mappings: Dict[str, int]) -> None:
+        """Set custom column mappings from track configuration"""
+        if mappings:
+            self.custom_column_map = {}
+            # Convert from 1-based to 0-based indexing
+            for field, col_num in mappings.items():
+                if col_num and isinstance(col_num, int):
+                    self.custom_column_map[col_num - 1] = self._field_name_mapping(field)
+            self.logger.info(f"Custom column mappings set: {self.custom_column_map}")
+    
+    def _field_name_mapping(self, field: str) -> str:
+        """Map frontend field names to internal field names"""
+        mapping = {
+            'position': 'Position',
+            'kart': 'Kart',
+            'team': 'Team',
+            'status': 'Status',
+            'lastLap': 'Last Lap',
+            'bestLap': 'Best Lap',
+            'gap': 'Gap',
+            'pitStops': 'Pit Stops'
+        }
+        return mapping.get(field, field)
             
     def parse_websocket_message(self, message: str) -> Dict:
         """Parse a WebSocket message in the format: command|parameter|value"""
@@ -715,10 +740,28 @@ class ApexTimingWebSocketParser:
                                     if row_id not in self.grid_data:
                                         self.grid_data[row_id] = {}
                                     
-                                    # Map column index to field based on typical Apex Timing layout
-                                    # c1 = Status, c2 = Position, c3 = Kart, c4 = Team, c5 = Laps
-                                    # c6 = Last Lap, c7 = Best Lap, c8 = Gap/Interval, c9 = Pit Stops
-                                    if col_idx == 0:  # c1 - Status
+                                    # Use custom column mappings if available, otherwise use defaults
+                                    if self.custom_column_map and col_idx in self.custom_column_map:
+                                        # Use custom mapping
+                                        field_name = self.custom_column_map[col_idx]
+                                        if field_name == 'Status' and update_type in ['gs', 'si', 'so', 'su', 'sd']:
+                                            # Handle status updates
+                                            if update_type == 'gs':
+                                                self.grid_data[row_id]['Status'] = 'On Track'
+                                            elif update_type == 'si':
+                                                self.grid_data[row_id]['Status'] = 'Pit-in'
+                                            elif update_type == 'so':
+                                                self.grid_data[row_id]['Status'] = 'Pit-out'
+                                            elif update_type == 'su':
+                                                self.grid_data[row_id]['Status'] = 'Up'
+                                            elif update_type == 'sd':
+                                                self.grid_data[row_id]['Status'] = 'Down'
+                                        else:
+                                            # Regular field update
+                                            self.grid_data[row_id][field_name] = value
+                                            if field_name == 'Kart' and value:
+                                                self.row_map[row_id] = value
+                                    elif col_idx == 0:  # c1 - Status (default mapping)
                                         if update_type == 'gs':
                                             self.grid_data[row_id]['Status'] = 'On Track'
                                         elif update_type == 'si':
