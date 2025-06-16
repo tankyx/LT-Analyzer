@@ -600,9 +600,16 @@ async def update_race_data():
                 
                 # Try to reinitialize the browser if there was an error
                 await parser.cleanup()
-                if not await parser.initialize():
-                    print("Failed to reinitialize parser. Exiting update thread.")
-                    return
+                if hasattr(parser, 'base_url') and parser.base_url:
+                    # For hybrid parser, pass the URL
+                    if not await parser.initialize(parser.base_url):
+                        print("Failed to reinitialize parser. Exiting update thread.")
+                        return
+                else:
+                    # For Playwright parser, no URL needed
+                    if not await parser.initialize():
+                        print("Failed to reinitialize parser. Exiting update thread.")
+                        return
             
             # Wait before next update - use shorter interval for WebSocket
             if hasattr(parser, 'use_websocket') and parser.use_websocket:

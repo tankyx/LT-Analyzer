@@ -440,7 +440,13 @@ class ApexTimingWebSocketParser:
             try:
                 position = int(row['Position']) if row.get('Position', '').strip() else None
                 kart = int(row['Kart']) if row.get('Kart', '').strip() else None
-                runtime = int(row.get('RunTime', '0')) if row.get('RunTime', '').strip() else 0
+                # Parse RunTime from MM:SS format to seconds
+                runtime_str = row.get('RunTime', '0')
+                if ':' in runtime_str:
+                    parts = runtime_str.split(':')
+                    runtime = int(parts[0]) * 60 + int(parts[1])
+                else:
+                    runtime = int(runtime_str) if runtime_str.strip() else 0
                 
                 current_records.append((
                     session_id,
