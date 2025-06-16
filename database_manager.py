@@ -11,33 +11,61 @@ class TrackDatabase:
     
     def init_database(self):
         """Initialize the database with tracks table"""
-        with sqlite3.connect(self.db_path) as conn:
-            # Create tracks table
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS tracks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    track_name TEXT NOT NULL UNIQUE,
-                    timing_url TEXT NOT NULL,
-                    websocket_url TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Create trigger to update updated_at timestamp
-            conn.execute('''
-                CREATE TRIGGER IF NOT EXISTS update_tracks_timestamp 
-                AFTER UPDATE ON tracks
-                BEGIN
-                    UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
-                END
-            ''')
-            
-            conn.commit()
-            self.logger.info("Database initialized with tracks table")
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Create tracks table
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS tracks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        track_name TEXT NOT NULL UNIQUE,
+                        timing_url TEXT NOT NULL,
+                        websocket_url TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Create trigger to update updated_at timestamp
+                conn.execute('''
+                    CREATE TRIGGER IF NOT EXISTS update_tracks_timestamp 
+                    AFTER UPDATE ON tracks
+                    BEGIN
+                        UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+                    END
+                ''')
+                
+                conn.commit()
+                self.logger.info("Database initialized with tracks table")
+                
+                # Verify table was created
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tracks'")
+                if cursor.fetchone():
+                    self.logger.info("Tracks table verified successfully")
+                else:
+                    self.logger.error("Failed to create tracks table")
+                    
+        except Exception as e:
+            self.logger.error(f"Error initializing database: {e}")
+            print(f"ERROR: Failed to initialize tracks table: {e}")
+            raise
+    
+    def ensure_table_exists(self):
+        """Ensure the tracks table exists before any operation"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tracks'")
+                if not cursor.fetchone():
+                    self.logger.warning("Tracks table not found, creating it now...")
+                    self.init_database()
+        except Exception as e:
+            self.logger.error(f"Error checking table existence: {e}")
+            raise
     
     def add_track(self, track_name: str, timing_url: str, websocket_url: Optional[str] = None) -> Dict:
         """Add a new track to the database"""
+        self.ensure_table_exists()  # Ensure table exists before operation
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -64,6 +92,7 @@ class TrackDatabase:
     
     def get_all_tracks(self) -> List[Dict]:
         """Get all tracks from the database"""
+        self.ensure_table_exists()  # Ensure table exists before operation
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -92,6 +121,7 @@ class TrackDatabase:
     
     def get_track_by_id(self, track_id: int) -> Optional[Dict]:
         """Get a specific track by ID"""
+        self.ensure_table_exists()  # Ensure table exists before operation
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -120,6 +150,7 @@ class TrackDatabase:
     def update_track(self, track_id: int, track_name: Optional[str] = None, 
                      timing_url: Optional[str] = None, websocket_url: Optional[str] = None) -> Dict:
         """Update a track's information"""
+        self.ensure_table_exists()  # Ensure table exists before operation
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
@@ -162,6 +193,7 @@ class TrackDatabase:
     
     def delete_track(self, track_id: int) -> Dict:
         """Delete a track from the database"""
+        self.ensure_table_exists()  # Ensure table exists before operation
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
