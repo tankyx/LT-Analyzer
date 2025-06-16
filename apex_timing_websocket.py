@@ -529,14 +529,25 @@ class ApexTimingWebSocketParser:
                     
                 reconnect_delay = 5  # Reset on successful connection
                 
+                # Send initial message to request data (some WebSocket servers require this)
+                try:
+                    await self.websocket.send("init")
+                    self.logger.info("Sent init message to WebSocket")
+                except Exception as e:
+                    self.logger.warning(f"Could not send init message: {e}")
+                
                 # Listen for messages
+                self.logger.info("Waiting for WebSocket messages...")
+                message_count = 0
                 async for message in self.websocket:
+                    message_count += 1
+                    self.logger.info(f"Received WebSocket message #{message_count}")
                     try:
                         # Debug log raw message (truncate if too long)
                         if len(message) > 200:
-                            self.logger.debug(f"WebSocket raw message: {message[:200]}... (truncated, total length: {len(message)})")
+                            self.logger.info(f"WebSocket raw message: {message[:200]}... (truncated, total length: {len(message)})")
                         else:
-                            self.logger.debug(f"WebSocket raw message: {message}")
+                            self.logger.info(f"WebSocket raw message: {message}")
                         
                         # Parse the message
                         parsed = self.parse_websocket_message(message)
@@ -595,8 +606,9 @@ class ApexTimingWebSocketParser:
                         self.logger.error(f"Error processing message: {e}")
                         self.logger.error(traceback.format_exc())
                         
-            except websockets.exceptions.ConnectionClosed:
-                self.logger.warning("WebSocket connection closed")
+            except websockets.exceptions.ConnectionClosed as e:
+                self.logger.warning(f"WebSocket connection closed: {e}")
+                self.logger.warning(f"Close code: {e.code}, reason: {e.reason}")
                 self.is_connected = False
                 await asyncio.sleep(reconnect_delay)
             except Exception as e:
