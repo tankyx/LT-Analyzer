@@ -644,27 +644,26 @@ class ApexTimingWebSocketParser:
                     message_count += 1
                     self.logger.info(f"Received WebSocket message #{message_count}")
                     try:
-                        # Debug log raw message (truncate if too long)
-                        if len(message) > 200:
-                            self.logger.info(f"WebSocket raw message: {message[:200]}... (truncated, total length: {len(message)})")
-                        else:
-                            self.logger.info(f"WebSocket raw message: {message}")
+                        # Log full raw message
+                        self.logger.info(f"WebSocket raw message (length: {len(message)}): {message}")
                         
                         # Split message by newlines as it contains multiple commands
                         lines = message.strip().split('\n')
                         self.logger.info(f"Message contains {len(lines)} commands")
                         
-                        for line in lines:
+                        for i, line in enumerate(lines):
                             if not line.strip():
                                 continue
                                 
+                            self.logger.info(f"Processing line {i+1}/{len(lines)}: {line}")
+                            
                             # Parse each command line
                             parsed = self.parse_websocket_message(line)
                             if not parsed:
                                 continue
                                 
                             command = parsed['command']
-                            self.logger.debug(f"WebSocket command: {command}, parameter: {parsed.get('parameter', 'N/A')}")
+                            self.logger.info(f"WebSocket command: {command}, parameter: {parsed.get('parameter', 'N/A')}, value: {parsed.get('value', 'N/A')[:100]}...")
                             
                             # Process different message types
                             if command == 'init':
@@ -691,12 +690,15 @@ class ApexTimingWebSocketParser:
                             elif command == 'com':
                                 # Comment/info message
                                 self.session_info['comment'] = parsed['value']
+                                self.logger.info(f"Comment message: {parsed['value']}")
                             elif command == 'msg':
                                 # Message (best lap info etc)
                                 self.session_info['message'] = parsed['value']
+                                self.logger.info(f"Message update: {parsed['value']}")
                             elif command == 'track':
                                 # Track info
                                 self.session_info['track'] = parsed['value']
+                                self.logger.info(f"Track info: {parsed['value']}")
                             elif command.startswith('r'):
                                 # Row update message (e.g., r35407|#|14)
                                 # These indicate position changes or other row-level updates
@@ -709,22 +711,29 @@ class ApexTimingWebSocketParser:
                                     if row_id not in self.grid_data:
                                         self.grid_data[row_id] = {}
                                     self.grid_data[row_id]['Position'] = value
-                                    self.logger.debug(f"Position update: {row_id} -> position {value}")
+                                    self.logger.info(f"Position update: {row_id} -> position {value}")
                                 elif update_type == '*':
                                     # Some other update, possibly timing
-                                    self.logger.debug(f"Row update: {row_id} type={update_type} value={value}")
+                                    self.logger.info(f"Row update: {row_id} type={update_type} value={value}")
+                            else:
+                                # Log unrecognized commands
+                                self.logger.info(f"Unrecognized command: {command} with parameter={parsed.get('parameter', 'N/A')} and value={parsed.get('value', 'N/A')[:50]}...")
                                 
                         # After processing all commands in the message, save to database
                         df = self.get_current_standings()
                         if not df.empty:
                             self.store_lap_data(session_id, df)
-                            self.logger.debug(f"Processed {len(df)} teams")
+                            self.logger.info(f"Processed {len(df)} teams from WebSocket message #{message_count}")
                             # Log sample data for debugging
                             if len(df) > 0:
                                 first_team = df.iloc[0]
-                                self.logger.debug(f"Sample team data - Pos: {first_team.get('Position')}, "
-                                                f"Kart: {first_team.get('Kart')}, Team: {first_team.get('Team')}, "
-                                                f"Gap: {first_team.get('Gap')}, Status: {first_team.get('Status')}")
+                                self.logger.info(f"Leader: Pos={first_team.get('Position')}, "
+                                               f"Kart={first_team.get('Kart')}, Team={first_team.get('Team')}, "
+                                               f"Gap={first_team.get('Gap')}, Status={first_team.get('Status')}")
+                        else:
+                            self.logger.info(f"No team data in WebSocket message #{message_count}")
+                        
+                        self.logger.info(f"=== End of WebSocket message #{message_count} processing ===")
                             
                     except Exception as e:
                         self.logger.error(f"Error processing message: {e}")
