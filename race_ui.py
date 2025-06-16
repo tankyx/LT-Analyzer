@@ -565,8 +565,8 @@ async def update_race_data():
         
         while not stop_event.is_set():
             try:
-                # Only log fetching for Playwright mode or every 5th update for WebSocket
-                if not (hasattr(parser, 'use_websocket') and parser.use_websocket) or race_data.get('update_count', 0) % 5 == 0:
+                # Only log fetching for Playwright mode
+                if not (hasattr(parser, 'use_websocket') and parser.use_websocket):
                     print("Fetching new data...")
                 grid_html, dyna_html = await parser.get_page_content(url)
                 
@@ -593,7 +593,9 @@ async def update_race_data():
                             )
                             race_data['delta_times'] = delta_times
                         
-                        print(f"Updated data at {race_data['last_update']} - {len(teams_data)} teams")
+                        # Only log updates for non-WebSocket mode or every 10th update for WebSocket
+                        if not (hasattr(parser, 'use_websocket') and parser.use_websocket) or race_data.get('update_count', 0) % 10 == 0:
+                            print(f"Updated data at {race_data['last_update']} - {len(teams_data)} teams")
             except Exception as e:
                 print(f"Error updating race data: {e}")
                 print(traceback.format_exc())
