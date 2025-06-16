@@ -208,9 +208,9 @@ const RaceDashboard = () => {
     }
   }, [myTeam, monitoredTeams]);
 
-  const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string, parserMode?: string) => {
+  const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string, parserMode?: string, websocketUrl?: string, trackId?: number) => {
     try {
-      const response = await ApiService.startSimulation(isSimulationMode, timingUrl, parserMode);
+      const response = await ApiService.startSimulation(isSimulationMode, timingUrl, parserMode, websocketUrl, trackId);
     
       setSimulating(true);
       setAlerts([...alerts, {

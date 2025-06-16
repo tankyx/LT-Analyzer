@@ -34,161 +34,32 @@ class ApexTimingHybridParser:
         )
         self.logger = logging.getLogger(__name__)
         
-    async def detect_websocket_url(self, page: Page) -> Optional[str]:
+    def set_websocket_url(self, ws_url: str) -> None:
         """
-        Detect WebSocket URL from the page by intercepting network requests
-        or analyzing JavaScript code.
+        Set the WebSocket URL manually instead of auto-detecting.
         """
-        ws_url = None
-        
-        # Method 1: Listen for WebSocket connections
-        ws_connections = []
-        
-        async def handle_websocket(ws):
-            nonlocal ws_url
-            ws_url = ws.url
-            ws_connections.append(ws)
-            self.logger.info(f"Detected WebSocket connection: {ws_url}")
-            
-            # Listen for frames to verify it's the correct WebSocket
-            ws.on("framesent", lambda payload: self.logger.debug(f"WS sent: {payload[:100]}..."))
-            ws.on("framereceived", lambda payload: self.logger.debug(f"WS received: {payload[:100]}..."))
-            
-        page.on("websocket", handle_websocket)
-        
-        # Method 1b: Also monitor network requests for WebSocket upgrades
-        async def handle_request(request):
-            nonlocal ws_url
-            if request.resource_type == "websocket" or "websocket" in request.headers.get("upgrade", "").lower():
-                ws_url = request.url
-                self.logger.info(f"Detected WebSocket upgrade request: {ws_url}")
-                
-        page.on("request", handle_request)
-        
-        # Wait a bit for WebSocket connections
-        await page.wait_for_timeout(5000)  # Give more time for WebSocket to connect
-        
-        
-        # Method 2: Search for WebSocket URL in page scripts
-        if not ws_url:
-            try:
-                # Look for WebSocket URLs in JavaScript
-                ws_url = await page.evaluate("""
-                    () => {
-                        // First check if there's already an active WebSocket
-                        for (let key in window) {
-                            if (window[key] && window[key] instanceof WebSocket) {
-                                console.log('Found WebSocket in window.' + key, window[key].url);
-                                return window[key].url;
-                            }
-                        }
-                        
-                        // Search for WebSocket URLs in scripts
-                        const scripts = Array.from(document.querySelectorAll('script'));
-                        for (const script of scripts) {
-                            const content = script.textContent || '';
-                            
-                            // Look for WebSocket URL patterns with port numbers
-                            const wsPatterns = [
-                                /wss?:\\/\\/[^'"\\s]+:\\d+/g,  // Match ws:// or wss:// with port
-                                /["'](wss?:\\/\\/[^"']+)["']/g,  // Match quoted WebSocket URLs
-                                /websocket.*?["'](wss?:\\/\\/[^"']+)["']/gi,  // Match WebSocket references
-                                /ws\\s*[:=]\\s*["'](wss?:\\/\\/[^"']+)["']/gi  // Match ws variables
-                            ];
-                            
-                            for (const pattern of wsPatterns) {
-                                const matches = content.match(pattern);
-                                if (matches) {
-                                    // Clean up the match and return the URL
-                                    let url = matches[0].replace(/["']/g, '');
-                                    if (url.includes('ws://') || url.includes('wss://')) {
-                                        console.log('Found WebSocket URL in script:', url);
-                                        return url;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Check for WebSocket port in configuration
-                        const portPatterns = [
-                            /websocket.*?port.*?[:=]\\s*(\\d+)/gi,
-                            /ws.*?port.*?[:=]\\s*(\\d+)/gi,
-                            /port.*?[:=]\\s*(\\d{4})/gi  // 4-digit ports
-                        ];
-                        
-                        for (const script of scripts) {
-                            const content = script.textContent || '';
-                            for (const pattern of portPatterns) {
-                                const match = content.match(pattern);
-                                if (match && match[1]) {
-                                    const port = match[1];
-                                    if (parseInt(port) > 8000 && parseInt(port) < 9000) {
-                                        // Likely a WebSocket port
-                                        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                                        const url = `${protocol}//${window.location.hostname}:${port}/`;
-                                        console.log('Constructed WebSocket URL from port:', url);
-                                        return url;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        return null;
-                    }
-                """)
-            except Exception as e:
-                self.logger.warning(f"Error searching for WebSocket URL: {e}")
-                
-        # Method 3: Try common WebSocket endpoints
-        if not ws_url and self.base_url:
-            # Extract base domain
-            import urllib.parse
-            parsed = urllib.parse.urlparse(self.base_url)
-            base_domain = f"{parsed.scheme}://{parsed.netloc}"
-            
-            # Common WebSocket paths
-            common_paths = ['/ws', '/websocket', '/live-timing/ws', '/live/ws', '/socket']
-            
-            for path in common_paths:
-                test_url = base_domain.replace('http://', 'ws://').replace('https://', 'wss://') + path
-                # We can't test these directly here, but store as candidates
-                if not ws_url:
-                    ws_url = test_url
-                    self.logger.info(f"Trying common WebSocket endpoint: {ws_url}")
-                    break
-        
-        # Fix WebSocket URL protocol based on main site protocol
-        if ws_url and self.base_url:
-            # If main site is HTTPS but WebSocket is WS, convert to WSS
-            if self.base_url.startswith('https://') and ws_url.startswith('ws://'):
-                original_url = ws_url
-                ws_url = ws_url.replace('ws://', 'wss://', 1)
-                self.logger.info(f"Converted WebSocket URL from {original_url} to {ws_url}")
-                    
-        return ws_url
+        self.ws_url = ws_url
+        self.logger.info(f"WebSocket URL manually set to: {ws_url}")
         
     async def initialize(self, url: str) -> bool:
         """
-        Initialize the hybrid parser by detecting available methods.
+        Initialize the hybrid parser.
         """
         self.base_url = url
         self.logger.info(f"Initializing hybrid parser for URL: {url}")
         
-        # First, try to initialize Playwright to detect WebSocket
+        # First, try to initialize Playwright
         self.playwright_parser = ApexTimingParserPlaywright()
         playwright_initialized = await self.playwright_parser.initialize()
         
         if playwright_initialized:
             try:
-                # Navigate to page to detect WebSocket
+                # Navigate to page
                 await self.playwright_parser.page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 
-                # Try to detect WebSocket URL
-                self.ws_url = await self.detect_websocket_url(self.playwright_parser.page)
-                
-                
+                # Check if we have a manually set WebSocket URL
                 if self.ws_url:
-                    self.logger.info(f"WebSocket URL detected: {self.ws_url}")
+                    self.logger.info(f"Using manually set WebSocket URL: {self.ws_url}")
                     
                     # Try to initialize WebSocket parser
                     self.websocket_parser = ApexTimingWebSocketParser()
@@ -212,13 +83,13 @@ class ApexTimingHybridParser:
                     except Exception as e:
                         self.logger.warning(f"WebSocket test failed: {e} - falling back to Playwright")
                 else:
-                    self.logger.info("No WebSocket detected - using Playwright mode")
+                    self.logger.info("No WebSocket URL provided - using Playwright mode")
                     if self.force_websocket:
-                        self.logger.error("WebSocket forced but not available on this page!")
+                        self.logger.error("WebSocket forced but no WebSocket URL provided!")
                         return False
                     
             except Exception as e:
-                self.logger.error(f"Error during WebSocket detection: {e}")
+                self.logger.error(f"Error during initialization: {e}")
                 if self.force_websocket:
                     return False
                 

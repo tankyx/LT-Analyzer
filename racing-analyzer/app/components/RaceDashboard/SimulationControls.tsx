@@ -1,8 +1,9 @@
 // racing-analyzer/app/components/RaceDashboard/SimulationControls.tsx
 import React, { useState, useEffect } from 'react';
+import TrackManager from './TrackManager';
 
 interface SimulationControlsProps {
-  onStart: (isSimulation?: boolean, timingUrl?: string, parserMode?: string) => void;
+  onStart: (isSimulation?: boolean, timingUrl?: string, parserMode?: string, websocketUrl?: string, trackId?: number) => void;
   onStop: () => void;
   isSimulating?: boolean;
   isDarkMode?: boolean;
@@ -24,8 +25,10 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   const [timer, setTimer] = useState<number>(0);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [timingUrl, setTimingUrl] = useState(currentTimingUrl || 'https://www.apex-timing.com/live-timing/karting-mariembourg/index.html');
-  const [urlChanged, setUrlChanged] = useState(false);
   const [parserMode, setParserMode] = useState<'playwright' | 'websocket' | 'hybrid'>('hybrid');
+  const [websocketUrl, setWebsocketUrl] = useState('');
+  const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
+  const [showUrlInput, setShowUrlInput] = useState(true);
 
   // Update timing URL when currentTimingUrl changes (only on mount)
   useEffect(() => {
@@ -74,7 +77,13 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
     setStatus(isSimulation ? 'Starting simulation...' : 'Starting real data collection...');
     
     try {
-      await onStart(isSimulation, isSimulation ? undefined : timingUrl, isSimulation ? undefined : parserMode);
+      await onStart(
+        isSimulation, 
+        isSimulation ? undefined : timingUrl, 
+        isSimulation ? undefined : parserMode,
+        isSimulation ? undefined : websocketUrl,
+        isSimulation ? undefined : selectedTrackId || undefined
+      );
       setStatus(isSimulation ? 'Simulation running' : 'Real data collection running');
       setShowModeSelector(false);
     } catch (error) {
@@ -133,54 +142,97 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className={`rounded-lg p-4 border ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
           <div className="flex flex-col space-y-4">
-            {/* URL Input - Always visible */}
-            <div>
-              <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Live Timing URL:
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={timingUrl}
-                  onChange={(e) => {
-                    setTimingUrl(e.target.value);
-                    if (isSimulating && !isSimulationMode && e.target.value !== currentTimingUrl) {
-                      setUrlChanged(true);
-                    }
-                  }}
-                  placeholder="https://www.apex-timing.com/live-timing/..."
-                  className={`flex-1 px-3 py-2 rounded border text-sm
-                    ${isDarkMode 
-                      ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
-                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
-                    }
-                    focus:outline-none focus:ring-2 focus:ring-blue-500
-                  `}
-                />
-                {isSimulating && !isSimulationMode && urlChanged && (
-                  <button
-                    onClick={async () => {
-                      try {
-                        await onStop();
-                        await onStart(false, timingUrl, parserMode);
-                        setUrlChanged(false);
-                        setStatus('URL updated and collection restarted');
-                      } catch (error) {
-                        setStatus(`Error updating URL: ${error instanceof Error ? error.message : 'Unknown error'}`);
-                      }
+            {/* Track Selection Mode Toggle */}
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={() => setShowUrlInput(false)}
+                className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                  ${!showUrlInput
+                    ? (isDarkMode 
+                        ? 'bg-blue-700 text-white border-blue-600' 
+                        : 'bg-blue-100 text-blue-800 border-blue-300')
+                    : (isDarkMode 
+                        ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                  }
+                `}
+              >
+                Select Track
+              </button>
+              <button
+                onClick={() => setShowUrlInput(true)}
+                className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                  ${showUrlInput
+                    ? (isDarkMode 
+                        ? 'bg-blue-700 text-white border-blue-600' 
+                        : 'bg-blue-100 text-blue-800 border-blue-300')
+                    : (isDarkMode 
+                        ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                  }
+                `}
+              >
+                Manual URL
+              </button>
+            </div>
+
+            {/* Track Selection or URL Input */}
+            {showUrlInput ? (
+              <div>
+                <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Live Timing URL:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={timingUrl}
+                    onChange={(e) => {
+                      setTimingUrl(e.target.value);
+                      setSelectedTrackId(null);
                     }}
-                    className={`px-3 py-2 rounded text-sm font-medium transition-all
+                    placeholder="https://www.apex-timing.com/live-timing/..."
+                    className={`flex-1 px-3 py-2 rounded border text-sm
                       ${isDarkMode 
-                        ? 'bg-blue-700 hover:bg-blue-600 text-white' 
-                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                        ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
+                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
                       }
+                      focus:outline-none focus:ring-2 focus:ring-blue-500
                     `}
-                  >
-                    Apply
-                  </button>
+                  />
+                </div>
+                {parserMode === 'websocket' && (
+                  <div className="mt-2">
+                    <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                      WebSocket URL (required for WebSocket mode):
+                    </label>
+                    <input
+                      type="text"
+                      value={websocketUrl}
+                      onChange={(e) => setWebsocketUrl(e.target.value)}
+                      placeholder="ws://www.apex-timing.com:8585/"
+                      className={`w-full px-3 py-2 rounded border text-sm
+                        ${isDarkMode 
+                          ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
+                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                        }
+                        focus:outline-none focus:ring-2 focus:ring-blue-500
+                      `}
+                    />
+                  </div>
                 )}
               </div>
-            </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto">
+                <TrackManager
+                  onSelectTrack={(track) => {
+                    setSelectedTrackId(track.id);
+                    setTimingUrl(track.timing_url);
+                    setWebsocketUrl(track.websocket_url || '');
+                  }}
+                  selectedTrackId={selectedTrackId}
+                />
+              </div>
+            )}
 
             {/* Parser Mode Selector - Only show for real data mode */}
             {!isSimulating && (

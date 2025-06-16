@@ -13,10 +13,14 @@ from flask_cors import CORS
 
 from apex_timing_parser import ApexTimingParserPlaywright
 from apex_timing_hybrid import ApexTimingHybridParser
+from database_manager import TrackDatabase
 
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
+
+# Initialize track database
+track_db = TrackDatabase()
 
 REQUIRED_PIT_STOPS = 7
 PIT_STOP_TIME = 158
@@ -516,16 +520,26 @@ async def update_race_data():
     
     if parser_mode == 'hybrid':
         parser = ApexTimingHybridParser()
-        print("Using hybrid parser (auto-detect WebSocket or Playwright)...")
+        # Set WebSocket URL if provided
+        if race_data.get('websocket_url'):
+            parser.set_websocket_url(race_data['websocket_url'])
+            print(f"Using hybrid parser with manually set WebSocket URL: {race_data['websocket_url']}")
+        else:
+            print("Using hybrid parser (Playwright-only mode, no WebSocket URL provided)...")
         init_result = await parser.initialize(race_data.get('timing_url', ''))
     elif parser_mode == 'websocket':
         # For WebSocket-only mode, we'll use the hybrid parser but force WebSocket
         parser = ApexTimingHybridParser()
         parser.force_websocket = True  # Add this flag to force WebSocket mode
-        print("Using WebSocket-only mode...")
+        # WebSocket URL is required for WebSocket-only mode
+        if not race_data.get('websocket_url'):
+            print("ERROR: WebSocket URL is required for WebSocket-only mode")
+            return
+        parser.set_websocket_url(race_data['websocket_url'])
+        print(f"Using WebSocket-only mode with URL: {race_data['websocket_url']}")
         init_result = await parser.initialize(race_data.get('timing_url', ''))
         if not parser.use_websocket:
-            print("WARNING: WebSocket not available for this page, cannot proceed in WebSocket-only mode")
+            print("WARNING: WebSocket connection failed, cannot proceed in WebSocket-only mode")
             return
     else:  # playwright
         parser = ApexTimingParserPlaywright()
@@ -659,10 +673,21 @@ def start_simulation():
         simulation_mode = data.get('simulation', False)
         timing_url = data.get('timingUrl', None)
         parser_mode = data.get('parserMode', 'hybrid')  # Default to hybrid
+        websocket_url = data.get('websocketUrl', None)  # Optional WebSocket URL
+        track_id = data.get('trackId', None)  # Optional track ID
+        
+        # If track ID is provided, get URLs from database
+        if track_id and not simulation_mode:
+            track = track_db.get_track_by_id(track_id)
+            if not track:
+                return jsonify({'status': 'error', 'message': 'Track not found'}), 404
+            timing_url = track['timing_url']
+            websocket_url = track['websocket_url']
+            print(f"Using track from database: {track['track_name']}")
         
         # Validate URL if provided and not in simulation mode
         if not simulation_mode and not timing_url:
-            return jsonify({'status': 'error', 'message': 'Timing URL is required for real data mode'}), 400
+            return jsonify({'status': 'error', 'message': 'Timing URL or track ID is required for real data mode'}), 400
         
         print(f"Starting with simulation mode: {simulation_mode}, URL: {timing_url}, Parser mode: {parser_mode}")
         
@@ -682,6 +707,7 @@ def start_simulation():
         race_data['is_running'] = False
         race_data['timing_url'] = timing_url  # Store the URL
         race_data['parser_mode'] = parser_mode  # Store the parser mode
+        race_data['websocket_url'] = websocket_url  # Store the WebSocket URL
         
         # Start a new thread
         start_update_thread()
@@ -828,6 +854,65 @@ def simulate_data():
     race_data['last_update'] = datetime.now().strftime('%H:%M:%S')
     
     return jsonify({'status': 'success', 'message': 'Simulation data generated'})
+
+# Track management API endpoints
+@app.route('/api/tracks', methods=['GET'])
+def get_tracks():
+    """Get all tracks from the database"""
+    tracks = track_db.get_all_tracks()
+    return jsonify({'tracks': tracks})
+
+@app.route('/api/tracks/<int:track_id>', methods=['GET'])
+def get_track(track_id):
+    """Get a specific track by ID"""
+    track = track_db.get_track_by_id(track_id)
+    if track:
+        return jsonify(track)
+    return jsonify({'error': 'Track not found'}), 404
+
+@app.route('/api/tracks', methods=['POST'])
+def add_track():
+    """Add a new track to the database"""
+    data = request.json
+    if not data or 'track_name' not in data or 'timing_url' not in data:
+        return jsonify({'error': 'track_name and timing_url are required'}), 400
+    
+    result = track_db.add_track(
+        track_name=data['track_name'],
+        timing_url=data['timing_url'],
+        websocket_url=data.get('websocket_url')
+    )
+    
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+@app.route('/api/tracks/<int:track_id>', methods=['PUT'])
+def update_track(track_id):
+    """Update a track in the database"""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    result = track_db.update_track(
+        track_id=track_id,
+        track_name=data.get('track_name'),
+        timing_url=data.get('timing_url'),
+        websocket_url=data.get('websocket_url')
+    )
+    
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result)
+
+@app.route('/api/tracks/<int:track_id>', methods=['DELETE'])
+def delete_track(track_id):
+    """Delete a track from the database"""
+    result = track_db.delete_track(track_id)
+    
+    if 'error' in result:
+        return jsonify(result), 404
+    return jsonify(result)
 
 if __name__ == '__main__':
     # Don't automatically start the update thread - wait for user to choose mode
