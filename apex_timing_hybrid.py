@@ -189,21 +189,16 @@ class ApexTimingHybridParser:
     def parse_grid_data(self, html_content: str) -> pd.DataFrame:
         """Parse grid data using the appropriate parser"""
         if self.use_websocket and self.websocket_parser:
-            # If using WebSocket, data is already in DataFrame format
-            df, _ = asyncio.get_event_loop().run_until_complete(
-                self.websocket_parser.get_current_data()
-            )
-            return df
+            # If using WebSocket, get the current standings directly
+            return self.websocket_parser.get_current_standings()
         else:
             return self.playwright_parser.parse_grid_data(html_content)
             
     def parse_dyna_info(self, html_content: str) -> Dict[str, str]:
         """Parse dynamic info using the appropriate parser"""
         if self.use_websocket and self.websocket_parser:
-            _, session_info = asyncio.get_event_loop().run_until_complete(
-                self.websocket_parser.get_current_data()
-            )
-            return session_info
+            # Return the session info directly from WebSocket parser
+            return self.websocket_parser.session_info
         else:
             return self.playwright_parser.parse_dyna_info(html_content)
             
