@@ -150,7 +150,21 @@ export const ApiService = {
     }
   },
 
-  addTrack: async (data: { track_name: string; timing_url: string; websocket_url?: string }) => {
+  addTrack: async (data: { 
+    track_name: string; 
+    timing_url: string; 
+    websocket_url?: string; 
+    column_mappings?: {
+      position?: number;
+      kart?: number;
+      team?: number;
+      status?: number;
+      lastLap?: number;
+      bestLap?: number;
+      gap?: number;
+      pitStops?: number;
+    } 
+  }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracks`, {
         method: 'POST',
@@ -170,7 +184,21 @@ export const ApiService = {
     }
   },
 
-  updateTrack: async (id: number, data: { track_name?: string; timing_url?: string; websocket_url?: string }) => {
+  updateTrack: async (id: number, data: { 
+    track_name?: string; 
+    timing_url?: string; 
+    websocket_url?: string; 
+    column_mappings?: {
+      position?: number;
+      kart?: number;
+      team?: number;
+      status?: number;
+      lastLap?: number;
+      bestLap?: number;
+      gap?: number;
+      pitStops?: number;
+    }
+  }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracks/${id}`, {
         method: 'PUT',

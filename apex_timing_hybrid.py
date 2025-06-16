@@ -41,6 +41,14 @@ class ApexTimingHybridParser:
         self.ws_url = ws_url
         self.logger.info(f"WebSocket URL manually set to: {ws_url}")
         
+    def set_column_mappings(self, mappings: Dict[str, int]) -> None:
+        """
+        Set custom column mappings for the WebSocket parser.
+        """
+        self.column_mappings = mappings
+        if self.websocket_parser:
+            self.websocket_parser.set_column_mappings(mappings)
+        
     async def initialize(self, url: str) -> bool:
         """
         Initialize the hybrid parser.
@@ -63,6 +71,10 @@ class ApexTimingHybridParser:
                     
                     # Try to initialize WebSocket parser
                     self.websocket_parser = ApexTimingWebSocketParser()
+                    
+                    # Apply column mappings if available
+                    if hasattr(self, 'column_mappings') and self.column_mappings:
+                        self.websocket_parser.set_column_mappings(self.column_mappings)
                     
                     # Test WebSocket connection
                     try:

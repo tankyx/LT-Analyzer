@@ -526,6 +526,10 @@ async def update_race_data():
             print(f"Using hybrid parser with manually set WebSocket URL: {race_data['websocket_url']}")
         else:
             print("Using hybrid parser (Playwright-only mode, no WebSocket URL provided)...")
+        # Set column mappings if provided
+        if race_data.get('column_mappings'):
+            parser.set_column_mappings(race_data['column_mappings'])
+            print(f"Set column mappings: {race_data['column_mappings']}")
         init_result = await parser.initialize(race_data.get('timing_url', ''))
     elif parser_mode == 'websocket':
         # For WebSocket-only mode, we'll use the hybrid parser but force WebSocket
@@ -537,6 +541,10 @@ async def update_race_data():
             return
         parser.set_websocket_url(race_data['websocket_url'])
         print(f"Using WebSocket-only mode with URL: {race_data['websocket_url']}")
+        # Set column mappings if provided
+        if race_data.get('column_mappings'):
+            parser.set_column_mappings(race_data['column_mappings'])
+            print(f"Set column mappings: {race_data['column_mappings']}")
         init_result = await parser.initialize(race_data.get('timing_url', ''))
         if not parser.use_websocket:
             print("WARNING: WebSocket connection failed, cannot proceed in WebSocket-only mode")
@@ -685,14 +693,18 @@ def start_simulation():
         websocket_url = data.get('websocketUrl', None)  # Optional WebSocket URL
         track_id = data.get('trackId', None)  # Optional track ID
         
-        # If track ID is provided, get URLs from database
+        # If track ID is provided, get URLs and column mappings from database
+        column_mappings = None
         if track_id and not simulation_mode:
             track = track_db.get_track_by_id(track_id)
             if not track:
                 return jsonify({'status': 'error', 'message': 'Track not found'}), 404
             timing_url = track['timing_url']
             websocket_url = track['websocket_url']
+            column_mappings = track.get('column_mappings', {})
             print(f"Using track from database: {track['track_name']}")
+            if column_mappings:
+                print(f"Column mappings: {column_mappings}")
         
         # Validate URL if provided and not in simulation mode
         if not simulation_mode and not timing_url:
@@ -717,6 +729,7 @@ def start_simulation():
         race_data['timing_url'] = timing_url  # Store the URL
         race_data['parser_mode'] = parser_mode  # Store the parser mode
         race_data['websocket_url'] = websocket_url  # Store the WebSocket URL
+        race_data['column_mappings'] = column_mappings  # Store column mappings
         
         # Start a new thread
         start_update_thread()
@@ -889,7 +902,8 @@ def add_track():
     result = track_db.add_track(
         track_name=data['track_name'],
         timing_url=data['timing_url'],
-        websocket_url=data.get('websocket_url')
+        websocket_url=data.get('websocket_url'),
+        column_mappings=data.get('column_mappings')
     )
     
     if 'error' in result:
@@ -907,7 +921,8 @@ def update_track(track_id):
         track_id=track_id,
         track_name=data.get('track_name'),
         timing_url=data.get('timing_url'),
-        websocket_url=data.get('websocket_url')
+        websocket_url=data.get('websocket_url'),
+        column_mappings=data.get('column_mappings')
     )
     
     if 'error' in result:
