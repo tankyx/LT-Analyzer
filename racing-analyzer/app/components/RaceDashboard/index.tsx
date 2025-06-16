@@ -350,6 +350,7 @@ const RaceDashboard = () => {
                 oldTeam.Status !== newTeam.Status;
               
               if (hasChanged) {
+                console.log(`Row updated: Kart ${newTeam.Kart} - Position: ${oldTeam.Position} -> ${newTeam.Position}, Last Lap: ${oldTeam['Last Lap']} -> ${newTeam['Last Lap']}`);
                 newUpdatedRows.set(newTeam.Kart, currentTime);
               }
             }

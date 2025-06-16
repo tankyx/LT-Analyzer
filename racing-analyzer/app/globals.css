@@ -40,25 +40,47 @@ body {
   animation: pit-pulse 1.5s infinite;
 }
 
-@keyframes row-flash {
-  0%, 100% {
+@keyframes row-breathe {
+  0% {
     background-color: rgba(59, 130, 246, 0);
-  }
-  25% {
-    background-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
   }
   50% {
-    background-color: rgba(59, 130, 246, 0.5);
+    background-color: rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 20px 5px rgba(59, 130, 246, 0.3);
   }
-  75% {
-    background-color: rgba(59, 130, 246, 0.3);
+  100% {
+    background-color: rgba(59, 130, 246, 0);
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
   }
 }
 
 .row-updated {
-  animation: row-flash 0.5s ease-in-out 3;
+  animation: row-breathe 1s ease-in-out 5;
+  position: relative;
+  z-index: 1;
 }
 
 .dark .row-updated {
-  animation: row-flash 0.5s ease-in-out 3;
+  animation: row-breathe 1s ease-in-out 5;
+}
+
+/* Make the animation more visible in dark mode */
+.dark .row-updated {
+  animation-name: row-breathe-dark;
+}
+
+@keyframes row-breathe-dark {
+  0% {
+    background-color: rgba(96, 165, 250, 0);
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+  }
+  50% {
+    background-color: rgba(96, 165, 250, 0.3);
+    box-shadow: 0 0 30px 10px rgba(96, 165, 250, 0.4);
+  }
+  100% {
+    background-color: rgba(96, 165, 250, 0);
+    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
+  }
 }
