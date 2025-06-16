@@ -91,7 +91,7 @@ class ApexTimingWebSocketParser:
                         FOREIGN KEY (session_id) REFERENCES sessions(session_id)
                     )
                 ''')
-            self.logger.info("Database setup complete")
+            self.logger.debug("Database setup complete")
         except Exception as e:
             self.logger.error(f"Database setup error: {e}")
             raise
@@ -104,7 +104,7 @@ class ApexTimingWebSocketParser:
             for field, col_num in mappings.items():
                 if col_num and isinstance(col_num, int):
                     self.custom_column_map[col_num - 1] = self._field_name_mapping(field)
-            self.logger.info(f"Custom column mappings set: {self.custom_column_map}")
+            self.logger.debug(f"Custom column mappings set: {self.custom_column_map}")
     
     def _field_name_mapping(self, field: str) -> str:
         """Map frontend field names to internal field names"""
@@ -210,14 +210,14 @@ class ApexTimingWebSocketParser:
                             if field == 'Kart' and value:
                                 self.row_map[row_id] = value
                                 
-            self.logger.info(f"Grid initialized with {len(self.grid_data)} rows")
+            self.logger.debug(f"Grid initialized with {len(self.grid_data)} rows")
                         
     def process_grid_message(self, data: Dict):
         """Process grid data messages"""
         # The grid message contains the entire HTML table
         if data['parameter'] == '' and data['value']:
             # This is the full grid HTML
-            self.logger.info("Processing full grid HTML")
+            self.logger.debug("Processing full grid HTML")
             from bs4 import BeautifulSoup
             soup = BeautifulSoup(data['value'], 'html.parser')
             
@@ -256,7 +256,7 @@ class ApexTimingWebSocketParser:
                     elif data_type == 'pit' or 'Stands' in text or 'Pit' in text:
                         self.column_map[i] = 'Pit Stops'
                         
-                self.logger.info(f"Column map initialized: {self.column_map}")
+                self.logger.debug(f"Column map initialized: {self.column_map}")
             
             # Process data rows
             data_rows = soup.find_all('tr', {'data-id': True})
@@ -302,7 +302,7 @@ class ApexTimingWebSocketParser:
                             if field == 'Kart' and value:
                                 self.row_map[row_id] = value
                                 
-            self.logger.info(f"Grid initialized with {len(self.grid_data)} rows")
+            self.logger.debug(f"Grid initialized with {len(self.grid_data)} rows")
         else:
             # This might be a row update
             row_id = data['parameter']
@@ -409,13 +409,13 @@ class ApexTimingWebSocketParser:
         """Process title messages (session info)"""
         title = data['value']
         self.session_info['title'] = title
-        self.logger.info(f"Session title: {title}")
+        self.logger.debug(f"Session title: {title}")
         
     def get_current_standings(self) -> pd.DataFrame:
         """Convert current grid data to DataFrame format compatible with existing code"""
         teams = []
         
-        self.logger.info(f"get_current_standings: grid_data has {len(self.grid_data)} rows")
+        self.logger.debug(f"get_current_standings: grid_data has {len(self.grid_data)} rows")
         
         for row_id, row_data in self.grid_data.items():
             if 'Kart' in row_data and row_data['Kart']:
@@ -435,9 +435,9 @@ class ApexTimingWebSocketParser:
         # Sort by position
         teams.sort(key=lambda x: int(x['Position']) if x['Position'].isdigit() else 999)
         
-        self.logger.info(f"Returning {len(teams)} teams from get_current_standings")
+        self.logger.debug(f"Returning {len(teams)} teams from get_current_standings")
         if teams:
-            self.logger.info(f"First team: {teams[0]}")
+            self.logger.debug(f"First team: {teams[0]}")
         
         return pd.DataFrame(teams)
         
@@ -528,7 +528,7 @@ class ApexTimingWebSocketParser:
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         ''', lap_history_records)
                     
-                    self.logger.info(f"Stored {len(current_records)} current records and {len(lap_history_records)} lap history records")
+                    self.logger.debug(f"Stored {len(current_records)} current records and {len(lap_history_records)} lap history records")
             except Exception as e:
                 self.logger.error(f"Error storing data in database: {e}")
                 
@@ -545,7 +545,7 @@ class ApexTimingWebSocketParser:
     async def connect_websocket(self, ws_url: str):
         """Connect to the WebSocket endpoint"""
         try:
-            self.logger.info(f"Connecting to WebSocket: {ws_url}")
+            self.logger.debug(f"Connecting to WebSocket: {ws_url}")
             
             # Try connecting with different parameters
             # Add headers that might be required
@@ -608,7 +608,7 @@ class ApexTimingWebSocketParser:
                     raise
                     
             self.is_connected = True
-            self.logger.info("WebSocket connected successfully")
+            self.logger.debug("WebSocket connected successfully")
             
             # Check WebSocket state
             if self.websocket:
@@ -636,7 +636,7 @@ class ApexTimingWebSocketParser:
             await self.websocket.close()
             self.websocket = None
             self.is_connected = False
-            self.logger.info("WebSocket disconnected")
+            self.logger.debug("WebSocket disconnected")
             
     async def monitor_race_websocket(self, ws_url: str, session_name: str = "Live Session", 
                                    track: str = "Karting Mariembourg"):
@@ -658,37 +658,32 @@ class ApexTimingWebSocketParser:
                 # Send initial message to request data (some WebSocket servers require this)
                 try:
                     await self.websocket.send("init")
-                    self.logger.info("Sent init message to WebSocket")
+                    self.logger.debug("Sent init message to WebSocket")
                 except Exception as e:
                     self.logger.warning(f"Could not send init message: {e}")
                 
                 # Listen for messages
-                self.logger.info("Waiting for WebSocket messages...")
+                self.logger.debug("Waiting for WebSocket messages...")
                 message_count = 0
                 async for message in self.websocket:
                     message_count += 1
-                    self.logger.info(f"Received WebSocket message #{message_count}")
                     try:
-                        # Log full raw message
-                        self.logger.info(f"WebSocket raw message (length: {len(message)}): {message}")
+                        # Log only the raw message
+                        self.logger.info(f"WebSocket message #{message_count}: {message}")
                         
                         # Split message by newlines as it contains multiple commands
                         lines = message.strip().split('\n')
-                        self.logger.info(f"Message contains {len(lines)} commands")
                         
                         for i, line in enumerate(lines):
                             if not line.strip():
                                 continue
                                 
-                            self.logger.info(f"Processing line {i+1}/{len(lines)}: {line}")
-                            
                             # Parse each command line
                             parsed = self.parse_websocket_message(line)
                             if not parsed:
                                 continue
                                 
                             command = parsed['command']
-                            self.logger.info(f"WebSocket command: {command}, parameter: {parsed.get('parameter', 'N/A')}, value: {parsed.get('value', 'N/A')[:100]}...")
                             
                             # Process different message types
                             if command == 'init':
@@ -701,10 +696,10 @@ class ApexTimingWebSocketParser:
                                 self.process_css_message(parsed)
                             elif command == 'title1':
                                 self.session_info['title1'] = parsed['value']
-                                self.logger.info(f"Session title1: {parsed['value']}")
+                                self.logger.debug(f"Session title1: {parsed['value']}")
                             elif command == 'title2':
                                 self.session_info['title2'] = parsed['value']
-                                self.logger.info(f"Session title2: {parsed['value']}")
+                                self.logger.debug(f"Session title2: {parsed['value']}")
                             elif command == 'title':
                                 self.process_title_message(parsed)
                             elif command == 'clear':
@@ -715,15 +710,15 @@ class ApexTimingWebSocketParser:
                             elif command == 'com':
                                 # Comment/info message
                                 self.session_info['comment'] = parsed['value']
-                                self.logger.info(f"Comment message: {parsed['value']}")
+                                self.logger.debug(f"Comment message: {parsed['value']}")
                             elif command == 'msg':
                                 # Message (best lap info etc)
                                 self.session_info['message'] = parsed['value']
-                                self.logger.info(f"Message update: {parsed['value']}")
+                                self.logger.debug(f"Message update: {parsed['value']}")
                             elif command == 'track':
                                 # Track info
                                 self.session_info['track'] = parsed['value']
-                                self.logger.info(f"Track info: {parsed['value']}")
+                                self.logger.debug(f"Track info: {parsed['value']}")
                             elif command.startswith('r') and 'c' in command:
                                 # Cell update message (e.g., r15c6|ti|3:28.267)
                                 cell_id = command
@@ -802,7 +797,7 @@ class ApexTimingWebSocketParser:
                                         else:
                                             self.grid_data[row_id]['Pit Stops'] = value
                                     
-                                    self.logger.info(f"Cell update: {cell_id} col={col_idx+1} type={update_type} value={value}")
+                                    self.logger.debug(f"Cell update: {cell_id} col={col_idx+1} type={update_type} value={value}")
                             elif command.startswith('r'):
                                 # Row update message (e.g., r35407|#|14)
                                 # These indicate position changes or other row-level updates
@@ -815,29 +810,29 @@ class ApexTimingWebSocketParser:
                                     if row_id not in self.grid_data:
                                         self.grid_data[row_id] = {}
                                     self.grid_data[row_id]['Position'] = value
-                                    self.logger.info(f"Position update: {row_id} -> position {value}")
+                                    self.logger.debug(f"Position update: {row_id} -> position {value}")
                                 elif update_type == '*':
                                     # Some other update, possibly timing
-                                    self.logger.info(f"Row update: {row_id} type={update_type} value={value}")
+                                    self.logger.debug(f"Row update: {row_id} type={update_type} value={value}")
                             else:
                                 # Log unrecognized commands
-                                self.logger.info(f"Unrecognized command: {command} with parameter={parsed.get('parameter', 'N/A')} and value={parsed.get('value', 'N/A')[:50]}...")
+                                self.logger.debug(f"Unrecognized command: {command} with parameter={parsed.get('parameter', 'N/A')} and value={parsed.get('value', 'N/A')[:50]}...")
                                 
                         # After processing all commands in the message, save to database
                         df = self.get_current_standings()
                         if not df.empty:
                             self.store_lap_data(session_id, df)
-                            self.logger.info(f"Processed {len(df)} teams from WebSocket message #{message_count}")
+                            self.logger.debug(f"Processed {len(df)} teams from WebSocket message #{message_count}")
                             # Log sample data for debugging
                             if len(df) > 0:
                                 first_team = df.iloc[0]
-                                self.logger.info(f"Leader: Pos={first_team.get('Position')}, "
+                                self.logger.debug(f"Leader: Pos={first_team.get('Position')}, "
                                                f"Kart={first_team.get('Kart')}, Team={first_team.get('Team')}, "
                                                f"Gap={first_team.get('Gap')}, Status={first_team.get('Status')}")
                         else:
-                            self.logger.info(f"No team data in WebSocket message #{message_count}")
+                            self.logger.debug(f"No team data in WebSocket message #{message_count}")
                         
-                        self.logger.info(f"=== End of WebSocket message #{message_count} processing ===")
+                        self.logger.debug(f"=== End of WebSocket message #{message_count} processing ===")
                             
                     except Exception as e:
                         self.logger.error(f"Error processing message: {e}")
