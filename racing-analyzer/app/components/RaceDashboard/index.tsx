@@ -135,6 +135,7 @@ const RaceDashboard = () => {
     timing_url?: string;
     [key: string]: unknown;
   } | null>(null);
+  const [updatedRows, setUpdatedRows] = useState<Map<string, number>>(new Map()); // Track updated rows with timestamps
 
   const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number) => {
     try {
@@ -330,6 +331,40 @@ const RaceDashboard = () => {
     const fetchData = async () => {
       try {
         const data = await ApiService.getRaceData();
+        
+        // Detect changes in teams
+        if (data.teams && teams.length > 0) {
+          const currentTime = Date.now();
+          const newUpdatedRows = new Map(updatedRows);
+          
+          data.teams.forEach((newTeam: Team) => {
+            const oldTeam = teams.find(t => t.Kart === newTeam.Kart);
+            if (oldTeam) {
+              // Check if any critical fields have changed
+              const hasChanged = 
+                oldTeam.Position !== newTeam.Position ||
+                oldTeam['Last Lap'] !== newTeam['Last Lap'] ||
+                oldTeam['Best Lap'] !== newTeam['Best Lap'] ||
+                oldTeam.Gap !== newTeam.Gap ||
+                oldTeam['Pit Stops'] !== newTeam['Pit Stops'] ||
+                oldTeam.Status !== newTeam.Status;
+              
+              if (hasChanged) {
+                newUpdatedRows.set(newTeam.Kart, currentTime);
+              }
+            }
+          });
+          
+          // Clean up old entries (older than 5 seconds)
+          newUpdatedRows.forEach((timestamp, kart) => {
+            if (currentTime - timestamp > 5000) {
+              newUpdatedRows.delete(kart);
+            }
+          });
+          
+          setUpdatedRows(newUpdatedRows);
+        }
+        
         setTeams(data.teams || []);
         setSessionInfo(data.session_info || {});
         setLastUpdate(data.last_update || '');
@@ -360,7 +395,8 @@ const RaceDashboard = () => {
     fetchData();
     const interval = setInterval(fetchData, 1000);
     return () => clearInterval(interval);
-  }, [checkPitStops]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkPitStops]); // Only run on mount, teams and updatedRows changes are handled internally
 
   const toggleTeamMonitoring = (kartNum: string) => {
     setMonitoredTeams(prev => 
@@ -424,6 +460,7 @@ const RaceDashboard = () => {
                     ${team.Kart === myTeam ? (isDarkMode ? 'bg-blue-900 hover:bg-blue-800' : 'bg-blue-50 hover:bg-blue-100') : ''}
                     ${team.Status === 'Pit-in' ? (isDarkMode ? 'bg-red-900/40 hover:bg-red-800/40' : 'bg-red-50 hover:bg-red-100') : ''}
                     ${monitoredTeams.includes(team.Kart) && team.Status === 'Pit-in' ? 'pit-alert' : ''}
+                    ${updatedRows.has(team.Kart) ? 'row-updated' : ''}
                   `}
                   style={monitoredTeams.includes(team.Kart) ? { 
                     borderLeft: `4px solid ${teamColors[team.Kart] || 'transparent'}`

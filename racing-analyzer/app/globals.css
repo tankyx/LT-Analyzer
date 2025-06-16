@@ -39,3 +39,26 @@ body {
 .dark .pit-alert {
   animation: pit-pulse 1.5s infinite;
 }
+
+@keyframes row-flash {
+  0%, 100% {
+    background-color: rgba(59, 130, 246, 0);
+  }
+  25% {
+    background-color: rgba(59, 130, 246, 0.3);
+  }
+  50% {
+    background-color: rgba(59, 130, 246, 0.5);
+  }
+  75% {
+    background-color: rgba(59, 130, 246, 0.3);
+  }
+}
+
+.row-updated {
+  animation: row-flash 0.5s ease-in-out 3;
+}
+
+.dark .row-updated {
+  animation: row-flash 0.5s ease-in-out 3;
+}
