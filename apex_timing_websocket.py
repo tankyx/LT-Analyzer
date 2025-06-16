@@ -189,23 +189,114 @@ class ApexTimingWebSocketParser:
                         
     def process_grid_message(self, data: Dict):
         """Process grid data messages"""
-        row_id = data['parameter']
-        values = data['value'].split('|')
-        
-        self.logger.debug(f"Processing grid message for row {row_id}, {len(values)} values")
-        
-        if row_id not in self.grid_data:
-            self.grid_data[row_id] = {}
+        # The grid message contains the entire HTML table
+        if data['parameter'] == '' and data['value']:
+            # This is the full grid HTML
+            self.logger.info("Processing full grid HTML")
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(data['value'], 'html.parser')
             
-        # Update grid data for this row
-        for i, value in enumerate(values):
-            if i in self.column_map:
-                field = self.column_map[i]
-                self.grid_data[row_id][field] = value.strip()
+            # Clear existing data
+            self.grid_data.clear()
+            self.row_map.clear()
+            self.column_map.clear()
+            
+            # Find header row to build column map
+            header_row = soup.find('tr', {'class': 'head'})
+            if header_row:
+                cells = header_row.find_all('td')
+                for i, cell in enumerate(cells):
+                    data_type = cell.get('data-type', '')
+                    text = cell.text.strip()
+                    
+                    # Map column based on data-type or text content
+                    if data_type == 'sta':
+                        self.column_map[i] = 'Status'
+                    elif data_type == 'rk' or 'Clt' in text or 'Pos' in text:
+                        self.column_map[i] = 'Position'
+                    elif data_type == 'no' or 'Kart' in text:
+                        self.column_map[i] = 'Kart'
+                    elif data_type == 'dr' or 'Team' in text or 'Equipe' in text:
+                        self.column_map[i] = 'Team'
+                    elif data_type == 'llp' or 'Dernier' in text or 'Last' in text:
+                        self.column_map[i] = 'Last Lap'
+                    elif data_type == 'blp' or 'Meilleur' in text or 'Best' in text:
+                        self.column_map[i] = 'Best Lap'
+                    elif data_type == 'gap' or 'Ecart' in text or 'Gap' in text:
+                        self.column_map[i] = 'Gap'
+                    elif data_type == 'int' or 'Interv' in text:
+                        self.column_map[i] = 'Interval'
+                    elif data_type == 'otr' or 'piste' in text or 'RunTime' in text:
+                        self.column_map[i] = 'RunTime'
+                    elif data_type == 'pit' or 'Stands' in text or 'Pit' in text:
+                        self.column_map[i] = 'Pit Stops'
+                        
+                self.logger.info(f"Column map initialized: {self.column_map}")
+            
+            # Process data rows
+            data_rows = soup.find_all('tr', {'data-id': True})
+            for row in data_rows:
+                if row.get('class') and 'head' in row.get('class'):
+                    continue
+                    
+                row_id = row.get('data-id')
+                if row_id:
+                    self.grid_data[row_id] = {}
+                    cells = row.find_all('td')
+                    
+                    for i, cell in enumerate(cells):
+                        if i in self.column_map:
+                            field = self.column_map[i]
+                            
+                            # Special handling for different cell types
+                            if field == 'Status':
+                                # Check for status classes
+                                cell_class = cell.get('class', [])
+                                if 'si' in cell_class:
+                                    value = 'Pit-in'
+                                elif 'so' in cell_class:
+                                    value = 'Pit-out'
+                                elif 'sf' in cell_class:
+                                    value = 'Finished'
+                                else:
+                                    value = 'On Track'
+                            elif field == 'Kart':
+                                # Kart number might be in a div
+                                div = cell.find('div')
+                                value = div.text.strip() if div else cell.text.strip()
+                            elif field == 'Position':
+                                # Position might be in a p tag
+                                p = cell.find('p')
+                                value = p.text.strip() if p else cell.text.strip()
+                            else:
+                                value = cell.text.strip()
+                                
+                            self.grid_data[row_id][field] = value
+                            
+                            # Store kart mapping
+                            if field == 'Kart' and value:
+                                self.row_map[row_id] = value
+                                
+            self.logger.info(f"Grid initialized with {len(self.grid_data)} rows")
+        else:
+            # This might be a row update
+            row_id = data['parameter']
+            values = data['value'].split('|')
+            
+            self.logger.debug(f"Processing grid row update for row {row_id}, {len(values)} values")
+            
+            if row_id not in self.grid_data:
+                self.grid_data[row_id] = {}
                 
-                # If this is the kart number column, store the mapping
-                if field == 'Kart' and value.strip():
-                    self.row_map[row_id] = value.strip()
+            # Update grid data for this row
+            for i, value in enumerate(values):
+                if i in self.column_map:
+                    field = self.column_map[i]
+                    self.grid_data[row_id][field] = value.strip()
+                    
+                    # If this is the kart number column, store the mapping
+                    if field == 'Kart' and value.strip():
+                        self.row_map[row_id] = value.strip()
                     
     def process_update_message(self, data: Dict):
         """Process cell update messages"""
@@ -299,7 +390,7 @@ class ApexTimingWebSocketParser:
         """Convert current grid data to DataFrame format compatible with existing code"""
         teams = []
         
-        self.logger.debug(f"get_current_standings: grid_data has {len(self.grid_data)} rows")
+        self.logger.info(f"get_current_standings: grid_data has {len(self.grid_data)} rows")
         
         for row_id, row_data in self.grid_data.items():
             if 'Kart' in row_data and row_data['Kart']:
@@ -318,6 +409,10 @@ class ApexTimingWebSocketParser:
                 
         # Sort by position
         teams.sort(key=lambda x: int(x['Position']) if x['Position'].isdigit() else 999)
+        
+        self.logger.info(f"Returning {len(teams)} teams from get_current_standings")
+        if teams:
+            self.logger.info(f"First team: {teams[0]}")
         
         return pd.DataFrame(teams)
         
@@ -549,48 +644,71 @@ class ApexTimingWebSocketParser:
                         else:
                             self.logger.info(f"WebSocket raw message: {message}")
                         
-                        # Parse the message
-                        parsed = self.parse_websocket_message(message)
-                        if not parsed:
-                            continue
-                            
-                        command = parsed['command']
-                        self.logger.debug(f"WebSocket command: {command}, parameter: {parsed.get('parameter', 'N/A')}")
+                        # Split message by newlines as it contains multiple commands
+                        lines = message.strip().split('\n')
+                        self.logger.info(f"Message contains {len(lines)} commands")
                         
-                        # Process different message types
-                        if command == 'init':
-                            self.process_init_message(parsed)
-                        elif command == 'grid':
-                            self.process_grid_message(parsed)
-                        elif command == 'update':
-                            self.process_update_message(parsed)
-                        elif command == 'css':
-                            self.process_css_message(parsed)
-                        elif command == 'title':
-                            self.process_title_message(parsed)
-                        elif command == 'clear':
-                            # Clear data for the specified element
-                            if parsed['parameter'] == 'grid':
-                                self.grid_data.clear()
-                                self.row_map.clear()
-                        elif command.startswith('r'):
-                            # Row update message (e.g., r35407|#|14)
-                            # These indicate position changes or other row-level updates
-                            row_id = command
-                            update_type = parsed['parameter']
-                            value = parsed['value']
-                            
-                            if update_type == '#':
-                                # Position update
-                                if row_id not in self.grid_data:
-                                    self.grid_data[row_id] = {}
-                                self.grid_data[row_id]['Position'] = value
-                                self.logger.debug(f"Position update: {row_id} -> position {value}")
-                            elif update_type == '*':
-                                # Some other update, possibly timing
-                                self.logger.debug(f"Row update: {row_id} type={update_type} value={value}")
+                        for line in lines:
+                            if not line.strip():
+                                continue
                                 
-                        # Periodically save to database
+                            # Parse each command line
+                            parsed = self.parse_websocket_message(line)
+                            if not parsed:
+                                continue
+                                
+                            command = parsed['command']
+                            self.logger.debug(f"WebSocket command: {command}, parameter: {parsed.get('parameter', 'N/A')}")
+                            
+                            # Process different message types
+                            if command == 'init':
+                                self.process_init_message(parsed)
+                            elif command == 'grid':
+                                self.process_grid_message(parsed)
+                            elif command == 'update':
+                                self.process_update_message(parsed)
+                            elif command == 'css':
+                                self.process_css_message(parsed)
+                            elif command == 'title1':
+                                self.session_info['title1'] = parsed['value']
+                                self.logger.info(f"Session title1: {parsed['value']}")
+                            elif command == 'title2':
+                                self.session_info['title2'] = parsed['value']
+                                self.logger.info(f"Session title2: {parsed['value']}")
+                            elif command == 'title':
+                                self.process_title_message(parsed)
+                            elif command == 'clear':
+                                # Clear data for the specified element
+                                if parsed['parameter'] == 'grid':
+                                    self.grid_data.clear()
+                                    self.row_map.clear()
+                            elif command == 'com':
+                                # Comment/info message
+                                self.session_info['comment'] = parsed['value']
+                            elif command == 'msg':
+                                # Message (best lap info etc)
+                                self.session_info['message'] = parsed['value']
+                            elif command == 'track':
+                                # Track info
+                                self.session_info['track'] = parsed['value']
+                            elif command.startswith('r'):
+                                # Row update message (e.g., r35407|#|14)
+                                # These indicate position changes or other row-level updates
+                                row_id = command
+                                update_type = parsed['parameter']
+                                value = parsed['value']
+                                
+                                if update_type == '#':
+                                    # Position update
+                                    if row_id not in self.grid_data:
+                                        self.grid_data[row_id] = {}
+                                    self.grid_data[row_id]['Position'] = value
+                                    self.logger.debug(f"Position update: {row_id} -> position {value}")
+                                elif update_type == '*':
+                                    # Some other update, possibly timing
+                                    self.logger.debug(f"Row update: {row_id} type={update_type} value={value}")
+                                
+                        # After processing all commands in the message, save to database
                         df = self.get_current_standings()
                         if not df.empty:
                             self.store_lap_data(session_id, df)
