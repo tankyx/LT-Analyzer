@@ -3,3 +3,8 @@ __pycache__/
 repopack-output.txt
 lt-venv/
 live-timing-extract.html.txt
+race_data.db
+tracks.db
+*.db
+*.log
+racing-venv/
