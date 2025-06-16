@@ -72,6 +72,28 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPitStatusRef = useRef<string>('');
 
+  // Pastel colors for drivers (4 opposite colors on color wheel)
+  const driverColors = useMemo(() => {
+    const colors = [
+      { light: 'rgb(255, 230, 230)', dark: 'rgb(60, 30, 30)' },    // Pastel Red
+      { light: 'rgb(230, 255, 230)', dark: 'rgb(30, 60, 30)' },    // Pastel Green
+      { light: 'rgb(230, 240, 255)', dark: 'rgb(30, 40, 60)' },    // Pastel Blue
+      { light: 'rgb(255, 245, 230)', dark: 'rgb(60, 50, 30)' },    // Pastel Orange
+      { light: 'rgb(255, 230, 255)', dark: 'rgb(60, 30, 60)' },    // Pastel Purple
+      { light: 'rgb(230, 255, 255)', dark: 'rgb(30, 60, 60)' },    // Pastel Cyan
+      { light: 'rgb(255, 255, 230)', dark: 'rgb(60, 60, 30)' },    // Pastel Yellow
+      { light: 'rgb(240, 230, 255)', dark: 'rgb(40, 30, 60)' },    // Pastel Indigo
+      { light: 'rgb(255, 240, 245)', dark: 'rgb(60, 40, 50)' },    // Pastel Pink
+      { light: 'rgb(240, 255, 240)', dark: 'rgb(40, 60, 40)' },    // Pastel Mint
+    ];
+    return colors;
+  }, []);
+
+  const getDriverColor = (index: number) => {
+    const colorIndex = index % driverColors.length;
+    return isDarkMode ? driverColors[colorIndex].dark : driverColors[colorIndex].light;
+  };
+
   // Calculate available jokers and long stints
   const availableSpecialStints = useMemo(() => {
     const { numStints, minStintTime, maxStintTime, pitDuration, totalRaceTime } = config;
@@ -143,8 +165,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       maxJokers: Math.max(0, maxJokers),
       maxLongs: Math.max(0, maxLongs),
       baseStintTime: Math.round(baseStintTime),
-      jokerRange: `${minStintTime}-${minStintTime + 3}`,
-      longRange: `${maxStintTime - 3}-${maxStintTime}`
+      jokerRange: `${minStintTime}-${minStintTime + 5}`,
+      longRange: `${maxStintTime - 5}-${maxStintTime}`
     };
   }, [config]);
 
@@ -319,8 +341,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     assignment.duration = duration;
     
     // Determine if it's a joker or long stint
-    assignment.isJoker = duration > 0 && duration <= config.minStintTime;
-    assignment.isLong = duration >= config.maxStintTime;
+    // Joker: min <= duration <= min + 5
+    assignment.isJoker = duration > 0 && duration >= config.minStintTime && duration <= config.minStintTime + 5;
+    
+    // Long: max - 5 <= duration <= max
+    assignment.isLong = duration >= config.maxStintTime - 5 && duration <= config.maxStintTime;
     
     // Recalculate times
     let currentTime = 0;
@@ -349,7 +374,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       
       {/* Active Stint Timer */}
       {activeStint && (
-        <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-green-900' : 'bg-green-100'}`}>
+        <div 
+          className={`mb-6 p-4 rounded-lg border-2 ${isDarkMode ? 'border-green-700' : 'border-green-300'}`}
+          style={{
+            backgroundColor: getDriverColor(activeStint.driverIndex),
+            color: isDarkMode ? '#ffffff' : '#000000'
+          }}
+        >
           <h3 className="text-lg font-semibold mb-2">Active Stint</h3>
           <div className="flex items-center gap-4">
             <span className="text-xl font-bold">
@@ -369,11 +400,22 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           value={currentDriverIndex}
           onChange={(e) => setCurrentDriverIndex(parseInt(e.target.value))}
           className={`w-full md:w-64 p-2 rounded border ${
-            isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+            isDarkMode ? 'border-gray-600' : 'border-gray-300'
           }`}
+          style={{
+            backgroundColor: getDriverColor(currentDriverIndex),
+            color: isDarkMode ? '#ffffff' : '#000000'
+          }}
         >
           {driverNames.map((name, index) => (
-            <option key={index} value={index}>
+            <option 
+              key={index} 
+              value={index}
+              style={{
+                backgroundColor: getDriverColor(index),
+                color: isDarkMode ? '#ffffff' : '#000000'
+              }}
+            >
               {name}
             </option>
           ))}
@@ -512,9 +554,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 type="text"
                 value={name}
                 onChange={(e) => handleDriverNameChange(index, e.target.value)}
-                className={`w-full p-2 rounded border ${
-                  isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+                className={`w-full p-2 rounded border transition-colors ${
+                  isDarkMode ? 'border-gray-600' : 'border-gray-300'
                 }`}
+                style={{
+                  backgroundColor: getDriverColor(index),
+                  color: isDarkMode ? '#ffffff' : '#000000'
+                }}
               />
             </div>
           ))}
@@ -525,8 +571,17 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
         <h3 className="text-lg font-semibold mb-3">Driver Statistics</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {driverStats.map(stat => (
-            <div key={stat.driver} className={`p-3 rounded ${isDarkMode ? 'bg-gray-600' : 'bg-white'}`}>
+          {driverStats.map((stat, index) => (
+            <div 
+              key={stat.driver} 
+              className={`p-3 rounded border transition-colors ${
+                isDarkMode ? 'border-gray-600' : 'border-gray-300'
+              }`}
+              style={{
+                backgroundColor: getDriverColor(index),
+                color: isDarkMode ? '#ffffff' : '#000000'
+              }}
+            >
               <h4 className="font-medium mb-2">{stat.name}</h4>
               <div className="text-sm space-y-1">
                 <div>Total Time: {formatTime(stat.totalTime)}</div>
@@ -572,11 +627,22 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     value={assignment.driver}
                     onChange={(e) => handleStintDriverChange(index, parseInt(e.target.value))}
                     className={`w-full p-1 rounded border ${
-                      isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+                      isDarkMode ? 'border-gray-600' : 'border-gray-300'
                     }`}
+                    style={{
+                      backgroundColor: getDriverColor(assignment.driver - 1),
+                      color: isDarkMode ? '#ffffff' : '#000000'
+                    }}
                   >
                     {driverNames.map((name, driverIndex) => (
-                      <option key={driverIndex} value={driverIndex + 1}>
+                      <option 
+                        key={driverIndex} 
+                        value={driverIndex + 1}
+                        style={{
+                          backgroundColor: getDriverColor(driverIndex),
+                          color: isDarkMode ? '#ffffff' : '#000000'
+                        }}
+                      >
                         {name}
                       </option>
                     ))}
@@ -637,11 +703,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       <div className="mt-4 flex gap-4 text-sm">
         <div className="flex items-center gap-2">
           <div className={`w-4 h-4 ${isDarkMode ? 'bg-yellow-900' : 'bg-yellow-100'} border ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
-          <span>Joker Stint (≤ Min Time)</span>
+          <span>Joker Stint ({config.minStintTime} - {config.minStintTime + 5} min)</span>
         </div>
         <div className="flex items-center gap-2">
           <div className={`w-4 h-4 ${isDarkMode ? 'bg-blue-900' : 'bg-blue-100'} border ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
-          <span>Long Stint (≥ Max Time)</span>
+          <span>Long Stint ({config.maxStintTime - 5} - {config.maxStintTime} min)</span>
         </div>
       </div>
     </div>
