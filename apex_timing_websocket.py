@@ -699,6 +699,67 @@ class ApexTimingWebSocketParser:
                                 # Track info
                                 self.session_info['track'] = parsed['value']
                                 self.logger.info(f"Track info: {parsed['value']}")
+                            elif command.startswith('r') and 'c' in command:
+                                # Cell update message (e.g., r15c6|ti|3:28.267)
+                                cell_id = command
+                                update_type = parsed['parameter']
+                                value = parsed['value']
+                                
+                                # Parse cell ID (format: r{row}c{col})
+                                match = re.match(r'r(\d+)c(\d+)', cell_id)
+                                if match:
+                                    row_id = f"r{match.group(1)}"
+                                    col_idx = int(match.group(2)) - 1  # Column index is 1-based, convert to 0-based
+                                    
+                                    # Initialize row if needed
+                                    if row_id not in self.grid_data:
+                                        self.grid_data[row_id] = {}
+                                    
+                                    # Map column index to field based on typical Apex Timing layout
+                                    # c1 = Status, c2 = Position, c3 = Kart, c4 = Team, c5 = Laps
+                                    # c6 = Last Lap, c7 = Best Lap, c8 = Gap/Interval, c9 = Pit Stops
+                                    if col_idx == 0:  # c1 - Status
+                                        if update_type == 'gs':
+                                            self.grid_data[row_id]['Status'] = 'On Track'
+                                        elif update_type == 'si':
+                                            self.grid_data[row_id]['Status'] = 'Pit-in'
+                                        elif update_type == 'so':
+                                            self.grid_data[row_id]['Status'] = 'Pit-out'
+                                    elif col_idx == 1:  # c2 - Position changes
+                                        if update_type == 'su':
+                                            self.grid_data[row_id]['Status'] = 'Up'
+                                        elif update_type == 'sd':
+                                            self.grid_data[row_id]['Status'] = 'Down'
+                                    elif col_idx == 2:  # c3 - Position number
+                                        self.grid_data[row_id]['Position'] = value
+                                    elif col_idx == 3:  # c4 - Kart number
+                                        self.grid_data[row_id]['Kart'] = value
+                                        if value:
+                                            self.row_map[row_id] = value
+                                    elif col_idx == 4:  # c5 - Team name
+                                        self.grid_data[row_id]['Team'] = value
+                                    elif col_idx == 5:  # c6 - Last Lap
+                                        if update_type == 'ti':  # Time improvement
+                                            self.grid_data[row_id]['Last Lap'] = value
+                                        else:
+                                            self.grid_data[row_id]['Last Lap'] = value
+                                    elif col_idx == 6:  # c7 - Best Lap
+                                        if update_type == 'ib':  # Improved best
+                                            self.grid_data[row_id]['Best Lap'] = value
+                                        else:
+                                            self.grid_data[row_id]['Best Lap'] = value
+                                    elif col_idx == 7:  # c8 - Gap
+                                        if update_type == 'in':  # Interval
+                                            self.grid_data[row_id]['Gap'] = value
+                                        else:
+                                            self.grid_data[row_id]['Gap'] = value
+                                    elif col_idx == 8:  # c9 - Pit Stops
+                                        if update_type == 'in':
+                                            self.grid_data[row_id]['Pit Stops'] = value
+                                        else:
+                                            self.grid_data[row_id]['Pit Stops'] = value
+                                    
+                                    self.logger.info(f"Cell update: {cell_id} col={col_idx+1} type={update_type} value={value}")
                             elif command.startswith('r'):
                                 # Row update message (e.g., r35407|#|14)
                                 # These indicate position changes or other row-level updates
