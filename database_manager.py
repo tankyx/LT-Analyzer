@@ -4,7 +4,11 @@ from typing import List, Dict, Optional
 import logging
 
 class TrackDatabase:
-    def __init__(self, db_path='race_data.db'):
+    """
+    Manages persistent track data in a separate database (tracks.db).
+    This database is independent from race_data.db and should never be cleared.
+    """
+    def __init__(self, db_path='tracks.db'):
         self.db_path = db_path
         self.logger = logging.getLogger(__name__)
         self.init_database()
@@ -35,15 +39,15 @@ class TrackDatabase:
                 ''')
                 
                 conn.commit()
-                self.logger.info("Database initialized with tracks table")
+                self.logger.info(f"Database initialized with tracks table in {self.db_path}")
                 
                 # Verify table was created
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tracks'")
                 if cursor.fetchone():
-                    self.logger.info("Tracks table verified successfully")
+                    self.logger.info(f"Tracks table verified successfully in {self.db_path}")
                 else:
-                    self.logger.error("Failed to create tracks table")
+                    self.logger.error(f"Failed to create tracks table in {self.db_path}")
                     
         except Exception as e:
             self.logger.error(f"Error initializing database: {e}")
