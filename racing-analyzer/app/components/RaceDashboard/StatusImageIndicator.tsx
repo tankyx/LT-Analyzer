@@ -47,8 +47,12 @@ const StatusImageIndicator: React.FC<StatusImageIndicatorProps> = ({ status = 'O
         return 'text-green-600';
       case 'Down':
         return 'text-red-500';
-      default:
+      case 'On Track':
         return 'text-green-600';
+      default:
+        // Log unexpected status values for debugging
+        console.warn(`Unexpected status value: "${status}"`);
+        return 'text-gray-600';
     }
   };
 

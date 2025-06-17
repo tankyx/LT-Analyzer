@@ -42,15 +42,12 @@ export const ApiService = {
   },
 
   // Start simulation
-  startSimulation: async (isSimulationMode: boolean = false, timingUrl?: string, parserMode?: string, websocketUrl?: string, trackId?: number) => {
+  startSimulation: async (isSimulationMode: boolean = false, timingUrl?: string, websocketUrl?: string, trackId?: number) => {
     try {
-      console.log(`Calling ${API_BASE_URL}/api/start-simulation with mode:`, isSimulationMode, 'URL:', timingUrl, 'Parser:', parserMode, 'WS URL:', websocketUrl, 'Track ID:', trackId);
-      const payload: { simulation: boolean; timingUrl?: string; parserMode?: string; websocketUrl?: string; trackId?: number } = { simulation: isSimulationMode };
+      console.log(`Calling ${API_BASE_URL}/api/start-simulation with mode:`, isSimulationMode, 'URL:', timingUrl, 'WS URL:', websocketUrl, 'Track ID:', trackId);
+      const payload: { simulation: boolean; timingUrl?: string; websocketUrl?: string; trackId?: number } = { simulation: isSimulationMode };
       if (timingUrl) {
         payload.timingUrl = timingUrl;
-      }
-      if (parserMode) {
-        payload.parserMode = parserMode;
       }
       if (websocketUrl) {
         payload.websocketUrl = websocketUrl;
@@ -104,7 +101,7 @@ export const ApiService = {
     }
   },
 
-  updatePitStopConfig: async (data: { pitStopTime: number; requiredPitStops: number }) => {
+  updatePitStopConfig: async (data: { pitStopTime: number; requiredPitStops: number; defaultLapTime?: number }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/update-pit-config`, {
         method: 'POST',
@@ -230,6 +227,24 @@ export const ApiService = {
       return await response.json();
     } catch (error) {
       console.error('Error deleting track:', error);
+      throw error;
+    }
+  },
+
+  resetRaceData: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/reset-race-data`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!response.ok) {
+        throw new Error('Failed to reset race data');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error resetting race data:', error);
       throw error;
     }
   }

@@ -1,9 +1,10 @@
 // racing-analyzer/app/components/RaceDashboard/SimulationControls.tsx
 import React, { useState, useEffect } from 'react';
 import TrackManager from './TrackManager';
+import ApiService from '../../services/ApiService';
 
 interface SimulationControlsProps {
-  onStart: (isSimulation?: boolean, timingUrl?: string, parserMode?: string, websocketUrl?: string, trackId?: number) => void;
+  onStart: (isSimulation?: boolean, timingUrl?: string, websocketUrl?: string, trackId?: number) => void;
   onStop: () => void;
   isSimulating?: boolean;
   isDarkMode?: boolean;
@@ -25,7 +26,6 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   const [timer, setTimer] = useState<number>(0);
   const [showModeSelector, setShowModeSelector] = useState(false);
   const [timingUrl, setTimingUrl] = useState(currentTimingUrl || 'https://www.apex-timing.com/live-timing/karting-mariembourg/index.html');
-  const [parserMode, setParserMode] = useState<'playwright' | 'websocket' | 'hybrid'>('hybrid');
   const [websocketUrl, setWebsocketUrl] = useState('');
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
   const [showUrlInput, setShowUrlInput] = useState(true);
@@ -80,7 +80,6 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
       await onStart(
         isSimulation, 
         isSimulation ? undefined : timingUrl, 
-        isSimulation ? undefined : parserMode,
         isSimulation ? undefined : websocketUrl,
         isSimulation ? undefined : selectedTrackId || undefined
       );
@@ -124,17 +123,6 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
               <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse mr-2"></span>
               {isSimulationMode ? 'Simulation' : 'Real Data'} Active - {formatTime(timer)}
             </div>
-            {!isSimulationMode && parserMode && (
-              <div className={`text-xs rounded-full px-2 py-1 ${
-                parserMode === 'websocket' 
-                  ? (isDarkMode ? 'bg-purple-900 text-purple-200' : 'bg-purple-100 text-purple-800')
-                  : parserMode === 'hybrid'
-                  ? (isDarkMode ? 'bg-blue-900 text-blue-200' : 'bg-blue-100 text-blue-800')
-                  : (isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-200 text-gray-700')
-              }`}>
-                {parserMode === 'websocket' ? '⚡ WebSocket' : parserMode === 'hybrid' ? '🔄 Hybrid' : '🌐 Playwright'}
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -200,11 +188,10 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                     `}
                   />
                 </div>
-                {parserMode === 'websocket' && (
-                  <div className="mt-2">
-                    <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                      WebSocket URL (required for WebSocket mode):
-                    </label>
+                <div className="mt-2">
+                  <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    WebSocket URL (required):
+                  </label>
                     <input
                       type="text"
                       value={websocketUrl}
@@ -218,91 +205,28 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                         focus:outline-none focus:ring-2 focus:ring-blue-500
                       `}
                     />
-                  </div>
-                )}
+                </div>
               </div>
             ) : (
               <div className="max-h-64 overflow-y-auto">
                 <TrackManager
-                  onSelectTrack={(track) => {
-                    setSelectedTrackId(track.id);
-                    setTimingUrl(track.timing_url);
-                    setWebsocketUrl(track.websocket_url || '');
+                  onSelectTrack={async (track) => {
+                    try {
+                      // Reset race data when changing tracks
+                      await ApiService.resetRaceData();
+                      
+                      setSelectedTrackId(track.id);
+                      setTimingUrl(track.timing_url);
+                      setWebsocketUrl(track.websocket_url || '');
+                    } catch (error) {
+                      console.error('Error resetting race data:', error);
+                    }
                   }}
                   selectedTrackId={selectedTrackId}
                 />
               </div>
             )}
 
-            {/* Parser Mode Selector - Only show for real data mode */}
-            {!isSimulating && (
-              <div>
-                <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Parser Mode:
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setParserMode('hybrid')}
-                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
-                      ${parserMode === 'hybrid'
-                        ? (isDarkMode 
-                            ? 'bg-blue-700 text-white border-blue-600' 
-                            : 'bg-blue-100 text-blue-800 border-blue-300')
-                        : (isDarkMode 
-                            ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
-                      }
-                    `}
-                  >
-                    <div className="flex flex-col items-center">
-                      <span>Hybrid</span>
-                      <span className="text-xs opacity-70 mt-0.5">Auto-detect</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setParserMode('websocket')}
-                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
-                      ${parserMode === 'websocket'
-                        ? (isDarkMode 
-                            ? 'bg-blue-700 text-white border-blue-600' 
-                            : 'bg-blue-100 text-blue-800 border-blue-300')
-                        : (isDarkMode 
-                            ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
-                      }
-                    `}
-                  >
-                    <div className="flex flex-col items-center">
-                      <span>WebSocket</span>
-                      <span className="text-xs opacity-70 mt-0.5">Direct</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setParserMode('playwright')}
-                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
-                      ${parserMode === 'playwright'
-                        ? (isDarkMode 
-                            ? 'bg-blue-700 text-white border-blue-600' 
-                            : 'bg-blue-100 text-blue-800 border-blue-300')
-                        : (isDarkMode 
-                            ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
-                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
-                      }
-                    `}
-                  >
-                    <div className="flex flex-col items-center">
-                      <span>Playwright</span>
-                      <span className="text-xs opacity-70 mt-0.5">Original</span>
-                    </div>
-                  </button>
-                </div>
-                <div className={`text-xs mt-1 ${isDarkMode ? 'text-gray-500' : 'text-gray-600'}`}>
-                  {parserMode === 'hybrid' && 'Automatically selects the best method based on the timing page'}
-                  {parserMode === 'websocket' && 'Fast, direct WebSocket connection (if supported by the page)'}
-                  {parserMode === 'playwright' && 'Browser-based scraping (works with all pages)'}
-                </div>
-              </div>
-            )}
 
             {!isSimulating && showModeSelector && (
               <div className={`p-4 rounded-lg border ${isDarkMode ? 'border-gray-600 bg-gray-800' : 'border-gray-300 bg-white'}`}>

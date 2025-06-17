@@ -10,7 +10,6 @@ import math
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from flask_socketio import SocketIO, emit, join_room, leave_room
 
 from apex_timing_websocket import ApexTimingWebSocketParser
 from database_manager import TrackDatabase
@@ -19,23 +18,11 @@ from database_manager import TrackDatabase
 app = Flask(__name__)
 CORS(app)
 
-# Initialize SocketIO with CORS support and proxy handling
-socketio = SocketIO(
-    app, 
-    cors_allowed_origins="*", 
-    async_mode='threading',
-    logger=False,
-    engineio_logger=False,
-    ping_interval=25,  # Send ping every 25 seconds
-    ping_timeout=60    # Wait 60 seconds for pong response
-)
-
 # Initialize track database
 track_db = TrackDatabase()
 
 REQUIRED_PIT_STOPS = 7
 PIT_STOP_TIME = 158
-DEFAULT_LAP_TIME = 90.0  # Default lap time in seconds when no data available
 
 # Simulation configuration
 SIMULATION_MODE = False
@@ -59,8 +46,7 @@ race_data = {
     'gap_history': {},
     'pit_config': {
         'required_stops': REQUIRED_PIT_STOPS,
-        'pit_time': PIT_STOP_TIME,
-        'default_lap_time': DEFAULT_LAP_TIME
+        'pit_time': PIT_STOP_TIME
     },
     'race_time': 0,
     'is_running': False,
@@ -73,110 +59,6 @@ parser = None
 update_thread = None
 stop_event = threading.Event()
 simulation_teams = []
-
-# WebSocket tracking
-connected_clients = set()
-last_race_data_hash = None
-
-# WebSocket connection handlers
-@socketio.on('connect')
-def handle_connect(auth=None):
-    """Handle client connection"""
-    print(f"Client connected: {request.sid}")
-    connected_clients.add(request.sid)
-    join_room('race_updates')
-    
-    # Convert gap_history deques to lists for JSON serialization
-    serializable_gap_history = {}
-    for kart, history in race_data['gap_history'].items():
-        serializable_gap_history[kart] = {
-            'gaps': list(history['gaps']) if isinstance(history['gaps'], deque) else history['gaps'],
-            'last_update': history.get('last_update')
-        }
-        if 'adjusted_gaps' in history:
-            serializable_gap_history[kart]['adjusted_gaps'] = list(history['adjusted_gaps']) if isinstance(history['adjusted_gaps'], deque) else history['adjusted_gaps']
-    
-    # Send current race data on connect
-    emit('race_data_update', {
-        'teams': race_data['teams'],
-        'session_info': race_data['session_info'],
-        'last_update': race_data['last_update'],
-        'delta_times': race_data['delta_times'],
-        'gap_history': serializable_gap_history,
-        'simulation_mode': race_data['simulation_mode'],
-        'timing_url': race_data['timing_url'],
-        'is_running': race_data['is_running'],
-        'my_team': race_data['my_team'],
-        'monitored_teams': race_data['monitored_teams'],
-        'pit_config': race_data['pit_config']
-    })
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Handle client disconnection"""
-    print(f"Client disconnected: {request.sid}")
-    connected_clients.discard(request.sid)
-    leave_room('race_updates')
-
-def emit_race_update(update_type='full', data=None):
-    """Emit race data updates to all connected clients"""
-    if len(connected_clients) == 0:
-        return
-    
-    # Only emit if we have actual data to send
-    if not race_data.get('teams') and update_type != 'custom':
-        return
-        
-    if update_type == 'full':
-        # Convert gap_history deques to lists for JSON serialization
-        serializable_gap_history = {}
-        for kart, history in race_data['gap_history'].items():
-            serializable_gap_history[kart] = {
-                'gaps': list(history['gaps']) if isinstance(history['gaps'], deque) else history['gaps'],
-                'last_update': history.get('last_update')
-            }
-            if 'adjusted_gaps' in history:
-                serializable_gap_history[kart]['adjusted_gaps'] = list(history['adjusted_gaps']) if isinstance(history['adjusted_gaps'], deque) else history['adjusted_gaps']
-        
-        socketio.emit('race_data_update', {
-            'teams': race_data['teams'],
-            'session_info': race_data['session_info'],
-            'last_update': race_data['last_update'],
-            'delta_times': race_data['delta_times'],
-            'gap_history': serializable_gap_history,
-            'simulation_mode': race_data['simulation_mode'],
-            'timing_url': race_data['timing_url'],
-            'is_running': race_data['is_running'],
-            'my_team': race_data['my_team'],
-            'monitored_teams': race_data['monitored_teams'],
-            'pit_config': race_data['pit_config']
-        }, room='race_updates')
-    elif update_type == 'teams' and race_data.get('teams'):
-        socketio.emit('teams_update', {
-            'teams': race_data['teams'],
-            'last_update': race_data['last_update']
-        }, room='race_updates')
-    elif update_type == 'gaps' and race_data.get('delta_times'):
-        # Convert gap_history deques to lists for JSON serialization
-        serializable_gap_history = {}
-        for kart, history in race_data['gap_history'].items():
-            serializable_gap_history[kart] = {
-                'gaps': list(history['gaps']) if isinstance(history['gaps'], deque) else history['gaps'],
-                'last_update': history.get('last_update')
-            }
-            if 'adjusted_gaps' in history:
-                serializable_gap_history[kart]['adjusted_gaps'] = list(history['adjusted_gaps']) if isinstance(history['adjusted_gaps'], deque) else history['adjusted_gaps']
-        
-        socketio.emit('gap_update', {
-            'delta_times': race_data['delta_times'],
-            'gap_history': serializable_gap_history
-        }, room='race_updates')
-    elif update_type == 'session' and race_data.get('session_info'):
-        socketio.emit('session_update', {
-            'session_info': race_data['session_info']
-        }, room='race_updates')
-    elif update_type == 'custom' and data:
-        socketio.emit(data['event'], data['payload'], room='race_updates')
 
 # Team class for simulation
 class Team:
@@ -314,91 +196,6 @@ def calculate_trend(current_gap, previous_gaps):
         
     return trend, arrow
 
-# Function to get average lap time from recent race data
-def get_average_lap_time(session_id=None, kart_numbers=None, default=None):
-    """Calculate average lap time from recent laps in the database
-    
-    Args:
-        session_id: Specific session to calculate from (None for current)
-        kart_numbers: List of kart numbers to include (None for all)
-        default: Default lap time if no valid data found (uses DEFAULT_LAP_TIME if None)
-    
-    Returns:
-        Average lap time in seconds
-    """
-    if default is None:
-        default = DEFAULT_LAP_TIME
-    
-    try:
-        conn = sqlite3.connect('race_data.db')
-        cursor = conn.cursor()
-        
-        # Build query based on parameters
-        query = """
-            SELECT lap_time 
-            FROM lap_history 
-            WHERE lap_time IS NOT NULL 
-            AND lap_time != ''
-            AND lap_time NOT LIKE '%Tour%'
-        """
-        params = []
-        
-        if session_id:
-            query += " AND session_id = ?"
-            params.append(session_id)
-        
-        if kart_numbers:
-            placeholders = ','.join(['?' for _ in kart_numbers])
-            query += f" AND kart_number IN ({placeholders})"
-            params.extend(kart_numbers)
-        
-        # Get last 50 valid lap times
-        query += " ORDER BY id DESC LIMIT 50"
-        
-        cursor.execute(query, params)
-        lap_times = cursor.fetchall()
-        
-        if not lap_times:
-            conn.close()
-            return default
-        
-        # Convert lap times to seconds
-        total_seconds = 0
-        valid_count = 0
-        
-        for (lap_time,) in lap_times:
-            try:
-                # Parse time string to seconds
-                if ':' in lap_time:
-                    parts = lap_time.split(':')
-                    if len(parts) == 2:
-                        minutes = int(parts[0])
-                        seconds = float(parts[1].replace(',', '.'))
-                        lap_seconds = minutes * 60 + seconds
-                        # Filter out unrealistic lap times
-                        if 50 < lap_seconds < 150:  # Between 50 and 150 seconds
-                            total_seconds += lap_seconds
-                            valid_count += 1
-                else:
-                    lap_seconds = float(lap_time.replace(',', '.'))
-                    if 50 < lap_seconds < 150:
-                        total_seconds += lap_seconds
-                        valid_count += 1
-            except:
-                continue
-        
-        conn.close()
-        
-        if valid_count > 0:
-            avg_lap_time = total_seconds / valid_count
-            return round(avg_lap_time, 1)
-        else:
-            return default
-            
-    except Exception as e:
-        print(f"Error calculating average lap time: {e}")
-        return default
-
 # Function to calculate delta times between teams
 def calculate_delta_times(teams, my_team_kart, monitored_karts):
     """Calculate delta times between my team and monitored teams"""
@@ -416,37 +213,11 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
         my_pit_stops = int(my_team.get('Pit Stops', '0') or '0')
         my_remaining_stops = max(0, REQUIRED_PIT_STOPS - my_pit_stops)
         
-        # Helper function to parse time string to seconds
-        def parse_time_to_seconds(time_str):
-            """Convert time string (MM:SS.sss or SS.sss) to seconds"""
-            if ':' in time_str:
-                parts = time_str.split(':')
-                if len(parts) == 2:
-                    # MM:SS.sss format
-                    minutes = int(parts[0])
-                    seconds = float(parts[1].replace(',', '.'))
-                    return minutes * 60 + seconds
-            # Just seconds
-            return float(time_str.replace(',', '.'))
-        
         # Check if my team is in position 1
-        my_laps_behind = 0
         if my_team.get('Position') == '1':
             my_base_gap = 0.0
         else:
-            gap_str = my_team.get('Gap', '0')
-            # Handle lapped teams (e.g., "1 Tour", "2 Tours")
-            if 'Tour' in gap_str:
-                # My team is lapped - extract number of laps
-                my_laps_behind = int(gap_str.split()[0])
-                # Use a default lap time since we're lapped
-                my_base_gap = my_laps_behind * 90.0
-            else:
-                # Handle normal gap (could be MM:SS.sss or SS.sss)
-                try:
-                    my_base_gap = parse_time_to_seconds(gap_str)
-                except:
-                    my_base_gap = 0.0
+            my_base_gap = float(my_team.get('Gap', '0').replace(',', '.') or '0')
         
         # Initialize gap history for new karts
         for kart in monitored_karts:
@@ -470,115 +241,11 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                     mon_pit_stops = int(monitored_team.get('Pit Stops', '0') or '0')
                     mon_remaining_stops = max(0, REQUIRED_PIT_STOPS - mon_pit_stops)
                     
-                    # Helper function to parse time string to seconds
-                    def parse_time_to_seconds(time_str):
-                        """Convert time string (MM:SS.sss or SS.sss) to seconds"""
-                        if ':' in time_str:
-                            parts = time_str.split(':')
-                            if len(parts) == 2:
-                                # MM:SS.sss format
-                                minutes = int(parts[0])
-                                seconds = float(parts[1].replace(',', '.'))
-                                return minutes * 60 + seconds
-                        # Just seconds
-                        return float(time_str.replace(',', '.'))
-                    
-                    # Count laps difference between my team and monitored team
-                    def count_lap_difference(my_pos, mon_pos):
-                        """Count how many lapped teams are between positions"""
-                        if my_pos == mon_pos:
-                            return 0
-                        
-                        start_pos = min(my_pos, mon_pos)
-                        end_pos = max(my_pos, mon_pos)
-                        lap_diff = 0
-                        
-                        # Check all teams between the two positions
-                        for t in teams:
-                            team_pos = int(t.get('Position', '0'))
-                            if start_pos < team_pos < end_pos:
-                                team_gap = t.get('Gap', '0')
-                                if 'Tour' in team_gap:
-                                    # This team is lapped
-                                    lap_diff += int(team_gap.split()[0])
-                        
-                        return lap_diff
-                    
-                    my_position = int(my_team.get('Position', '0'))
-                    mon_position = int(monitored_team.get('Position', '0'))
-                    
                     # If position is 1, gap is 0
-                    if mon_position == 1:
+                    if monitored_team.get('Position') == '1':
                         mon_base_gap = 0.0
                     else:
-                        gap_str = monitored_team.get('Gap', '0')
-                        # Handle lapped teams and special cases
-                        if 'Tour' in gap_str:
-                            # Check if this is P1 showing total laps (e.g., "Tour 56")
-                            if mon_position == 1:
-                                # This is the winner showing total laps completed
-                                mon_base_gap = 0.0
-                                mon_laps_behind = 0
-                            else:
-                                # This is laps behind the leader (e.g., "1 Tour", "2 Tours")
-                                mon_laps_behind = int(gap_str.split()[0])
-                                
-                                # Check if there are lapped teams between us
-                                laps_between = count_lap_difference(my_position, mon_position)
-                                
-                                # Calculate actual lap difference
-                                if my_position < mon_position:
-                                    # Monitored team is behind us
-                                    actual_lap_diff = mon_laps_behind - my_laps_behind - laps_between
-                                else:
-                                    # Monitored team is ahead of us
-                                    actual_lap_diff = mon_laps_behind - my_laps_behind + laps_between
-                                
-                                # If actual_lap_diff is 0, we're on the same lap
-                                if actual_lap_diff == 0:
-                                    # We're on the same lap, use the position difference
-                                    # Find the time gap to the closest non-lapped team
-                                    mon_base_gap = my_base_gap  # Start with same base
-                                else:
-                                    # Calculate gap based on lap difference
-                                    # Get average lap time from recent data for better accuracy
-                                    avg_lap_time = get_average_lap_time()
-                                    
-                                    # Also consider the specific teams' recent lap times if available
-                                    team_karts = [int(my_team.get('Kart', 0)), int(monitored_team.get('Kart', 0))]
-                                    team_avg = get_average_lap_time(kart_numbers=team_karts)
-                                    if team_avg != 90.0:  # If we got valid team-specific data
-                                        avg_lap_time = team_avg
-                                    
-                                    mon_base_gap = my_base_gap + (actual_lap_diff * avg_lap_time)
-                        else:
-                            # Gap is in seconds (time format)
-                            try:
-                                mon_base_gap = parse_time_to_seconds(gap_str)
-                                
-                                # Check if there are lapped teams between us
-                                laps_between = count_lap_difference(my_position, mon_position)
-                                
-                                # If there are lapped teams between us, account for lap difference
-                                if laps_between > 0:
-                                    # Get average lap time from recent data
-                                    avg_lap_time = get_average_lap_time()
-                                    
-                                    # Also consider the specific teams' recent lap times if available
-                                    team_karts = [int(my_team.get('Kart', 0)), int(monitored_team.get('Kart', 0))]
-                                    team_avg = get_average_lap_time(kart_numbers=team_karts)
-                                    if team_avg != 90.0:  # If we got valid team-specific data
-                                        avg_lap_time = team_avg
-                                    
-                                    if my_position < mon_position:
-                                        # Monitored team is behind us with lapped teams in between
-                                        mon_base_gap += laps_between * avg_lap_time
-                                    else:
-                                        # Monitored team is ahead of us with lapped teams in between
-                                        mon_base_gap -= laps_between * avg_lap_time
-                                # If no lapped teams between us, we're on same lap - use gap as is
-                            except:
-                                mon_base_gap = 0.0
+                        mon_base_gap = float(monitored_team.get('Gap', '0').replace(',', '.') or '0')
                     
                     # Calculate regular gap with pit stop compensation for completed stops
                     # Using standard 150 second compensation as base (this is what Apex Timing shows)
@@ -805,14 +472,9 @@ async def simulate_race():
         race_data['teams'] = team_dicts
         race_data['last_update'] = datetime.now().strftime('%H:%M:%S')
         
-        # Emit teams update via WebSocket
-        emit_race_update('teams')
-        
         # Calculate delta times if my_team is set
         if race_data['my_team'] and race_data['monitored_teams']:
             calculate_delta_times(team_dicts, race_data['my_team'], race_data['monitored_teams'])
-            # Emit gap updates if we have monitored teams
-            emit_race_update('gaps')
             
         # Sleep to control simulation speed (4x real time)
         await asyncio.sleep(time_step / 4)
@@ -894,10 +556,6 @@ async def update_race_data():
                     race_data['last_update'] = datetime.now().strftime('%H:%M:%S')
                     race_data['update_count'] = race_data.get('update_count', 0) + 1
                     
-                    # Emit teams and session updates via WebSocket
-                    emit_race_update('teams')
-                    emit_race_update('session')
-                    
                     # Update delta times for monitored teams
                     if race_data['my_team'] and race_data['monitored_teams']:
                         delta_times = calculate_delta_times(
@@ -906,8 +564,6 @@ async def update_race_data():
                             race_data['monitored_teams']
                         )
                         race_data['delta_times'] = delta_times
-                        # Emit gap updates
-                        emit_race_update('gaps')
                     
                     # Log updates every 10th update
                     if race_data.get('update_count', 0) % 10 == 0:
@@ -980,21 +636,6 @@ def update_monitoring():
     race_data['monitored_teams'] = data.get('monitoredTeams', [])
     
     print(f"Updated monitoring: my_team={race_data['my_team']}, monitored_teams={race_data['monitored_teams']}")
-    
-    # Emit monitoring update via WebSocket
-    emit_race_update('custom', {
-        'event': 'monitoring_update',
-        'payload': {
-            'my_team': race_data['my_team'],
-            'monitored_teams': race_data['monitored_teams']
-        }
-    })
-    
-    # If we have teams data, recalculate and emit delta times
-    if race_data.get('teams') and race_data['my_team'] and race_data['monitored_teams']:
-        calculate_delta_times(race_data['teams'], race_data['my_team'], race_data['monitored_teams'])
-        # Emit gap updates
-        emit_race_update('gaps')
     
     return jsonify({'status': 'success'})
 
@@ -1089,7 +730,7 @@ def parser_status():
 @app.route('/api/update-pit-config', methods=['POST'])
 def update_pit_config():
     """Update pit stop configuration"""
-    global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS, DEFAULT_LAP_TIME
+    global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS
     
     data = request.json
     print("Received pit config update:", data)
@@ -1104,18 +745,7 @@ def update_pit_config():
             REQUIRED_PIT_STOPS = data['requiredPitStops']
             race_data['pit_config']['required_stops'] = REQUIRED_PIT_STOPS
             
-        if 'defaultLapTime' in data:
-            DEFAULT_LAP_TIME = data['defaultLapTime']
-            race_data['pit_config']['default_lap_time'] = DEFAULT_LAP_TIME
-            
-        print(f"Updated pit config: time={PIT_STOP_TIME}s, required stops={REQUIRED_PIT_STOPS}, default lap={DEFAULT_LAP_TIME}s")
-        
-        # Emit pit config update via WebSocket
-        emit_race_update('custom', {
-            'event': 'pit_config_update',
-            'payload': race_data['pit_config']
-        })
-        
+        print(f"Updated pit config: time={PIT_STOP_TIME}s, required stops={REQUIRED_PIT_STOPS}")
         return jsonify({'status': 'success', 'message': 'Pit stop configuration updated'})
     
     return jsonify({'status': 'error', 'message': 'Invalid configuration data'})
@@ -1255,55 +885,15 @@ def delete_track(track_id):
         return jsonify(result), 404
     return jsonify(result)
 
-@app.route('/api/reset-race-data', methods=['POST'])
-def reset_race_data():
-    """Reset all race data when switching tracks"""
-    global race_data
-    
-    # Preserve configuration settings
-    preserved_config = {
-        'pit_config': race_data.get('pit_config', {
-            'required_stops': REQUIRED_PIT_STOPS,
-            'pit_time': PIT_STOP_TIME
-        }),
-        'my_team': race_data.get('my_team'),
-        'monitored_teams': race_data.get('monitored_teams', [])
-    }
-    
-    # Reset race data
-    race_data = {
-        'teams': [],
-        'session_info': {},
-        'last_update': None,
-        'my_team': preserved_config['my_team'],
-        'monitored_teams': preserved_config['monitored_teams'],
-        'delta_times': {},
-        'gap_history': {},
-        'pit_config': preserved_config['pit_config'],
-        'race_time': 0,
-        'is_running': False,
-        'simulation_mode': False,
-        'timing_url': None,
-        'websocket_url': None,
-        'column_mappings': None
-    }
-    
-    # Emit reset event to all connected clients
-    socketio.emit('race_data_reset', room='race_updates')
-    
-    return jsonify({'status': 'success', 'message': 'Race data reset'})
-
 if __name__ == '__main__':
     # Don't automatically start the update thread - wait for user to choose mode
     # start_update_thread()
     
     try:
-        # Run the Flask app with SocketIO
-        print("Starting Flask-SocketIO server on port 5000...")
+        # Run the Flask app
+        print("Starting Flask server on port 5000...")
         print("Ready to start data collection - use the web interface to choose mode")
-        
-        # For development/pm2, allow unsafe werkzeug (in production, use gunicorn with eventlet)
-        socketio.run(app, host='127.0.0.1', port=5000, debug=False, allow_unsafe_werkzeug=True)
+        app.run(host='127.0.0.1', port=5000, debug=False)
     except Exception as e:
         print(f"Error starting server: {e}")
         print(traceback.format_exc())

@@ -5,6 +5,8 @@ interface PitStopConfigProps {
   setPitStopTime: (time: number) => void;
   requiredPitStops: number;
   setRequiredPitStops: (stops: number) => void;
+  defaultLapTime: number;
+  setDefaultLapTime: (time: number) => void;
   isDarkMode?: boolean;
 }
 
@@ -13,6 +15,8 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
   setPitStopTime,
   requiredPitStops,
   setRequiredPitStops,
+  defaultLapTime,
+  setDefaultLapTime,
   isDarkMode = false 
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -23,14 +27,25 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   });
   const [localStopsCount, setLocalStopsCount] = useState(requiredPitStops);
+  const [localDefaultLap, setLocalDefaultLap] = useState(() => {
+    // Convert seconds to MM:SS format
+    const minutes = Math.floor(defaultLapTime / 60);
+    const seconds = Math.round(defaultLapTime % 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  });
   
   const handleSave = () => {
-    // Parse the MM:SS format to seconds
-    const [minutes, seconds] = localPitTime.split(':').map(Number);
-    const totalSeconds = (minutes * 60) + seconds;
+    // Parse the MM:SS format to seconds for pit time
+    const [pitMinutes, pitSeconds] = localPitTime.split(':').map(Number);
+    const pitTotalSeconds = (pitMinutes * 60) + pitSeconds;
     
-    setPitStopTime(totalSeconds);
+    // Parse the MM:SS format to seconds for default lap time
+    const [lapMinutes, lapSeconds] = localDefaultLap.split(':').map(Number);
+    const lapTotalSeconds = (lapMinutes * 60) + lapSeconds;
+    
+    setPitStopTime(pitTotalSeconds);
     setRequiredPitStops(localStopsCount);
+    setDefaultLapTime(lapTotalSeconds);
     setIsOpen(false);
   };
   
@@ -69,7 +84,7 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
         }`}>
           <h3 className="font-medium mb-3">Pit Stop Configuration</h3>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className={`block text-sm font-medium mb-1 ${
                 isDarkMode ? 'text-gray-300' : 'text-gray-700'
@@ -117,6 +132,31 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
                 isDarkMode ? 'text-gray-400' : 'text-gray-500'
               }`}>
                 Average time spent in pits (e.g., 2:38)
+              </p>
+            </div>
+            
+            <div>
+              <label className={`block text-sm font-medium mb-1 ${
+                isDarkMode ? 'text-gray-300' : 'text-gray-700'
+              }`}>
+                Default Lap Time (MM:SS)
+              </label>
+              <input
+                type="text"
+                pattern="[0-9]+:[0-5][0-9]"
+                placeholder="1:30"
+                value={localDefaultLap}
+                onChange={(e) => setLocalDefaultLap(e.target.value)}
+                className={`w-full px-3 py-2 rounded-md border ${
+                  isDarkMode 
+                    ? 'bg-gray-700 border-gray-600 text-white' 
+                    : 'bg-white border-gray-300 text-gray-900'
+                }`}
+              />
+              <p className={`mt-1 text-xs ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
+                Used for gap calculations when no historical data
               </p>
             </div>
           </div>
