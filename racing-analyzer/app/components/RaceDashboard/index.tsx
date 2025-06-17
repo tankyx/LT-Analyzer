@@ -3,6 +3,7 @@ import TimeDeltaChart from './TimeDeltaChart';
 import SimulationControls from './SimulationControls';
 import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
+import webSocketService, { RaceDataUpdate, TeamsUpdate, GapUpdate, SessionUpdate, MonitoringUpdate, PitConfigUpdate } from '../../services/WebSocketService';
 import StatusImageIndicator from './StatusImageIndicator';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
@@ -91,6 +92,194 @@ const TrendArrows = ({ trend }: { trend: Trend | undefined }) => {
   );
 };
 
+// Helper function to parse time string to seconds
+const parseTimeToSeconds = (timeStr: string): number => {
+  // Handle MM:SS.sss or MM:SS:sss format
+  if (timeStr.includes(':')) {
+    const parts = timeStr.split(':');
+    if (parts.length === 2) {
+      const minutes = parseInt(parts[0]);
+      const seconds = parseFloat(parts[1].replace(',', '.'));
+      return minutes * 60 + seconds;
+    } else if (parts.length === 3) {
+      // Handle MM:SS:sss format (sometimes used)
+      const minutes = parseInt(parts[0]);
+      const seconds = parseInt(parts[1]);
+      const milliseconds = parseInt(parts[2]) / 1000;
+      return minutes * 60 + seconds + milliseconds;
+    }
+  }
+  // Just seconds
+  return parseFloat(timeStr.replace(',', '.'));
+};
+
+// Helper function to calculate gaps between teams
+const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: string[], pitStopTime: number, requiredPitStops: number): Record<string, DeltaData> => {
+  const myTeam = teams.find(t => t.Kart === myTeamKart);
+  if (!myTeam) return {};
+
+  const myPitStops = parseInt(myTeam['Pit Stops'] || '0');
+  const myRemainingStops = Math.max(0, requiredPitStops - myPitStops);
+  
+  // Parse my team's gap
+  let myGapToLeader = 0;
+  let myLapsBehind = 0;
+  if (myTeam.Position !== '1') {
+    const gapStr = myTeam.Gap;
+    // Handle lapped teams
+    if (gapStr.includes('Tour')) {
+      myLapsBehind = parseInt(gapStr.split(' ')[0]);
+      // Use my last lap time or default
+      const avgLapTime = myTeam['Last Lap'] && myTeam['Last Lap'].includes(':') 
+        ? parseTimeToSeconds(myTeam['Last Lap'])
+        : 90;
+      myGapToLeader = myLapsBehind * avgLapTime;
+    } else {
+      try {
+        myGapToLeader = parseTimeToSeconds(gapStr);
+      } catch {
+        myGapToLeader = 0;
+      }
+    }
+  }
+  
+  // Count laps difference between positions
+  const countLapDifference = (myPos: number, monPos: number): number => {
+    if (myPos === monPos) return 0;
+    
+    const startPos = Math.min(myPos, monPos);
+    const endPos = Math.max(myPos, monPos);
+    let lapDiff = 0;
+    
+    // Check all teams between the two positions
+    teams.forEach(t => {
+      const teamPos = parseInt(t.Position);
+      if (startPos < teamPos && teamPos < endPos) {
+        if (t.Gap.includes('Tour')) {
+          lapDiff += parseInt(t.Gap.split(' ')[0]);
+        }
+      }
+    });
+    
+    return lapDiff;
+  };
+  
+  const myPosition = parseInt(myTeam.Position);
+
+  const deltas: Record<string, DeltaData> = {};
+
+  monitoredKarts.forEach(kart => {
+    const monitoredTeam = teams.find(t => t.Kart === kart);
+    if (!monitoredTeam) return;
+
+    const monPitStops = parseInt(monitoredTeam['Pit Stops'] || '0');
+    const monRemainingStops = Math.max(0, requiredPitStops - monPitStops);
+    
+    const monPosition = parseInt(monitoredTeam.Position);
+    
+    // Parse monitored team's gap
+    let monGapToLeader = 0;
+    let monLapsBehind = 0;
+    if (monPosition !== 1) {
+      const gapStr = monitoredTeam.Gap;
+      // Handle lapped teams and special cases
+      if (gapStr.includes('Tour')) {
+        // Check if this is P1 showing total laps (e.g., "Tour 56")
+        if (monPosition === 1) {
+          // This is the winner showing total laps completed
+          monGapToLeader = 0; // Leader has no gap
+          monLapsBehind = 0;
+        } else {
+          // This is laps behind the leader (e.g., "1 Tour", "2 Tours")
+          monLapsBehind = parseInt(gapStr.split(' ')[0]);
+          
+          // Check if there are lapped teams between us
+          const lapsBetween = countLapDifference(myPosition, monPosition);
+          
+          // Calculate actual lap difference
+          let actualLapDiff = 0;
+          if (myPosition < monPosition) {
+            // Monitored team is behind us
+            actualLapDiff = monLapsBehind - myLapsBehind - lapsBetween;
+          } else {
+            // Monitored team is ahead of us
+            actualLapDiff = monLapsBehind - myLapsBehind + lapsBetween;
+          }
+          
+          // If actual lap diff is 0, we're on the same lap
+          if (actualLapDiff === 0) {
+            // We're on the same lap, calculate based on position
+            // This will be handled by the normal gap calculation below
+            monGapToLeader = myGapToLeader; // Start with same base
+          } else {
+            // Different laps, calculate based on lap difference
+            const avgLapTime = myTeam['Last Lap'] && myTeam['Last Lap'].includes(':') 
+              ? parseTimeToSeconds(myTeam['Last Lap'])
+              : 90;
+            monGapToLeader = myGapToLeader + (actualLapDiff * avgLapTime);
+          }
+        }
+      } else {
+        // Gap is in seconds (time format)
+        try {
+          monGapToLeader = parseTimeToSeconds(gapStr);
+          
+          // Check if there are lapped teams between us
+          const lapsBetween = countLapDifference(myPosition, monPosition);
+          
+          // If there are lapped teams between us, we need to account for the lap difference
+          if (lapsBetween > 0) {
+            const avgLapTime = myTeam['Last Lap'] && myTeam['Last Lap'].includes(':') 
+              ? parseTimeToSeconds(myTeam['Last Lap'])
+              : 90;
+            
+            if (myPosition < monPosition) {
+              // Monitored team is behind us but with lapped teams in between
+              monGapToLeader += lapsBetween * avgLapTime;
+            } else {
+              // Monitored team is ahead of us but with lapped teams in between
+              monGapToLeader -= lapsBetween * avgLapTime;
+            }
+          }
+          // If no lapped teams between us, we're on the same lap and can use the gap as is
+        } catch {
+          monGapToLeader = 0;
+        }
+      }
+    }
+
+    // Calculate real gap including pit stop compensation for completed stops
+    // Using 150 second compensation as base (standard Apex Timing value)
+    const realGap = (monGapToLeader - myGapToLeader) + ((monPitStops - myPitStops) * 150);
+    
+    // Calculate adjusted gap accounting for remaining required pit stops
+    const adjustedGap = realGap + ((monRemainingStops - myRemainingStops) * pitStopTime);
+
+    deltas[kart] = {
+      gap: Math.round(realGap * 1000) / 1000, // Round to 3 decimals
+      adjusted_gap: Math.round(adjustedGap * 1000) / 1000,
+      team_name: monitoredTeam.Team,
+      position: parseInt(monitoredTeam.Position),
+      last_lap: monitoredTeam['Last Lap'],
+      best_lap: monitoredTeam['Best Lap'],
+      pit_stops: monitoredTeam['Pit Stops'],
+      remaining_stops: monRemainingStops,
+      trends: {
+        lap_1: { value: 0, arrow: 0 },
+        lap_5: { value: 0, arrow: 0 },
+        lap_10: { value: 0, arrow: 0 }
+      },
+      adjusted_trends: {
+        lap_1: { value: 0, arrow: 0 },
+        lap_5: { value: 0, arrow: 0 },
+        lap_10: { value: 0, arrow: 0 }
+      }
+    };
+  });
+
+  return deltas;
+};
+
 // Star icon component with improved hover effect
 const StarIcon = ({ filled, onClick }: { filled: boolean; onClick?: () => void }) => (
   <button 
@@ -130,18 +319,21 @@ const RaceDashboard = () => {
   const [pitStopTime, setPitStopTime] = useState(158);
   const [alertedPitTeams, setAlertedPitTeams] = useState<Set<string>>(new Set());
   const [requiredPitStops, setRequiredPitStops] = useState(7);
+  const [defaultLapTime, setDefaultLapTime] = useState(90);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
   const [raceData, setRaceData] = useState<{
     timing_url?: string;
     [key: string]: unknown;
   } | null>(null);
   const [updatedRows, setUpdatedRows] = useState<Map<string, number>>(new Map()); // Track updated rows with timestamps
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
 
-  const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number) => {
+  const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number, newDefaultLapTime?: number) => {
     try {
       await ApiService.updatePitStopConfig({
         pitStopTime: newPitTime,
-        requiredPitStops: newRequiredStops
+        requiredPitStops: newRequiredStops,
+        defaultLapTime: newDefaultLapTime ?? defaultLapTime
       });
       
       setAlerts(prev => [...prev, {
@@ -157,7 +349,7 @@ const RaceDashboard = () => {
         type: 'error'
       }]);
     }
-  }, []);
+  }, [defaultLapTime]);
 
   const getTeamClass = (teamName: string): string | null => {
     if (teamName.startsWith('1 - ')) return '1';
@@ -189,6 +381,14 @@ const RaceDashboard = () => {
     
     return counts;
   }, [teams]);
+
+  // Calculate gaps locally in the frontend
+  const frontendDeltaData = useMemo(() => {
+    if (!myTeam || monitoredTeams.length === 0 || teams.length === 0) {
+      return {};
+    }
+    return calculateTeamGaps(teams, myTeam, monitoredTeams, pitStopTime, requiredPitStops);
+  }, [teams, myTeam, monitoredTeams, pitStopTime, requiredPitStops]);
     
   const handleTeamHover = (kartNum: string | null) => {
     setHoveredTeam(kartNum);
@@ -209,9 +409,9 @@ const RaceDashboard = () => {
     }
   }, [myTeam, monitoredTeams]);
 
-  const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string, parserMode?: string, websocketUrl?: string, trackId?: number) => {
+  const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string, websocketUrl?: string, trackId?: number) => {
     try {
-      const response = await ApiService.startSimulation(isSimulationMode, timingUrl, parserMode, websocketUrl, trackId);
+      const response = await ApiService.startSimulation(isSimulationMode, timingUrl, websocketUrl, trackId);
     
       setSimulating(true);
       setAlerts([...alerts, {
@@ -323,83 +523,153 @@ const RaceDashboard = () => {
     }
   }, [alerts]);
 
+  // Update monitoring via API only when user changes it locally
+  const [isUserUpdate, setIsUserUpdate] = useState(false);
+  
   useEffect(() => {
-    updateMonitoring();
-  }, [myTeam, monitoredTeams, updateMonitoring]);
+    // Only call API if this is a user-initiated change and we're connected
+    if (isUserUpdate && connectionStatus === 'connected') {
+      updateMonitoring();
+      setIsUserUpdate(false);
+    }
+  }, [myTeam, monitoredTeams, updateMonitoring, connectionStatus, isUserUpdate]);
 
+  // WebSocket connection and data handling
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const data = await ApiService.getRaceData();
+    // Helper function to detect changes and update rows
+    const detectChanges = (newTeams: Team[]) => {
+      if (newTeams && teams.length > 0) {
+        const currentTime = Date.now();
+        const newUpdatedRows = new Map(updatedRows);
         
-        // Detect changes in teams
-        if (data.teams && teams.length > 0) {
-          const currentTime = Date.now();
-          const newUpdatedRows = new Map(updatedRows);
-          
-          data.teams.forEach((newTeam: Team) => {
-            const oldTeam = teams.find(t => t.Kart === newTeam.Kart);
-            if (oldTeam) {
-              // Check if any critical fields have changed
-              const hasChanged = 
-                oldTeam.Position !== newTeam.Position ||
-                oldTeam['Last Lap'] !== newTeam['Last Lap'] ||
-                oldTeam['Best Lap'] !== newTeam['Best Lap'] ||
-                oldTeam.Gap !== newTeam.Gap ||
-                oldTeam['Pit Stops'] !== newTeam['Pit Stops'] ||
-                oldTeam.Status !== newTeam.Status;
-              
-              if (hasChanged) {
-                console.log(`Row updated: Kart ${newTeam.Kart} - Position: ${oldTeam.Position} -> ${newTeam.Position}, Last Lap: ${oldTeam['Last Lap']} -> ${newTeam['Last Lap']}`);
-                newUpdatedRows.set(newTeam.Kart, currentTime);
-              }
+        newTeams.forEach((newTeam: Team) => {
+          const oldTeam = teams.find(t => t.Kart === newTeam.Kart);
+          if (oldTeam) {
+            // Check if any critical fields have changed
+            const hasChanged = 
+              oldTeam.Position !== newTeam.Position ||
+              oldTeam['Last Lap'] !== newTeam['Last Lap'] ||
+              oldTeam['Best Lap'] !== newTeam['Best Lap'] ||
+              oldTeam.Gap !== newTeam.Gap ||
+              oldTeam['Pit Stops'] !== newTeam['Pit Stops'] ||
+              oldTeam.Status !== newTeam.Status;
+            
+            if (hasChanged) {
+              console.log(`Row updated: Kart ${newTeam.Kart} - Position: ${oldTeam.Position} -> ${newTeam.Position}, Last Lap: ${oldTeam['Last Lap']} -> ${newTeam['Last Lap']}`);
+              newUpdatedRows.set(newTeam.Kart, currentTime);
             }
-          });
-          
-          // Clean up old entries (older than 5 seconds)
-          newUpdatedRows.forEach((timestamp, kart) => {
-            if (currentTime - timestamp > 5000) {
-              newUpdatedRows.delete(kart);
-            }
-          });
-          
-          setUpdatedRows(newUpdatedRows);
-        }
+          }
+        });
         
+        // Clean up old entries (older than 5 seconds)
+        newUpdatedRows.forEach((timestamp, kart) => {
+          if (currentTime - timestamp > 5000) {
+            newUpdatedRows.delete(kart);
+          }
+        });
+        
+        setUpdatedRows(newUpdatedRows);
+      }
+    };
+
+    // Set up WebSocket callbacks
+    webSocketService.setCallbacks({
+      onConnectionStatusChange: (status) => {
+        setConnectionStatus(status);
+        console.log('WebSocket connection status:', status);
+      },
+      
+      onRaceDataUpdate: (data: RaceDataUpdate) => {
+        console.log('Received full race data update');
+        detectChanges(data.teams);
         setTeams(data.teams || []);
         setSessionInfo(data.session_info || {});
         setLastUpdate(data.last_update || '');
         setDeltaData(data.delta_times || {});
         setGapHistory(data.gap_history || {});
         setIsSimulationMode(data.simulation_mode || false);
-        setRaceData(data); // Store full race data
+        setMyTeam(data.my_team || '');
+        setMonitoredTeams(data.monitored_teams || []);
+        setPitStopTime(data.pit_config?.pit_time || 158);
+        setRequiredPitStops(data.pit_config?.required_stops || 7);
+        setDefaultLapTime(data.pit_config?.default_lap_time || 90);
+        setRaceData({
+          ...data,
+          timing_url: data.timing_url || undefined
+        });
         setIsLoading(false);
-        setError(null); // Clear any previous errors
+        setError(null);
         if (data.teams && data.teams.length > 0) {
           checkPitStops(data.teams);
         }
-      } catch (error) {
-        // Only show error if it's a real error, not just empty data
-        console.error('Error fetching race data:', error);
-        // Still set empty data to show the UI
+      },
+      
+      onTeamsUpdate: (data: TeamsUpdate) => {
+        console.log('Received teams update');
+        detectChanges(data.teams);
+        setTeams(data.teams || []);
+        setLastUpdate(data.last_update || '');
+        if (data.teams && data.teams.length > 0) {
+          checkPitStops(data.teams);
+        }
+      },
+      
+      onGapUpdate: (data: GapUpdate) => {
+        console.log('Received gap update');
+        setDeltaData(data.delta_times || {});
+        setGapHistory(data.gap_history || {});
+      },
+      
+      onSessionUpdate: (data: SessionUpdate) => {
+        console.log('Received session update');
+        setSessionInfo(data.session_info || {});
+      },
+      
+      onMonitoringUpdate: (data: MonitoringUpdate) => {
+        console.log('Received monitoring update');
+        setMyTeam(data.my_team || '');
+        setMonitoredTeams(data.monitored_teams || []);
+      },
+      
+      onPitConfigUpdate: (data: PitConfigUpdate) => {
+        console.log('Received pit config update');
+        setPitStopTime(data.pit_time || 158);
+        setRequiredPitStops(data.required_stops || 7);
+        if (data.default_lap_time !== undefined) {
+          setDefaultLapTime(data.default_lap_time);
+        }
+      },
+      
+      onRaceDataReset: () => {
+        console.log('Received race data reset');
+        // Reset all race-related state
         setTeams([]);
         setSessionInfo({});
         setLastUpdate('');
         setDeltaData({});
         setGapHistory({});
-        setIsLoading(false);
-        // Don't show error for normal operation without data
+        setAlertedPitTeams(new Set());
+        setUpdatedRows(new Map());
+        setRaceData(null);
+        setIsLoading(true);
         setError(null);
+        setAlerts(prev => [...prev, {
+          id: Date.now(),
+          message: 'Race data cleared - ready for new track',
+          type: 'info'
+        }]);
       }
-    };
+    });
 
-    fetchData();
-    const interval = setInterval(fetchData, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      // Clean up WebSocket callbacks on unmount
+      webSocketService.removeCallbacks();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkPitStops]); // Only run on mount, teams and updatedRows changes are handled internally
 
   const toggleTeamMonitoring = (kartNum: string) => {
+    setIsUserUpdate(true);
     setMonitoredTeams(prev => 
       prev.includes(kartNum)
         ? prev.filter(k => k !== kartNum)
@@ -411,12 +681,12 @@ const RaceDashboard = () => {
     setAlerts(prev => prev.filter(alert => alert.id !== id));
   };
 
-  if (isLoading) {
+  if (isLoading && connectionStatus === 'disconnected') {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50">
         <div className="text-lg flex flex-col items-center">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          Loading race data...
+          Connecting to race data server...
         </div>
       </div>
     );
@@ -498,7 +768,7 @@ const RaceDashboard = () => {
                       </div>
                       <div className="flex items-center gap-2">
                         <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Kart #{team.Kart}</span>
-                        {team.Status && <StatusImageIndicator status={team.Status} size="sm" />}
+                        {team.Status !== undefined && <StatusImageIndicator status={team.Status} size="sm" />}
                       </div>
                     </div>
                   </td>
@@ -591,7 +861,7 @@ const RaceDashboard = () => {
         </div>
         
         <div className="p-4">
-          {Object.entries(deltaData)
+          {Object.entries(frontendDeltaData)
             .sort((a, b) => a[1].position - b[1].position)
             .map(([kart, data]) => (
             <div key={kart} className={`p-3 rounded-lg mb-3 transition-colors ${
@@ -644,7 +914,7 @@ const RaceDashboard = () => {
               {/* Status indicator for monitored team */}
               <div className="flex justify-between items-center">
                 <div>
-                  {teams.find(t => t.Kart === kart)?.Status && (
+                  {teams.find(t => t.Kart === kart)?.Status !== undefined && (
                     <StatusImageIndicator status={teams.find(t => t.Kart === kart)?.Status} />
                   )}
                 </div>
@@ -677,7 +947,7 @@ const RaceDashboard = () => {
               </div>
             </div>
           ))}
-          {Object.keys(deltaData).length === 0 && (
+          {Object.keys(frontendDeltaData).length === 0 && (
             <div className={`text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
               <svg className="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
@@ -810,12 +1080,17 @@ const RaceDashboard = () => {
             pitStopTime={pitStopTime}
             setPitStopTime={(newTime) => {
               setPitStopTime(newTime);
-              updatePitStopConfig(newTime, requiredPitStops);
+              updatePitStopConfig(newTime, requiredPitStops, defaultLapTime);
             }}
             requiredPitStops={requiredPitStops}
             setRequiredPitStops={(newStops) => {
               setRequiredPitStops(newStops);
-              updatePitStopConfig(pitStopTime, newStops);
+              updatePitStopConfig(pitStopTime, newStops, defaultLapTime);
+            }}
+            defaultLapTime={defaultLapTime}
+            setDefaultLapTime={(newTime) => {
+              setDefaultLapTime(newTime);
+              updatePitStopConfig(pitStopTime, requiredPitStops, newTime);
             }}
             isDarkMode={isDarkMode}
           />
@@ -829,7 +1104,10 @@ const RaceDashboard = () => {
           <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
             <select 
               value={myTeam}
-              onChange={(e) => setMyTeam(e.target.value)}
+              onChange={(e) => {
+                setIsUserUpdate(true);
+                setMyTeam(e.target.value);
+              }}
               className={`w-full md:w-1/2 p-2 border rounded-lg ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
             >
               <option value="">Select Your Team</option>
@@ -876,6 +1154,27 @@ const RaceDashboard = () => {
               </span>
             </div>
           )}
+        </div>
+
+        {/* Connection Status */}
+        <div className="mb-4">
+          <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+            connectionStatus === 'connected' 
+              ? isDarkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-700'
+              : connectionStatus === 'connecting'
+              ? isDarkMode ? 'bg-yellow-900 text-yellow-200' : 'bg-yellow-100 text-yellow-700'
+              : isDarkMode ? 'bg-red-900 text-red-200' : 'bg-red-100 text-red-700'
+          }`}>
+            <div className={`w-2 h-2 rounded-full mr-2 ${
+              connectionStatus === 'connected' ? 'bg-green-500' :
+              connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+              'bg-red-500'
+            }`} />
+            {connectionStatus === 'connected' ? 'Connected' :
+             connectionStatus === 'connecting' ? 'Connecting...' :
+             connectionStatus === 'error' ? 'Connection Error' :
+             'Disconnected'}
+          </div>
         </div>
 
         {/* Alerts */}
