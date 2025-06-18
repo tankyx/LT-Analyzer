@@ -52,7 +52,7 @@ class ApexTimingWebSocketParser:
         try:
             with sqlite3.connect('race_data.db') as conn:
                 conn.execute('''
-                    CREATE TABLE IF NOT EXISTS sessions (
+                    CREATE TABLE IF NOT EXISTS race_sessions (
                         session_id INTEGER PRIMARY KEY AUTOINCREMENT,
                         start_time TEXT,
                         name TEXT,
@@ -73,7 +73,7 @@ class ApexTimingWebSocketParser:
                         gap TEXT,
                         RunTime TEXT,
                         pit_stops INTEGER,
-                        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+                        FOREIGN KEY (session_id) REFERENCES race_sessions(session_id)
                     )
                 ''')
 
@@ -88,7 +88,7 @@ class ApexTimingWebSocketParser:
                         lap_time TEXT,
                         position_after_lap INTEGER,
                         pit_this_lap INTEGER,
-                        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+                        FOREIGN KEY (session_id) REFERENCES race_sessions(session_id)
                     )
                 ''')
             self.logger.debug("Database setup complete")
@@ -537,7 +537,7 @@ class ApexTimingWebSocketParser:
         with sqlite3.connect('race_data.db') as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO sessions (start_time, name, track) VALUES (?, ?, ?)",
+                "INSERT INTO race_sessions (start_time, name, track) VALUES (?, ?, ?)",
                 (datetime.now().isoformat(), session_name, track)
             )
             return cursor.lastrowid

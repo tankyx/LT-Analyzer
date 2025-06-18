@@ -6,7 +6,10 @@
       "Bash(npm run build:*)",
       "Bash(npm run lint)",
       "Bash(ls:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(python:*)",
+      "Bash(source:*)",
+      "Bash(sqlite3:*)"
     ]
   },
   "enableAllProjectMcpServers": false

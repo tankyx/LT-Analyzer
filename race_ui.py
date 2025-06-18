@@ -3,12 +3,16 @@ import json
 import threading
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
 import random
 import math
+import hashlib
+import secrets
+import sqlite3
+from functools import wraps
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
@@ -17,7 +21,12 @@ from database_manager import TrackDatabase
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+app.secret_key = secrets.token_hex(32)  # For session management
+CORS(app, 
+     origins=["http://localhost:3000", "https://krranalyser.fr", "http://krranalyser.fr"],
+     supports_credentials=True,
+     allow_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # Initialize SocketIO with CORS support and proxy handling
 socketio = SocketIO(
@@ -962,6 +971,283 @@ def start_update_thread():
     update_thread.start()
     print(f"Update thread started, simulation mode: {race_data.get('simulation_mode', False)}")
 
+# Authentication helper functions
+def get_db_connection():
+    """Get database connection"""
+    conn = sqlite3.connect('race_data.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def create_session(user_id):
+    """Create a new session for user"""
+    session_id = secrets.token_urlsafe(32)
+    expires_at = datetime.now() + timedelta(hours=24)
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO sessions (id, user_id, expires_at)
+        VALUES (?, ?, ?)
+    ''', (session_id, user_id, expires_at.isoformat()))
+    conn.commit()
+    conn.close()
+    
+    return session_id
+
+def verify_session(session_id):
+    """Verify if session is valid and return user info"""
+    if not session_id:
+        return None
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT u.id, u.username, u.role, u.email
+        FROM sessions s
+        JOIN users u ON s.user_id = u.id
+        WHERE s.id = ? AND s.expires_at > ?
+    ''', (session_id, datetime.now().isoformat()))
+    
+    user = cursor.fetchone()
+    conn.close()
+    
+    return dict(user) if user else None
+
+def login_required(f):
+    """Decorator to require login for routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        session_id = session.get('session_id')
+        user = verify_session(session_id)
+        if not user:
+            return jsonify({'error': 'Authentication required'}), 401
+        request.current_user = user
+        return f(*args, **kwargs)
+    return decorated_function
+
+def admin_required(f):
+    """Decorator to require admin role"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        session_id = session.get('session_id')
+        user = verify_session(session_id)
+        if not user or user['role'] != 'admin':
+            return jsonify({'error': 'Admin access required'}), 403
+        request.current_user = user
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Authentication routes
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """User login endpoint"""
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+    
+    # Hash the password
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Log login attempt
+    cursor.execute('''
+        INSERT INTO login_attempts (username, ip_address, success)
+        VALUES (?, ?, ?)
+    ''', (username, request.remote_addr, False))
+    
+    # Check credentials
+    cursor.execute('''
+        SELECT id, username, role, email, is_active
+        FROM users
+        WHERE username = ? AND password_hash = ?
+    ''', (username, password_hash))
+    
+    user = cursor.fetchone()
+    
+    if user and user['is_active']:
+        # Update last login
+        cursor.execute('''
+            UPDATE users SET last_login = ? WHERE id = ?
+        ''', (datetime.now().isoformat(), user['id']))
+        
+        # Update login attempt as successful
+        cursor.execute('''
+            UPDATE login_attempts 
+            SET success = 1 
+            WHERE id = (SELECT MAX(id) FROM login_attempts WHERE username = ?)
+        ''', (username,))
+        
+        conn.commit()
+        
+        # Create session
+        session_id = create_session(user['id'])
+        session['session_id'] = session_id
+        
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user['id'],
+                'username': user['username'],
+                'role': user['role'],
+                'email': user['email']
+            }
+        })
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'error': 'Invalid credentials'}), 401
+
+@app.route('/api/auth/logout', methods=['POST'])
+@login_required
+def logout():
+    """User logout endpoint"""
+    session_id = session.get('session_id')
+    if session_id:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM sessions WHERE id = ?', (session_id,))
+        conn.commit()
+        conn.close()
+        session.clear()
+    
+    return jsonify({'success': True})
+
+@app.route('/api/auth/check', methods=['GET'])
+def check_auth():
+    """Check if user is authenticated"""
+    session_id = session.get('session_id')
+    user = verify_session(session_id)
+    
+    if user:
+        return jsonify({
+            'authenticated': True,
+            'user': user
+        })
+    
+    return jsonify({'authenticated': False})
+
+# User management routes (admin only)
+@app.route('/api/admin/users', methods=['GET'])
+@admin_required
+def get_users():
+    """Get all users (admin only)"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, username, email, role, created_at, last_login, is_active
+        FROM users
+        ORDER BY created_at DESC
+    ''')
+    users = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify(users)
+
+@app.route('/api/admin/users', methods=['POST'])
+@admin_required
+def create_user():
+    """Create new user (admin only)"""
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    email = data.get('email')
+    role = data.get('role', 'user')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password required'}), 400
+    
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            INSERT INTO users (username, password_hash, email, role)
+            VALUES (?, ?, ?, ?)
+        ''', (username, password_hash, email, role))
+        conn.commit()
+        user_id = cursor.lastrowid
+        conn.close()
+        
+        return jsonify({
+            'success': True,
+            'user': {
+                'id': user_id,
+                'username': username,
+                'email': email,
+                'role': role
+            }
+        })
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Username already exists'}), 400
+
+@app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
+@admin_required
+def update_user(user_id):
+    """Update user (admin only)"""
+    data = request.get_json()
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Build update query dynamically
+    updates = []
+    params = []
+    
+    if 'email' in data:
+        updates.append('email = ?')
+        params.append(data['email'])
+    
+    if 'role' in data:
+        updates.append('role = ?')
+        params.append(data['role'])
+    
+    if 'is_active' in data:
+        updates.append('is_active = ?')
+        params.append(data['is_active'])
+    
+    if 'password' in data:
+        updates.append('password_hash = ?')
+        params.append(hashlib.sha256(data['password'].encode()).hexdigest())
+    
+    if not updates:
+        return jsonify({'error': 'No fields to update'}), 400
+    
+    params.append(user_id)
+    query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
+    
+    cursor.execute(query, params)
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True})
+
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@admin_required
+def delete_user(user_id):
+    """Delete user (admin only)"""
+    # Prevent deleting admin user
+    if user_id == 1:
+        return jsonify({'error': 'Cannot delete admin user'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True})
+
 # REST API routes
 @app.route('/api/race-data')
 def get_race_data():
@@ -1209,6 +1495,94 @@ def get_track(track_id):
         return jsonify(track)
     return jsonify({'error': 'Track not found'}), 404
 
+# Admin track management routes
+@app.route('/api/admin/tracks', methods=['GET'])
+@admin_required
+def admin_get_tracks():
+    """Get all tracks with full details (admin only)"""
+    # Use track_db which connects to tracks.db
+    tracks = track_db.get_all_tracks()
+    
+    # Map fields to match admin panel expectations
+    mapped_tracks = []
+    for track in tracks:
+        mapped_tracks.append({
+            'id': track['id'],
+            'name': track['track_name'],  # Map track_name to name
+            'location': '',  # Not in tracks.db
+            'length_meters': None,  # Not in tracks.db
+            'description': '',  # Not in tracks.db
+            'timing_url': track['timing_url'],
+            'websocket_url': track['websocket_url'],
+            'column_mappings': track['column_mappings'],
+            'is_active': True,  # Default to active
+            'created_at': track['created_at'],
+            'updated_at': track['updated_at']
+        })
+    
+    return jsonify(mapped_tracks)
+
+@app.route('/api/admin/tracks', methods=['POST'])
+@admin_required
+def admin_add_track():
+    """Add a new track (admin only)"""
+    data = request.json
+    if not data or 'name' not in data:
+        return jsonify({'error': 'Track name is required'}), 400
+    
+    # Use track_db to add the track
+    result = track_db.add_track(
+        track_name=data['name'],
+        timing_url=data.get('timing_url', ''),
+        websocket_url=data.get('websocket_url'),
+        column_mappings=data.get('column_mappings')
+    )
+    
+    if 'error' in result:
+        return jsonify({'error': result['error']}), 400
+    
+    return jsonify({
+        'success': True,
+        'track': {
+            'id': result['id'],
+            'name': data['name']
+        }
+    }), 201
+
+@app.route('/api/admin/tracks/<int:track_id>', methods=['PUT'])
+@admin_required
+def admin_update_track(track_id):
+    """Update a track (admin only)"""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    # Use track_db to update the track
+    result = track_db.update_track(
+        track_id=track_id,
+        track_name=data.get('name'),
+        timing_url=data.get('timing_url'),
+        websocket_url=data.get('websocket_url'),
+        column_mappings=data.get('column_mappings')
+    )
+    
+    if 'error' in result:
+        return jsonify({'error': result['error']}), 400
+    
+    return jsonify({'success': True})
+
+@app.route('/api/admin/tracks/<int:track_id>', methods=['DELETE'])
+@admin_required
+def admin_delete_track(track_id):
+    """Delete a track (admin only)"""
+    result = track_db.delete_track(track_id)
+    
+    if 'error' in result:
+        return jsonify({'error': result['error']}), 404
+    
+    return jsonify({'success': True})
+
+# Keep original track routes for backwards compatibility
 @app.route('/api/tracks', methods=['POST'])
 def add_track():
     """Add a new track to the database"""

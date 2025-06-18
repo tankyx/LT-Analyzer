@@ -1,5 +1,6 @@
 // racing-analyzer/app/services/WebSocketService.ts
 import { io, Socket } from 'socket.io-client';
+import { API_BASE_URL } from '../../utils/config';
 
 // Import types from RaceDashboard
 interface Team {
@@ -127,18 +128,8 @@ class WebSocketService {
   }
 
   private getSocketUrl(): string {
-    // Use the same logic as ApiService for determining the base URL
-    if (typeof window === 'undefined') {
-      return 'http://localhost:5000'; // Default for SSR
-    }
-    
-    // In development, use localhost
-    if (process.env.NODE_ENV === 'development') {
-      return 'http://localhost:5000';
-    }
-    
-    // In production, use the same origin as the page (nginx will proxy /socket.io/)
-    return window.location.origin;
+    // Use the configured API URL
+    return API_BASE_URL;
   }
 
   connect(): void {
