@@ -212,11 +212,11 @@ const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: st
             // This will be handled by the normal gap calculation below
             monGapToLeader = myGapToLeader; // Start with same base
           } else {
-            // Different laps, calculate based on lap difference
-            const avgLapTime = myTeam['Last Lap'] && myTeam['Last Lap'].includes(':') 
-              ? parseTimeToSeconds(myTeam['Last Lap'])
+            // Different laps, calculate based on lap difference using best lap time
+            const bestLapTime = monitoredTeam['Best Lap'] && monitoredTeam['Best Lap'].includes(':') 
+              ? parseTimeToSeconds(monitoredTeam['Best Lap'])
               : 90;
-            monGapToLeader = myGapToLeader + (actualLapDiff * avgLapTime);
+            monGapToLeader = myGapToLeader + (actualLapDiff * bestLapTime);
           }
         }
       } else {
@@ -229,16 +229,16 @@ const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: st
           
           // If there are lapped teams between us, we need to account for the lap difference
           if (lapsBetween > 0) {
-            const avgLapTime = myTeam['Last Lap'] && myTeam['Last Lap'].includes(':') 
-              ? parseTimeToSeconds(myTeam['Last Lap'])
+            const bestLapTime = monitoredTeam['Best Lap'] && monitoredTeam['Best Lap'].includes(':') 
+              ? parseTimeToSeconds(monitoredTeam['Best Lap'])
               : 90;
             
             if (myPosition < monPosition) {
               // Monitored team is behind us but with lapped teams in between
-              monGapToLeader += lapsBetween * avgLapTime;
+              monGapToLeader += lapsBetween * bestLapTime;
             } else {
               // Monitored team is ahead of us but with lapped teams in between
-              monGapToLeader -= lapsBetween * avgLapTime;
+              monGapToLeader -= lapsBetween * bestLapTime;
             }
           }
           // If no lapped teams between us, we're on the same lap and can use the gap as is

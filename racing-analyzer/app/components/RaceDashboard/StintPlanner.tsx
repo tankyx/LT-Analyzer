@@ -105,58 +105,58 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     // Calculate base stint time
     const baseStintTime = availableRaceTime / numStints;
     
-    // Goal: Maximize the number of special stints (jokers + longs)
-    // Constraint: Total time must equal available race time
-    
+    // Calculate maximum joker stints (bad kart strategy)
     let maxJokers = 0;
-    let maxLongs = 0;
-    let bestTimeDiff = Infinity;
+    let jokerNormalTime = baseStintTime;
     
-    // Try different combinations, maximizing total special stints
-    for (let jokers = 0; jokers <= numStints; jokers++) {
-      for (let longs = 0; longs <= (numStints - jokers); longs++) {
-        const normalStints = numStints - jokers - longs;
+    for (let jokers = numStints; jokers >= 0; jokers--) {
+      const normalStints = numStints - jokers;
+      
+      if (normalStints === 0) {
+        // All joker stints
+        const totalTime = jokers * minStintTime;
+        if (Math.abs(totalTime - availableRaceTime) <= 0.5) {
+          maxJokers = jokers;
+          jokerNormalTime = 0;
+          break;
+        }
+      } else {
+        // Normal stints must compensate for time saved by jokers
+        const normalTime = (availableRaceTime - jokers * minStintTime) / normalStints;
         
-        // Calculate total race time with this combination
-        const totalTime = (jokers * minStintTime) + 
-                         (longs * maxStintTime) + 
-                         (normalStints * baseStintTime);
-        
-        const timeDiff = Math.abs(totalTime - availableRaceTime);
-        
-        // Accept combinations within 2 minutes of target
-        if (timeDiff <= 2) {
-          // Prefer combinations with more special stints
-          if ((jokers + longs) > (maxJokers + maxLongs) || 
-              ((jokers + longs) === (maxJokers + maxLongs) && timeDiff < bestTimeDiff)) {
-            maxJokers = jokers;
-            maxLongs = longs;
-            bestTimeDiff = timeDiff;
-          }
+        // Check if normal stint time is valid (not exceeding max)
+        if (normalTime <= maxStintTime) {
+          maxJokers = jokers;
+          jokerNormalTime = normalTime;
+          break;
         }
       }
     }
     
-    // If we still didn't find any combination, relax the tolerance
-    if (maxJokers === 0 && maxLongs === 0) {
-      // Try with more relaxed tolerance (5 minutes)
-      for (let jokers = 0; jokers <= numStints; jokers++) {
-        for (let longs = 0; longs <= (numStints - jokers); longs++) {
-          const normalStints = numStints - jokers - longs;
-          
-          const totalTime = (jokers * minStintTime) + 
-                           (longs * maxStintTime) + 
-                           (normalStints * baseStintTime);
-          
-          const timeDiff = Math.abs(totalTime - availableRaceTime);
-          
-          if (timeDiff <= 5) {
-            if ((jokers + longs) > (maxJokers + maxLongs)) {
-              maxJokers = jokers;
-              maxLongs = longs;
-              bestTimeDiff = timeDiff;
-            }
-          }
+    // Calculate maximum long stints (good kart strategy)
+    let maxLongs = 0;
+    let longNormalTime = baseStintTime;
+    
+    for (let longs = numStints; longs >= 0; longs--) {
+      const normalStints = numStints - longs;
+      
+      if (normalStints === 0) {
+        // All long stints
+        const totalTime = longs * maxStintTime;
+        if (Math.abs(totalTime - availableRaceTime) <= 0.5) {
+          maxLongs = longs;
+          longNormalTime = 0;
+          break;
+        }
+      } else {
+        // Normal stints must compensate for extra time used by longs
+        const normalTime = (availableRaceTime - longs * maxStintTime) / normalStints;
+        
+        // Check if normal stint time is valid (not below min)
+        if (normalTime >= minStintTime) {
+          maxLongs = longs;
+          longNormalTime = normalTime;
+          break;
         }
       }
     }
@@ -165,15 +165,22 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       maxJokers: Math.max(0, maxJokers),
       maxLongs: Math.max(0, maxLongs),
       baseStintTime: Math.round(baseStintTime),
+      jokerNormalTime: Math.round(jokerNormalTime * 10) / 10,
+      longNormalTime: Math.round(longNormalTime * 10) / 10,
       jokerRange: `${minStintTime}-${minStintTime + 5}`,
       longRange: `${maxStintTime - 5}-${maxStintTime}`
     };
   }, [config]);
 
-  // Initialize stints with 0 duration
+  // Initialize stints with base stint time duration
   const initializeStints = useMemo(() => {
     const assignments: StintAssignment[] = [];
     let currentTime = 0;
+    
+    // Calculate base stint time
+    const totalPitTime = config.pitDuration * (config.numStints - 1);
+    const availableRaceTime = config.totalRaceTime - totalPitTime;
+    const baseStintTime = Math.round(availableRaceTime / config.numStints);
     
     for (let stint = 1; stint <= config.numStints; stint++) {
       // Assign driver in rotation
@@ -182,12 +189,14 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       assignments.push({
         driver: driverIndex + 1,
         stint,
-        duration: 0, // Initialize with 0
+        duration: baseStintTime, // Initialize with base stint time
         isJoker: false,
         isLong: false,
         startTime: currentTime,
-        endTime: currentTime,
+        endTime: currentTime + baseStintTime,
       });
+      
+      currentTime += baseStintTime;
       
       // Add pit stop time (except for last stint)
       if (stint < config.numStints) {
@@ -337,15 +346,38 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
   const handleStintDurationChange = (stintIndex: number, duration: number) => {
     const newAssignments = [...stintAssignments];
-    const assignment = newAssignments[stintIndex];
-    assignment.duration = duration;
+    const oldDuration = newAssignments[stintIndex].duration;
+    const timeDifference = duration - oldDuration;
+    
+    // Update the changed stint
+    newAssignments[stintIndex].duration = duration;
     
     // Determine if it's a joker or long stint
-    // Joker: min <= duration <= min + 5
-    assignment.isJoker = duration > 0 && duration >= config.minStintTime && duration <= config.minStintTime + 5;
+    newAssignments[stintIndex].isJoker = duration > 0 && duration >= config.minStintTime && duration <= config.minStintTime + 5;
+    newAssignments[stintIndex].isLong = duration >= config.maxStintTime - 5 && duration <= config.maxStintTime;
     
-    // Long: max - 5 <= duration <= max
-    assignment.isLong = duration >= config.maxStintTime - 5 && duration <= config.maxStintTime;
+    // Calculate how many following stints need to compensate
+    const followingStints = newAssignments.filter((_, idx) => idx > stintIndex && newAssignments[idx].duration > 0);
+    
+    if (followingStints.length > 0 && timeDifference !== 0) {
+      // Distribute the time difference equally among following stints
+      const compensationPerStint = -timeDifference / followingStints.length;
+      
+      // Apply compensation only to following stints
+      newAssignments.forEach((stint, idx) => {
+        if (idx > stintIndex && stint.duration > 0) {
+          const newDuration = stint.duration + compensationPerStint;
+          // Ensure the compensated duration stays within bounds
+          if (newDuration >= config.minStintTime && newDuration <= config.maxStintTime) {
+            stint.duration = Math.round(newDuration * 10) / 10; // Round to 1 decimal
+            
+            // Re-evaluate if it's a joker or long stint
+            stint.isJoker = stint.duration >= config.minStintTime && stint.duration <= config.minStintTime + 5;
+            stint.isLong = stint.duration >= config.maxStintTime - 5 && stint.duration <= config.maxStintTime;
+          }
+        }
+      });
+    }
     
     // Recalculate times
     let currentTime = 0;
@@ -538,6 +570,9 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             <span className="font-medium">Base Stint Time: </span>
             <span className="text-xl font-bold">{availableSpecialStints.baseStintTime}m</span>
           </div>
+        </div>
+        <div className="mt-2 text-sm opacity-75">
+          Note: Time differences are automatically compensated across other stints
         </div>
       </div>
 
