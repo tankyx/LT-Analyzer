@@ -8,6 +8,8 @@ import StatusImageIndicator from './StatusImageIndicator';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
 import StintPlanner from './StintPlanner';
+import AdminPanel from './AdminPanel';
+import { useAuth } from '../../contexts/AuthContext';
 
 // Types
 interface Team {
@@ -300,6 +302,7 @@ const StarIcon = ({ filled, onClick }: { filled: boolean; onClick?: () => void }
 );
 
 const RaceDashboard = () => {
+  const { user, logout } = useAuth();
   const [teams, setTeams] = useState<Team[]>([]);
   const [sessionInfo, setSessionInfo] = useState<SessionInfo>({});
   const [lastUpdate, setLastUpdate] = useState<string>('');
@@ -1036,6 +1039,22 @@ const RaceDashboard = () => {
           </h1>
           
           <div className="flex items-center gap-4">
+            {user && (
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-500">
+                  {user.username}
+                  {user.role === 'admin' && (
+                    <span className="ml-2 px-2 py-1 text-xs bg-purple-600 text-white rounded">Admin</span>
+                  )}
+                </span>
+                <button
+                  onClick={logout}
+                  className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
             <div className="text-sm flex items-center gap-1">
               {teams.length > 0 ? (
                 <>
@@ -1289,7 +1308,16 @@ const RaceDashboard = () => {
                   <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               )
-            }
+            },
+            ...(user?.role === 'admin' ? [{
+              id: 'admin',
+              label: 'Admin',
+              icon: (
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              )
+            }] : [])
           ]}
           defaultTab="standings"
           isDarkMode={isDarkMode}
@@ -1304,6 +1332,9 @@ const RaceDashboard = () => {
             isSimulating={simulating}
             sessionInfo={sessionInfo}
           />
+          {user?.role === 'admin' && (
+            <AdminPanel isDarkMode={isDarkMode} />
+          )}
         </TabbedInterface>
       </div>
     </div>

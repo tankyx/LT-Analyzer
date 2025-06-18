@@ -1,10 +1,6 @@
 // racing-analyzer/app/services/ApiService.ts
 
-// Use relative URL so it works with any domain/proxy setup
-// In production, nginx will proxy /api/* to the backend
-const API_BASE_URL = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:5000' 
-  : '';
+import { API_BASE_URL } from '../../utils/config';
 
 export const ApiService = {
   // Get race data

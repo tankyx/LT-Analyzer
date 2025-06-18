@@ -1,6 +1,7 @@
 // racing-analyzer/app/components/RaceDashboard/SimulationControls.tsx
 import React, { useState, useEffect } from 'react';
-import TrackManager from './TrackManager';
+import TrackSelector from './TrackSelector';
+import { useAuth } from '../../contexts/AuthContext';
 import ApiService from '../../services/ApiService';
 
 interface SimulationControlsProps {
@@ -20,6 +21,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   isSimulationMode = false,
   currentTimingUrl = ''
 }) => {
+  const { user } = useAuth();
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -28,7 +30,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   const [timingUrl, setTimingUrl] = useState(currentTimingUrl || 'https://www.apex-timing.com/live-timing/karting-mariembourg/index.html');
   const [websocketUrl, setWebsocketUrl] = useState('');
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
-  const [showUrlInput, setShowUrlInput] = useState(true);
+  const [showUrlInput, setShowUrlInput] = useState(false); // Default to Select Track mode
 
   // Update timing URL when currentTimingUrl changes (only on mount)
   useEffect(() => {
@@ -130,42 +132,44 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className={`rounded-lg p-4 border ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
           <div className="flex flex-col space-y-4">
-            {/* Track Selection Mode Toggle */}
-            <div className="flex gap-2 mb-2">
-              <button
-                onClick={() => setShowUrlInput(false)}
-                className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
-                  ${!showUrlInput
-                    ? (isDarkMode 
-                        ? 'bg-blue-700 text-white border-blue-600' 
-                        : 'bg-blue-100 text-blue-800 border-blue-300')
-                    : (isDarkMode 
-                        ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
-                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
-                  }
-                `}
-              >
-                Select Track
-              </button>
-              <button
-                onClick={() => setShowUrlInput(true)}
-                className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
-                  ${showUrlInput
-                    ? (isDarkMode 
-                        ? 'bg-blue-700 text-white border-blue-600' 
-                        : 'bg-blue-100 text-blue-800 border-blue-300')
-                    : (isDarkMode 
-                        ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
-                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
-                  }
-                `}
-              >
-                Manual URL
-              </button>
-            </div>
+            {/* Track Selection Mode Toggle - Only show for admin */}
+            {user?.role === 'admin' && (
+              <div className="flex gap-2 mb-2">
+                <button
+                  onClick={() => setShowUrlInput(false)}
+                  className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                    ${!showUrlInput
+                      ? (isDarkMode 
+                          ? 'bg-blue-700 text-white border-blue-600' 
+                          : 'bg-blue-100 text-blue-800 border-blue-300')
+                      : (isDarkMode 
+                          ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
+                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                    }
+                  `}
+                >
+                  Select Track
+                </button>
+                <button
+                  onClick={() => setShowUrlInput(true)}
+                  className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                    ${showUrlInput
+                      ? (isDarkMode 
+                          ? 'bg-blue-700 text-white border-blue-600' 
+                          : 'bg-blue-100 text-blue-800 border-blue-300')
+                      : (isDarkMode 
+                          ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
+                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                    }
+                  `}
+                >
+                  Manual URL
+                </button>
+              </div>
+            )}
 
             {/* Track Selection or URL Input */}
-            {showUrlInput ? (
+            {showUrlInput && user?.role === 'admin' ? (
               <div>
                 <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                   Live Timing URL:
@@ -208,23 +212,29 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="max-h-64 overflow-y-auto">
-                <TrackManager
-                  onSelectTrack={async (track) => {
-                    try {
-                      // Reset race data when changing tracks
-                      await ApiService.resetRaceData();
-                      
-                      setSelectedTrackId(track.id);
-                      setTimingUrl(track.timing_url);
-                      setWebsocketUrl(track.websocket_url || '');
-                    } catch (error) {
-                      console.error('Error resetting race data:', error);
+              <TrackSelector
+                onSelectTrack={async (track) => {
+                  try {
+                    // Reset race data when changing tracks
+                    await ApiService.resetRaceData();
+                    
+                    setSelectedTrackId(track.id);
+                    setTimingUrl(track.timing_url);
+                    setWebsocketUrl(track.websocket_url || '');
+                    
+                    // Automatically start data collection with the selected track
+                    if (track.websocket_url) {
+                      await handleStart('real');
+                    } else {
+                      setStatus('Selected track does not have a WebSocket URL configured');
                     }
-                  }}
-                  selectedTrackId={selectedTrackId}
-                />
-              </div>
+                  } catch (error) {
+                    console.error('Error resetting race data:', error);
+                  }
+                }}
+                selectedTrackId={selectedTrackId}
+                isDarkMode={isDarkMode}
+              />
             )}
 
 
