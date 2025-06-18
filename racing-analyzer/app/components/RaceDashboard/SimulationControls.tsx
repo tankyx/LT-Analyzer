@@ -69,6 +69,9 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
     setIsStarting(true);
     const isSimulation = mode === 'simulation';
     
+    console.log('handleStart called with mode:', mode);
+    console.log('Current state - timingUrl:', timingUrl, 'websocketUrl:', websocketUrl, 'selectedTrackId:', selectedTrackId);
+    
     // Validate URL for real mode
     if (!isSimulation && !timingUrl.trim()) {
       setStatus('Please enter a timing URL');
@@ -82,7 +85,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
       await onStart(
         isSimulation, 
         isSimulation ? undefined : timingUrl, 
-        isSimulation ? undefined : websocketUrl,
+        isSimulation ? undefined : (websocketUrl || undefined), // Pass undefined instead of empty string
         isSimulation ? undefined : selectedTrackId || undefined
       );
       setStatus(isSimulation ? 'Simulation running' : 'Real data collection running');
@@ -215,21 +218,43 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
               <TrackSelector
                 onSelectTrack={async (track) => {
                   try {
+                    console.log('Track selected:', track);
+                    
                     // Reset race data when changing tracks
                     await ApiService.resetRaceData();
                     
                     setSelectedTrackId(track.id);
                     setTimingUrl(track.timing_url);
+                    // Don't set to empty string if null - keep it as empty string for the input field display
                     setWebsocketUrl(track.websocket_url || '');
                     
                     // Automatically start data collection with the selected track
                     if (track.websocket_url) {
-                      await handleStart('real');
+                      console.log('Starting with websocket URL:', track.websocket_url);
+                      // Pass the values directly instead of relying on state
+                      setIsStarting(true);
+                      setStatus('Starting real data collection...');
+                      
+                      try {
+                        await onStart(
+                          false, // not simulation
+                          track.timing_url,
+                          track.websocket_url,
+                          track.id
+                        );
+                        setStatus('Real data collection running');
+                        setShowModeSelector(false);
+                      } catch (error) {
+                        setStatus(`Error starting: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                      } finally {
+                        setIsStarting(false);
+                      }
                     } else {
+                      console.log('No websocket URL, showing error message');
                       setStatus('Selected track does not have a WebSocket URL configured');
                     }
                   } catch (error) {
-                    console.error('Error resetting race data:', error);
+                    console.error('Error in track selection:', error);
                   }
                 }}
                 selectedTrackId={selectedTrackId}

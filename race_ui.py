@@ -868,6 +868,8 @@ async def update_race_data():
     websocket_url = race_data.get('websocket_url')
     if not websocket_url:
         print("ERROR: WebSocket URL is required")
+        race_data['error'] = 'WebSocket URL is required for real data collection'
+        race_data['is_running'] = False
         return
     
     print(f"Using WebSocket parser with URL: {websocket_url}")
@@ -1309,10 +1311,18 @@ def start_simulation():
             print(f"Using track from database: {track['track_name']}")
             if column_mappings:
                 print(f"Column mappings: {column_mappings}")
+            
+            # Check if WebSocket URL is available for this track
+            if not websocket_url:
+                return jsonify({'status': 'error', 'message': f'Track "{track["track_name"]}" does not have a WebSocket URL configured. Please configure it in Track Manager.'}), 400
         
         # Validate URL if provided and not in simulation mode
         if not simulation_mode and not timing_url:
             return jsonify({'status': 'error', 'message': 'Timing URL or track ID is required for real data mode'}), 400
+        
+        # Validate WebSocket URL for real data mode
+        if not simulation_mode and not websocket_url:
+            return jsonify({'status': 'error', 'message': 'WebSocket URL is required for real data mode. Please select a track with WebSocket URL configured or provide one manually.'}), 400
         
         print(f"Starting with simulation mode: {simulation_mode}, URL: {timing_url}, WebSocket URL: {websocket_url}")
         
