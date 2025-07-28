@@ -458,6 +458,11 @@ def get_standings_with_deltas():
     if not teams:
         return []
     
+    # Check if this is a qualification or session (not a race)
+    session_info = race_data.get('session_info', {})
+    session_type = session_info.get('title2', '') or session_info.get('title1', '') or session_info.get('title', '')
+    is_qualification = any(keyword in session_type.lower() for keyword in ['qualification', 'session', 'practice', 'qualify'])
+    
     # Sort teams by position
     sorted_teams = sorted(teams, key=lambda t: int(t.get('Position', '999')))
     
@@ -466,72 +471,135 @@ def get_standings_with_deltas():
         position = int(team.get('Position', '0'))
         kart_num = team.get('Kart', '')
         
-        # Get current team's gap
-        if position == 1:
-            current_gap = 0.0
-        else:
-            gap_str = team.get('Gap', '0')
-            if 'Tour' in gap_str:
-                # Lapped - use average lap time
-                laps_behind = int(gap_str.split()[0])
-                current_gap = laps_behind * get_average_lap_time()
-            else:
+        # Get current team's gap/best lap
+        if is_qualification:
+            # In qualification, use best lap times
+            best_lap = team.get('Best Lap', '')
+            if best_lap:
                 try:
                     # Parse time to seconds
-                    if ':' in gap_str:
-                        parts = gap_str.split(':')
+                    if ':' in best_lap:
+                        parts = best_lap.split(':')
                         minutes = int(parts[0])
                         seconds = float(parts[1].replace(',', '.'))
                         current_gap = minutes * 60 + seconds
                     else:
-                        current_gap = float(gap_str.replace(',', '.'))
+                        current_gap = float(best_lap.replace(',', '.'))
                 except:
-                    current_gap = 0.0
+                    current_gap = float('inf')  # No valid lap
+            else:
+                current_gap = float('inf')  # No lap set
+        else:
+            # Normal race mode - use gap
+            if position == 1:
+                current_gap = 0.0
+            else:
+                gap_str = team.get('Gap', '0')
+                if 'Tour' in gap_str:
+                    # Lapped - use average lap time
+                    laps_behind = int(gap_str.split()[0])
+                    current_gap = laps_behind * get_average_lap_time()
+                else:
+                    try:
+                        # Parse time to seconds
+                        if ':' in gap_str:
+                            parts = gap_str.split(':')
+                            minutes = int(parts[0])
+                            seconds = float(parts[1].replace(',', '.'))
+                            current_gap = minutes * 60 + seconds
+                        else:
+                            current_gap = float(gap_str.replace(',', '.'))
+                    except:
+                        current_gap = 0.0
         
         # Calculate delta to P-1 (team ahead)
         delta_p_minus_1 = None
         if i > 0:  # Not the leader
             prev_team = sorted_teams[i-1]
-            prev_gap = 0.0
-            if int(prev_team.get('Position', '0')) > 1:
-                prev_gap_str = prev_team.get('Gap', '0')
-                if 'Tour' in prev_gap_str:
-                    prev_laps = int(prev_gap_str.split()[0])
-                    prev_gap = prev_laps * get_average_lap_time()
-                else:
+            if is_qualification:
+                # In qualification, use best lap times
+                prev_best_lap = prev_team.get('Best Lap', '')
+                if prev_best_lap:
                     try:
-                        if ':' in prev_gap_str:
-                            parts = prev_gap_str.split(':')
+                        if ':' in prev_best_lap:
+                            parts = prev_best_lap.split(':')
                             minutes = int(parts[0])
                             seconds = float(parts[1].replace(',', '.'))
                             prev_gap = minutes * 60 + seconds
                         else:
-                            prev_gap = float(prev_gap_str.replace(',', '.'))
+                            prev_gap = float(prev_best_lap.replace(',', '.'))
                     except:
-                        prev_gap = 0.0
-            delta_p_minus_1 = round(current_gap - prev_gap, 3)
+                        prev_gap = float('inf')
+                else:
+                    prev_gap = float('inf')
+            else:
+                # Normal race mode - use gap
+                prev_gap = 0.0
+                if int(prev_team.get('Position', '0')) > 1:
+                    prev_gap_str = prev_team.get('Gap', '0')
+                    if 'Tour' in prev_gap_str:
+                        prev_laps = int(prev_gap_str.split()[0])
+                        prev_gap = prev_laps * get_average_lap_time()
+                    else:
+                        try:
+                            if ':' in prev_gap_str:
+                                parts = prev_gap_str.split(':')
+                                minutes = int(parts[0])
+                                seconds = float(parts[1].replace(',', '.'))
+                                prev_gap = minutes * 60 + seconds
+                            else:
+                                prev_gap = float(prev_gap_str.replace(',', '.'))
+                        except:
+                            prev_gap = 0.0
+            
+            if current_gap != float('inf') and prev_gap != float('inf'):
+                delta_p_minus_1 = round(current_gap - prev_gap, 3)
+            else:
+                delta_p_minus_1 = None
         
         # Calculate delta to P+1 (team behind)
         delta_p_plus_1 = None
         if i < len(sorted_teams) - 1:  # Not the last place
             next_team = sorted_teams[i+1]
-            next_gap_str = next_team.get('Gap', '0')
-            next_gap = 0.0
-            if 'Tour' in next_gap_str:
-                next_laps = int(next_gap_str.split()[0])
-                next_gap = next_laps * get_average_lap_time()
+            if is_qualification:
+                # In qualification, use best lap times
+                next_best_lap = next_team.get('Best Lap', '')
+                if next_best_lap:
+                    try:
+                        if ':' in next_best_lap:
+                            parts = next_best_lap.split(':')
+                            minutes = int(parts[0])
+                            seconds = float(parts[1].replace(',', '.'))
+                            next_gap = minutes * 60 + seconds
+                        else:
+                            next_gap = float(next_best_lap.replace(',', '.'))
+                    except:
+                        next_gap = float('inf')
+                else:
+                    next_gap = float('inf')
             else:
-                try:
-                    if ':' in next_gap_str:
-                        parts = next_gap_str.split(':')
-                        minutes = int(parts[0])
-                        seconds = float(parts[1].replace(',', '.'))
-                        next_gap = minutes * 60 + seconds
-                    else:
-                        next_gap = float(next_gap_str.replace(',', '.'))
-                except:
-                    next_gap = 0.0
-            delta_p_plus_1 = round(next_gap - current_gap, 3)
+                # Normal race mode - use gap
+                next_gap_str = next_team.get('Gap', '0')
+                next_gap = 0.0
+                if 'Tour' in next_gap_str:
+                    next_laps = int(next_gap_str.split()[0])
+                    next_gap = next_laps * get_average_lap_time()
+                else:
+                    try:
+                        if ':' in next_gap_str:
+                            parts = next_gap_str.split(':')
+                            minutes = int(parts[0])
+                            seconds = float(parts[1].replace(',', '.'))
+                            next_gap = minutes * 60 + seconds
+                        else:
+                            next_gap = float(next_gap_str.replace(',', '.'))
+                    except:
+                        next_gap = 0.0
+            
+            if current_gap != float('inf') and next_gap != float('inf'):
+                delta_p_plus_1 = round(next_gap - current_gap, 3)
+            else:
+                delta_p_plus_1 = None
         
         standings.append({
             'position': position,
@@ -633,6 +701,11 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
     my_team = next((team for team in teams if team.get('Kart') == my_team_kart), None)
     if not my_team:
         return {}
+    
+    # Check if this is a qualification or session (not a race)
+    session_info = race_data.get('session_info', {})
+    session_type = session_info.get('title2', '') or session_info.get('title1', '') or session_info.get('title', '')
+    is_qualification = any(keyword in session_type.lower() for keyword in ['qualification', 'session', 'practice', 'qualify'])
 
     deltas = {}
     try:
@@ -652,24 +725,38 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
             # Just seconds
             return float(time_str.replace(',', '.'))
         
-        # Check if my team is in position 1
-        my_laps_behind = 0
-        if my_team.get('Position') == '1':
-            my_base_gap = 0.0
-        else:
-            gap_str = my_team.get('Gap', '0')
-            # Handle lapped teams (e.g., "1 Tour", "2 Tours")
-            if 'Tour' in gap_str:
-                # My team is lapped - extract number of laps
-                my_laps_behind = int(gap_str.split()[0])
-                # Use a default lap time since we're lapped
-                my_base_gap = my_laps_behind * 90.0
-            else:
-                # Handle normal gap (could be MM:SS.sss or SS.sss)
+        # In qualification/practice, use best lap times instead of gaps
+        if is_qualification:
+            # Get my team's best lap time
+            my_best_lap = my_team.get('Best Lap', '')
+            if my_best_lap:
                 try:
-                    my_base_gap = parse_time_to_seconds(gap_str)
+                    my_base_gap = parse_time_to_seconds(my_best_lap)
                 except:
-                    my_base_gap = 0.0
+                    my_base_gap = float('inf')  # No valid lap time
+            else:
+                my_base_gap = float('inf')  # No lap set
+            my_laps_behind = 0
+        else:
+            # Normal race mode - use gap times
+            # Check if my team is in position 1
+            my_laps_behind = 0
+            if my_team.get('Position') == '1':
+                my_base_gap = 0.0
+            else:
+                gap_str = my_team.get('Gap', '0')
+                # Handle lapped teams (e.g., "1 Tour", "2 Tours")
+                if 'Tour' in gap_str:
+                    # My team is lapped - extract number of laps
+                    my_laps_behind = int(gap_str.split()[0])
+                    # Use a default lap time since we're lapped
+                    my_base_gap = my_laps_behind * 90.0
+                else:
+                    # Handle normal gap (could be MM:SS.sss or SS.sss)
+                    try:
+                        my_base_gap = parse_time_to_seconds(gap_str)
+                    except:
+                        my_base_gap = 0.0
         
         # Initialize gap history for new karts
         for kart in monitored_karts:
@@ -730,87 +817,113 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                     my_position = int(my_team.get('Position', '0'))
                     mon_position = int(monitored_team.get('Position', '0'))
                     
-                    # If position is 1, gap is 0
-                    if mon_position == 1:
-                        mon_base_gap = 0.0
-                    else:
-                        gap_str = monitored_team.get('Gap', '0')
-                        # Handle lapped teams and special cases
-                        if 'Tour' in gap_str:
-                            # Check if this is P1 showing total laps (e.g., "Tour 56")
-                            if mon_position == 1:
-                                # This is the winner showing total laps completed
-                                mon_base_gap = 0.0
-                                mon_laps_behind = 0
-                            else:
-                                # This is laps behind the leader (e.g., "1 Tour", "2 Tours")
-                                mon_laps_behind = int(gap_str.split()[0])
-                                
-                                # Check if there are lapped teams between us
-                                laps_between = count_lap_difference(my_position, mon_position)
-                                
-                                # Calculate actual lap difference
-                                if my_position < mon_position:
-                                    # Monitored team is behind us
-                                    actual_lap_diff = mon_laps_behind - my_laps_behind - laps_between
-                                else:
-                                    # Monitored team is ahead of us
-                                    actual_lap_diff = mon_laps_behind - my_laps_behind + laps_between
-                                
-                                # If actual_lap_diff is 0, we're on the same lap
-                                if actual_lap_diff == 0:
-                                    # We're on the same lap, use the position difference
-                                    # Find the time gap to the closest non-lapped team
-                                    mon_base_gap = my_base_gap  # Start with same base
-                                else:
-                                    # Calculate gap based on lap difference
-                                    # Get average lap time from recent data for better accuracy
-                                    avg_lap_time = get_average_lap_time()
-                                    
-                                    # Also consider the specific teams' recent lap times if available
-                                    team_karts = [int(my_team.get('Kart', 0)), int(monitored_team.get('Kart', 0))]
-                                    team_avg = get_average_lap_time(kart_numbers=team_karts)
-                                    if team_avg != 90.0:  # If we got valid team-specific data
-                                        avg_lap_time = team_avg
-                                    
-                                    mon_base_gap = my_base_gap + (actual_lap_diff * avg_lap_time)
-                        else:
-                            # Gap is in seconds (time format)
+                    # In qualification/practice, use best lap times
+                    if is_qualification:
+                        # Get monitored team's best lap time
+                        mon_best_lap = monitored_team.get('Best Lap', '')
+                        if mon_best_lap:
                             try:
-                                mon_base_gap = parse_time_to_seconds(gap_str)
-                                
-                                # Check if there are lapped teams between us
-                                laps_between = count_lap_difference(my_position, mon_position)
-                                
-                                # If there are lapped teams between us, account for lap difference
-                                if laps_between > 0:
-                                    # Get average lap time from recent data
-                                    avg_lap_time = get_average_lap_time()
-                                    
-                                    # Also consider the specific teams' recent lap times if available
-                                    team_karts = [int(my_team.get('Kart', 0)), int(monitored_team.get('Kart', 0))]
-                                    team_avg = get_average_lap_time(kart_numbers=team_karts)
-                                    if team_avg != 90.0:  # If we got valid team-specific data
-                                        avg_lap_time = team_avg
-                                    
-                                    if my_position < mon_position:
-                                        # Monitored team is behind us with lapped teams in between
-                                        mon_base_gap += laps_between * avg_lap_time
-                                    else:
-                                        # Monitored team is ahead of us with lapped teams in between
-                                        mon_base_gap -= laps_between * avg_lap_time
-                                # If no lapped teams between us, we're on same lap - use gap as is
+                                mon_base_gap = parse_time_to_seconds(mon_best_lap)
                             except:
-                                mon_base_gap = 0.0
+                                mon_base_gap = float('inf')  # No valid lap time
+                        else:
+                            mon_base_gap = float('inf')  # No lap set
+                    else:
+                        # Normal race mode - use position-based gaps
+                        # If position is 1, gap is 0
+                        if mon_position == 1:
+                            mon_base_gap = 0.0
+                        else:
+                            gap_str = monitored_team.get('Gap', '0')
+                            # Handle lapped teams and special cases
+                            if 'Tour' in gap_str:
+                                # Check if this is P1 showing total laps (e.g., "Tour 56")
+                                if mon_position == 1:
+                                    # This is the winner showing total laps completed
+                                    mon_base_gap = 0.0
+                                    mon_laps_behind = 0
+                                else:
+                                    # This is laps behind the leader (e.g., "1 Tour", "2 Tours")
+                                    mon_laps_behind = int(gap_str.split()[0])
+                                    
+                                    # Check if there are lapped teams between us
+                                    laps_between = count_lap_difference(my_position, mon_position)
+                                    
+                                    # Calculate actual lap difference
+                                    if my_position < mon_position:
+                                        # Monitored team is behind us
+                                        actual_lap_diff = mon_laps_behind - my_laps_behind - laps_between
+                                    else:
+                                        # Monitored team is ahead of us
+                                        actual_lap_diff = mon_laps_behind - my_laps_behind + laps_between
+                                    
+                                    # If actual_lap_diff is 0, we're on the same lap
+                                    if actual_lap_diff == 0:
+                                        # We're on the same lap, use the position difference
+                                        # Find the time gap to the closest non-lapped team
+                                        mon_base_gap = my_base_gap  # Start with same base
+                                    else:
+                                        # Calculate gap based on lap difference
+                                        # Get average lap time from recent data for better accuracy
+                                        avg_lap_time = get_average_lap_time()
+                                        
+                                        # Also consider the specific teams' recent lap times if available
+                                        team_karts = [int(my_team.get('Kart', 0)), int(monitored_team.get('Kart', 0))]
+                                        team_avg = get_average_lap_time(kart_numbers=team_karts)
+                                        if team_avg != 90.0:  # If we got valid team-specific data
+                                            avg_lap_time = team_avg
+                                        
+                                        mon_base_gap = my_base_gap + (actual_lap_diff * avg_lap_time)
+                            else:
+                                # Gap is in seconds (time format)
+                                try:
+                                    mon_base_gap = parse_time_to_seconds(gap_str)
+                                    
+                                    # Check if there are lapped teams between us
+                                    laps_between = count_lap_difference(my_position, mon_position)
+                                    
+                                    # If there are lapped teams between us, account for lap difference
+                                    if laps_between > 0:
+                                        # Get average lap time from recent data
+                                        avg_lap_time = get_average_lap_time()
+                                        
+                                        # Also consider the specific teams' recent lap times if available
+                                        team_karts = [int(my_team.get('Kart', 0)), int(monitored_team.get('Kart', 0))]
+                                        team_avg = get_average_lap_time(kart_numbers=team_karts)
+                                        if team_avg != 90.0:  # If we got valid team-specific data
+                                            avg_lap_time = team_avg
+                                        
+                                        if my_position < mon_position:
+                                            # Monitored team is behind us with lapped teams in between
+                                            mon_base_gap += laps_between * avg_lap_time
+                                        else:
+                                            # Monitored team is ahead of us with lapped teams in between
+                                            mon_base_gap -= laps_between * avg_lap_time
+                                    # If no lapped teams between us, we're on same lap - use gap as is
+                                except:
+                                    mon_base_gap = 0.0
                     
-                    # Calculate regular gap with pit stop compensation for completed stops
-                    # Using standard 150 second compensation as base (this is what Apex Timing shows)
-                    real_gap = (mon_base_gap - my_base_gap) + ((mon_pit_stops - my_pit_stops) * 150)
-                    real_gap = round(real_gap, 3)
-                    
-                    # Calculate adjusted gap accounting for remaining required pit stops
-                    adjusted_gap = real_gap + ((mon_remaining_stops - my_remaining_stops) * PIT_STOP_TIME)
-                    adjusted_gap = round(adjusted_gap, 3)
+                    # Calculate gap based on session type
+                    if is_qualification:
+                        # In qualification, gap is simply the difference in best lap times
+                        if my_base_gap == float('inf') or mon_base_gap == float('inf'):
+                            # One or both teams haven't set a valid lap time
+                            real_gap = 0.0 if my_base_gap == mon_base_gap else float('inf')
+                        else:
+                            real_gap = mon_base_gap - my_base_gap
+                        real_gap = round(real_gap, 3)
+                        # No pit stop adjustments in qualification
+                        adjusted_gap = real_gap
+                    else:
+                        # Normal race mode - calculate with pit stops
+                        # Calculate regular gap with pit stop compensation for completed stops
+                        # Using standard 150 second compensation as base (this is what Apex Timing shows)
+                        real_gap = (mon_base_gap - my_base_gap) + ((mon_pit_stops - my_pit_stops) * 150)
+                        real_gap = round(real_gap, 3)
+                        
+                        # Calculate adjusted gap accounting for remaining required pit stops
+                        adjusted_gap = real_gap + ((mon_remaining_stops - my_remaining_stops) * PIT_STOP_TIME)
+                        adjusted_gap = round(adjusted_gap, 3)
                     
                     # Update gap history
                     gap_history = race_data['gap_history'][kart]

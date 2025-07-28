@@ -29,6 +29,10 @@ interface SessionInfo {
   dyn1?: string;
   dyn2?: string;
   light?: string;
+  title?: string;
+  title1?: string;
+  title2?: string;
+  [key: string]: string | undefined; // Allow other string fields from backend
 }
 
 interface Alert {
@@ -116,12 +120,12 @@ const parseTimeToSeconds = (timeStr: string): number => {
 };
 
 // Helper function to calculate gaps between teams
-const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: string[], pitStopTime: number, requiredPitStops: number): Record<string, DeltaData> => {
+const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: string[], pitStopTime: number, requiredPitStops: number, isQualification: boolean = false): Record<string, DeltaData> => {
   const myTeam = teams.find(t => t.Kart === myTeamKart);
   if (!myTeam) return {};
 
-  const myPitStops = parseInt(myTeam['Pit Stops'] || '0');
-  const myRemainingStops = Math.max(0, requiredPitStops - myPitStops);
+  const myPitStops = isQualification ? 0 : parseInt(myTeam['Pit Stops'] || '0');
+  const myRemainingStops = isQualification ? 0 : Math.max(0, requiredPitStops - myPitStops);
   
   // Parse my team's gap
   let myGapToLeader = 0;
@@ -174,8 +178,8 @@ const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: st
     const monitoredTeam = teams.find(t => t.Kart === kart);
     if (!monitoredTeam) return;
 
-    const monPitStops = parseInt(monitoredTeam['Pit Stops'] || '0');
-    const monRemainingStops = Math.max(0, requiredPitStops - monPitStops);
+    const monPitStops = isQualification ? 0 : parseInt(monitoredTeam['Pit Stops'] || '0');
+    const monRemainingStops = isQualification ? 0 : Math.max(0, requiredPitStops - monPitStops);
     
     const monPosition = parseInt(monitoredTeam.Position);
     
@@ -250,12 +254,31 @@ const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: st
       }
     }
 
-    // Calculate real gap including pit stop compensation for completed stops
-    // Using 150 second compensation as base (standard Apex Timing value)
-    const realGap = (monGapToLeader - myGapToLeader) + ((monPitStops - myPitStops) * 150);
+    // Calculate gap based on session type
+    let realGap: number;
+    let adjustedGap: number;
     
-    // Calculate adjusted gap accounting for remaining required pit stops
-    const adjustedGap = realGap + ((monRemainingStops - myRemainingStops) * pitStopTime);
+    if (isQualification) {
+      // In qualification mode, use best lap times for gap calculation
+      const myBestLap = myTeam['Best Lap'] && myTeam['Best Lap'].includes(':') 
+        ? parseTimeToSeconds(myTeam['Best Lap'])
+        : Infinity;
+      const monBestLap = monitoredTeam['Best Lap'] && monitoredTeam['Best Lap'].includes(':')
+        ? parseTimeToSeconds(monitoredTeam['Best Lap'])
+        : Infinity;
+      
+      // Gap is the difference in best lap times
+      realGap = monBestLap - myBestLap;
+      adjustedGap = realGap; // No pit stop adjustments in qualification
+    } else {
+      // Normal race mode - calculate with pit stops
+      // Calculate real gap including pit stop compensation for completed stops
+      // Using 150 second compensation as base (standard Apex Timing value)
+      realGap = (monGapToLeader - myGapToLeader) + ((monPitStops - myPitStops) * 150);
+      
+      // Calculate adjusted gap accounting for remaining required pit stops
+      adjustedGap = realGap + ((monRemainingStops - myRemainingStops) * pitStopTime);
+    }
 
     deltas[kart] = {
       gap: Math.round(realGap * 1000) / 1000, // Round to 3 decimals
@@ -265,7 +288,7 @@ const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: st
       last_lap: monitoredTeam['Last Lap'],
       best_lap: monitoredTeam['Best Lap'],
       pit_stops: monitoredTeam['Pit Stops'],
-      remaining_stops: monRemainingStops,
+      remaining_stops: isQualification ? 0 : monRemainingStops,
       trends: {
         lap_1: { value: 0, arrow: 0 },
         lap_5: { value: 0, arrow: 0 },
@@ -386,12 +409,20 @@ const RaceDashboard = () => {
   }, [teams]);
 
   // Calculate gaps locally in the frontend
+  // Check if this is a qualification/practice session
+  const isQualificationMode = useMemo(() => {
+    const sessionType = sessionInfo.title2 || sessionInfo.title1 || sessionInfo.title || '';
+    return ['qualification', 'session', 'practice', 'qualify'].some(keyword => 
+      sessionType.toLowerCase().includes(keyword)
+    );
+  }, [sessionInfo]);
+
   const frontendDeltaData = useMemo(() => {
     if (!myTeam || monitoredTeams.length === 0 || teams.length === 0) {
       return {};
     }
-    return calculateTeamGaps(teams, myTeam, monitoredTeams, pitStopTime, requiredPitStops);
-  }, [teams, myTeam, monitoredTeams, pitStopTime, requiredPitStops]);
+    return calculateTeamGaps(teams, myTeam, monitoredTeams, pitStopTime, requiredPitStops, isQualificationMode);
+  }, [teams, myTeam, monitoredTeams, pitStopTime, requiredPitStops, isQualificationMode]);
     
   const handleTeamHover = (kartNum: string | null) => {
     setHoveredTeam(kartNum);
@@ -843,23 +874,25 @@ const RaceDashboard = () => {
               Monitored Teams
             </h2>
             
-            {/* Add gap mode toggle for monitored teams */}
-            <div className="flex items-center space-x-2">
-              <span className={`text-xs ${showAdjustedGap ? (isDarkMode ? 'text-gray-400' : 'text-gray-500') : (isDarkMode ? 'text-blue-300' : 'text-blue-600')}`}>
-                Regular
-              </span>
-              <button 
-                onClick={() => setShowAdjustedGap(!showAdjustedGap)}
-                className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors ${showAdjustedGap ? (isDarkMode ? 'bg-blue-600' : 'bg-blue-500') : (isDarkMode ? 'bg-gray-600' : 'bg-gray-300')}`}
-              >
-                <span 
-                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${showAdjustedGap ? 'translate-x-5' : 'translate-x-1'}`} 
-                />
-              </button>
-              <span className={`text-xs ${showAdjustedGap ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')}`}>
-                Adjusted
-              </span>
-            </div>
+            {/* Add gap mode toggle for monitored teams - only show in race mode */}
+            {!isQualificationMode && (
+              <div className="flex items-center space-x-2">
+                <span className={`text-xs ${showAdjustedGap ? (isDarkMode ? 'text-gray-400' : 'text-gray-500') : (isDarkMode ? 'text-blue-300' : 'text-blue-600')}`}>
+                  Regular
+                </span>
+                <button 
+                  onClick={() => setShowAdjustedGap(!showAdjustedGap)}
+                  className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors ${showAdjustedGap ? (isDarkMode ? 'bg-blue-600' : 'bg-blue-500') : (isDarkMode ? 'bg-gray-600' : 'bg-gray-300')}`}
+                >
+                  <span 
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${showAdjustedGap ? 'translate-x-5' : 'translate-x-1'}`} 
+                  />
+                </button>
+                <span className={`text-xs ${showAdjustedGap ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')}`}>
+                  Adjusted
+                </span>
+              </div>
+            )}
           </div>
         </div>
         
@@ -922,8 +955,8 @@ const RaceDashboard = () => {
                   )}
                 </div>
                 
-                {/* Add pit stop indicator */}
-                {showAdjustedGap && data.remaining_stops !== undefined && (
+                {/* Add pit stop indicator - only show in race mode */}
+                {!isQualificationMode && showAdjustedGap && data.remaining_stops !== undefined && (
                   <div className={`text-xs rounded-full px-2 py-1 ${isDarkMode ? 'bg-blue-900 text-blue-100' : 'bg-blue-50 text-blue-800'}`}>
                     {data.remaining_stops > 0 ? (
                       <>Remaining stops: <span className="font-bold">{data.remaining_stops}</span></>
@@ -944,7 +977,7 @@ const RaceDashboard = () => {
                   <span className="font-medium">{data.best_lap}</span>
                 </div>
                 <div className="flex flex-col">
-                  <span className="text-xs opacity-70">Pit Stops</span>
+                  <span className="text-xs opacity-70">{isQualificationMode ? 'Laps' : 'Pit Stops'}</span>
                   <span className="font-medium">{data.pit_stops}</span>
                 </div>
               </div>
@@ -961,8 +994,8 @@ const RaceDashboard = () => {
           )}
         </div>
         
-        {/* Add explanation for adjusted gap */}
-        {showAdjustedGap && Object.keys(deltaData).length > 0 && (
+        {/* Add explanation for adjusted gap - only show in race mode */}
+        {!isQualificationMode && showAdjustedGap && Object.keys(deltaData).length > 0 && (
           <div className={`px-4 py-2 text-xs border-t ${isDarkMode ? 'border-gray-700 bg-gray-700/50 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
             <div className="flex items-center">
               <svg className="w-4 h-4 mr-1 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

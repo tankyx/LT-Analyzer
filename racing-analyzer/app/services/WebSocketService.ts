@@ -20,6 +20,10 @@ interface SessionInfo {
   dyn1?: string;
   dyn2?: string;
   light?: string;
+  title?: string;
+  title1?: string;
+  title2?: string;
+  [key: string]: string | undefined; // Allow other string fields from backend
 }
 
 interface Trend {
