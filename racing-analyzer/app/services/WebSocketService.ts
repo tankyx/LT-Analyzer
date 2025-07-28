@@ -98,6 +98,26 @@ export interface PitConfigUpdate {
   default_lap_time?: number;
 }
 
+export interface DeltaChange {
+  kart: string;
+  team_name: string;
+  gap: number;
+  adjusted_gap: number;
+  gap_change: number;
+  adj_gap_change: number;
+  position: number;
+  trends: {
+    lap_1: Trend;
+    lap_5: Trend;
+    lap_10: Trend;
+  };
+}
+
+export interface DeltaChangeUpdate {
+  changed_deltas: Record<string, DeltaChange>;
+  timestamp: string;
+}
+
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 interface WebSocketCallbacks {
@@ -109,6 +129,7 @@ interface WebSocketCallbacks {
   onPitConfigUpdate?: (data: PitConfigUpdate) => void;
   onConnectionStatusChange?: (status: ConnectionStatus) => void;
   onRaceDataReset?: () => void;
+  onDeltaChange?: (data: DeltaChangeUpdate) => void;
 }
 
 class WebSocketService {
@@ -205,6 +226,11 @@ class WebSocketService {
     // Handle race data reset
     this.socket.on('race_data_reset', () => {
       this.callbacks.onRaceDataReset?.();
+    });
+
+    // Handle delta change events
+    this.socket.on('delta_change', (data: DeltaChangeUpdate) => {
+      this.callbacks.onDeltaChange?.(data);
     });
   }
 

@@ -126,6 +126,43 @@ def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
     connected_clients.discard(request.sid)
     leave_room('race_updates')
+    leave_room('standings_stream')
+
+@socketio.on('subscribe_standings')
+def handle_standings_subscription(data=None):
+    """Handle subscription to standings stream with deltas"""
+    print(f"Client {request.sid} subscribed to standings stream")
+    join_room('standings_stream')
+    
+    # Send initial standings with all teams
+    standings_data = get_standings_with_deltas()
+    emit('standings_update', {
+        'type': 'initial',
+        'standings': standings_data,
+        'timestamp': datetime.now().strftime('%H:%M:%S.%f')[:-3]
+    })
+
+@socketio.on('unsubscribe_standings')
+def handle_standings_unsubscription():
+    """Handle unsubscription from standings stream"""
+    print(f"Client {request.sid} unsubscribed from standings stream")
+    leave_room('standings_stream')
+
+@socketio.on('request_team_delta')
+def handle_team_delta_request(data):
+    """Handle request for specific team delta information"""
+    team_number = data.get('team_number')
+    if not team_number:
+        emit('error', {'message': 'Team number required'})
+        return
+    
+    # Get delta info for specific team
+    delta_info = get_team_delta_info(str(team_number))
+    emit('team_delta_response', {
+        'team_number': team_number,
+        'delta_info': delta_info,
+        'timestamp': datetime.now().strftime('%H:%M:%S.%f')[:-3]
+    })
 
 def emit_race_update(update_type='full', data=None):
     """Emit race data updates to all connected clients"""
@@ -135,6 +172,10 @@ def emit_race_update(update_type='full', data=None):
     # Only emit if we have actual data to send
     if not race_data.get('teams') and update_type != 'custom':
         return
+    
+    # Emit standings update to subscribers
+    if update_type in ['full', 'teams'] and race_data.get('teams'):
+        emit_standings_update()
         
     if update_type == 'full':
         # Convert gap_history deques to lists for JSON serialization
@@ -408,10 +449,183 @@ def get_average_lap_time(session_id=None, kart_numbers=None, default=None):
         print(f"Error calculating average lap time: {e}")
         return default
 
+# Store previous delta values for change detection
+previous_deltas = {}
+
+def get_standings_with_deltas():
+    """Get current standings with P-1 and P+1 deltas for all teams"""
+    teams = race_data.get('teams', [])
+    if not teams:
+        return []
+    
+    # Sort teams by position
+    sorted_teams = sorted(teams, key=lambda t: int(t.get('Position', '999')))
+    
+    standings = []
+    for i, team in enumerate(sorted_teams):
+        position = int(team.get('Position', '0'))
+        kart_num = team.get('Kart', '')
+        
+        # Get current team's gap
+        if position == 1:
+            current_gap = 0.0
+        else:
+            gap_str = team.get('Gap', '0')
+            if 'Tour' in gap_str:
+                # Lapped - use average lap time
+                laps_behind = int(gap_str.split()[0])
+                current_gap = laps_behind * get_average_lap_time()
+            else:
+                try:
+                    # Parse time to seconds
+                    if ':' in gap_str:
+                        parts = gap_str.split(':')
+                        minutes = int(parts[0])
+                        seconds = float(parts[1].replace(',', '.'))
+                        current_gap = minutes * 60 + seconds
+                    else:
+                        current_gap = float(gap_str.replace(',', '.'))
+                except:
+                    current_gap = 0.0
+        
+        # Calculate delta to P-1 (team ahead)
+        delta_p_minus_1 = None
+        if i > 0:  # Not the leader
+            prev_team = sorted_teams[i-1]
+            prev_gap = 0.0
+            if int(prev_team.get('Position', '0')) > 1:
+                prev_gap_str = prev_team.get('Gap', '0')
+                if 'Tour' in prev_gap_str:
+                    prev_laps = int(prev_gap_str.split()[0])
+                    prev_gap = prev_laps * get_average_lap_time()
+                else:
+                    try:
+                        if ':' in prev_gap_str:
+                            parts = prev_gap_str.split(':')
+                            minutes = int(parts[0])
+                            seconds = float(parts[1].replace(',', '.'))
+                            prev_gap = minutes * 60 + seconds
+                        else:
+                            prev_gap = float(prev_gap_str.replace(',', '.'))
+                    except:
+                        prev_gap = 0.0
+            delta_p_minus_1 = round(current_gap - prev_gap, 3)
+        
+        # Calculate delta to P+1 (team behind)
+        delta_p_plus_1 = None
+        if i < len(sorted_teams) - 1:  # Not the last place
+            next_team = sorted_teams[i+1]
+            next_gap_str = next_team.get('Gap', '0')
+            next_gap = 0.0
+            if 'Tour' in next_gap_str:
+                next_laps = int(next_gap_str.split()[0])
+                next_gap = next_laps * get_average_lap_time()
+            else:
+                try:
+                    if ':' in next_gap_str:
+                        parts = next_gap_str.split(':')
+                        minutes = int(parts[0])
+                        seconds = float(parts[1].replace(',', '.'))
+                        next_gap = minutes * 60 + seconds
+                    else:
+                        next_gap = float(next_gap_str.replace(',', '.'))
+                except:
+                    next_gap = 0.0
+            delta_p_plus_1 = round(next_gap - current_gap, 3)
+        
+        standings.append({
+            'position': position,
+            'kart_number': kart_num,
+            'team_name': team.get('Team', ''),
+            'gap': team.get('Gap', '0'),
+            'gap_seconds': current_gap,
+            'delta_p_minus_1': delta_p_minus_1,  # Gap to car ahead
+            'delta_p_plus_1': delta_p_plus_1,    # Gap to car behind
+            'last_lap': team.get('Last Lap', ''),
+            'best_lap': team.get('Best Lap', ''),
+            'pit_stops': team.get('Pit Stops', '0'),
+            'status': team.get('Status', 'On Track')
+        })
+    
+    return standings
+
+def get_team_delta_info(kart_number):
+    """Get detailed delta information for a specific team"""
+    standings = get_standings_with_deltas()
+    
+    for standing in standings:
+        if standing['kart_number'] == kart_number:
+            return standing
+    
+    return None
+
+# Store previous standings for change detection
+previous_standings = {}
+
+def emit_standings_update():
+    """Emit standings update to all subscribed clients"""
+    global previous_standings
+    
+    standings = get_standings_with_deltas()
+    if not standings:
+        return
+    
+    # Detect changes in standings
+    changed_teams = []
+    for standing in standings:
+        kart_num = standing['kart_number']
+        if kart_num in previous_standings:
+            prev = previous_standings[kart_num]
+            # Check for significant changes
+            position_changed = standing['position'] != prev.get('position')
+            delta_p_minus_changed = (
+                standing['delta_p_minus_1'] is not None and 
+                prev.get('delta_p_minus_1') is not None and
+                abs(standing['delta_p_minus_1'] - prev['delta_p_minus_1']) > 0.1
+            )
+            delta_p_plus_changed = (
+                standing['delta_p_plus_1'] is not None and 
+                prev.get('delta_p_plus_1') is not None and
+                abs(standing['delta_p_plus_1'] - prev['delta_p_plus_1']) > 0.1
+            )
+            
+            if position_changed or delta_p_minus_changed or delta_p_plus_changed:
+                changed_teams.append({
+                    'kart_number': kart_num,
+                    'position': standing['position'],
+                    'position_change': standing['position'] - prev.get('position', standing['position']),
+                    'delta_p_minus_1': standing['delta_p_minus_1'],
+                    'delta_p_plus_1': standing['delta_p_plus_1'],
+                    'delta_p_minus_change': (standing['delta_p_minus_1'] - prev.get('delta_p_minus_1', 0)) if standing['delta_p_minus_1'] is not None and prev.get('delta_p_minus_1') is not None else None,
+                    'delta_p_plus_change': (standing['delta_p_plus_1'] - prev.get('delta_p_plus_1', 0)) if standing['delta_p_plus_1'] is not None and prev.get('delta_p_plus_1') is not None else None
+                })
+        else:
+            # New team
+            changed_teams.append({
+                'kart_number': kart_num,
+                'position': standing['position'],
+                'position_change': 0,
+                'delta_p_minus_1': standing['delta_p_minus_1'],
+                'delta_p_plus_1': standing['delta_p_plus_1'],
+                'delta_p_minus_change': None,
+                'delta_p_plus_change': None
+            })
+    
+    # Update previous standings
+    previous_standings = {s['kart_number']: s for s in standings}
+    
+    # Emit update to standings stream subscribers
+    socketio.emit('standings_update', {
+        'type': 'update',
+        'standings': standings,
+        'changes': changed_teams,
+        'timestamp': datetime.now().strftime('%H:%M:%S.%f')[:-3]
+    }, room='standings_stream')
+
 # Function to calculate delta times between teams
 def calculate_delta_times(teams, my_team_kart, monitored_karts):
     """Calculate delta times between my team and monitored teams"""
-    global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS
+    global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS, previous_deltas
     
     if not my_team_kart or not teams:
         return {}
@@ -651,6 +865,53 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
     
     # Store the delta times in race_data for future reference
     race_data['delta_times'] = deltas
+    
+    # Check for significant changes and emit targeted updates
+    changed_deltas = {}
+    for kart, delta_info in deltas.items():
+        if kart in previous_deltas:
+            prev_delta = previous_deltas[kart]
+            # Check if gap changed by more than 0.1 seconds
+            gap_changed = abs(delta_info['gap'] - prev_delta.get('gap', 0)) > 0.1
+            adj_gap_changed = abs(delta_info['adjusted_gap'] - prev_delta.get('adjusted_gap', 0)) > 0.1
+            
+            if gap_changed or adj_gap_changed:
+                changed_deltas[kart] = {
+                    'kart': kart,
+                    'team_name': delta_info['team_name'],
+                    'gap': delta_info['gap'],
+                    'adjusted_gap': delta_info['adjusted_gap'],
+                    'gap_change': delta_info['gap'] - prev_delta.get('gap', 0),
+                    'adj_gap_change': delta_info['adjusted_gap'] - prev_delta.get('adjusted_gap', 0),
+                    'position': delta_info['position'],
+                    'trends': delta_info['trends']
+                }
+        else:
+            # New monitored team
+            changed_deltas[kart] = {
+                'kart': kart,
+                'team_name': delta_info['team_name'],
+                'gap': delta_info['gap'],
+                'adjusted_gap': delta_info['adjusted_gap'],
+                'gap_change': 0,
+                'adj_gap_change': 0,
+                'position': delta_info['position'],
+                'trends': delta_info['trends']
+            }
+    
+    # Update previous deltas
+    previous_deltas = deltas.copy()
+    
+    # If there are changed deltas, emit a targeted update
+    if changed_deltas:
+        emit_race_update('custom', {
+            'event': 'delta_change',
+            'payload': {
+                'changed_deltas': changed_deltas,
+                'timestamp': datetime.now().strftime('%H:%M:%S.%f')[:-3]  # Include milliseconds
+            }
+        })
+    
     return deltas
 
 # Simulation helper functions
