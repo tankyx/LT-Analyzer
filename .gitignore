@@ -24,3 +24,6 @@ htmlcov/
 
 # Log files
 *.log.*
+
+# Database files
+race_data.db
