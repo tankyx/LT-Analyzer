@@ -8,3 +8,19 @@ tracks.db
 *.db
 *.log
 racing-venv/
+
+# Backup files
+*_original.py
+*_original.ts
+*_original.tsx
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Database files
+*.db-shm
+*.db-wal
+
+# Log files
+*.log.*
