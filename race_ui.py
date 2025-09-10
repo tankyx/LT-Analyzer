@@ -1417,69 +1417,85 @@ def admin_required(f):
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     """User login endpoint"""
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    
-    if not username or not password:
-        return jsonify({'error': 'Username and password required'}), 400
-    
-    # Hash the password
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Log login attempt
-    cursor.execute('''
-        INSERT INTO login_attempts (username, ip_address, success)
-        VALUES (?, ?, ?)
-    ''', (username, request.remote_addr, False))
-    
-    # Check credentials
-    cursor.execute('''
-        SELECT id, username, role, email, is_active
-        FROM users
-        WHERE username = ? AND password_hash = ?
-    ''', (username, password_hash))
-    
-    user = cursor.fetchone()
-    
-    if user and user['is_active']:
-        # Update last login
-        cursor.execute('''
-            UPDATE users SET last_login = ? WHERE id = ?
-        ''', (datetime.now().isoformat(), user['id']))
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+            
+        username = data.get('username')
+        password = data.get('password')
         
-        # Update login attempt as successful
-        cursor.execute('''
-            UPDATE login_attempts 
-            SET success = 1 
-            WHERE id = (SELECT MAX(id) FROM login_attempts WHERE username = ?)
-        ''', (username,))
+        if not username or not password:
+            return jsonify({'error': 'Username and password required'}), 400
         
-        conn.commit()
+        # Hash the password
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
         
-        # Create session
-        session_id = create_session(user['id'])
-        session['session_id'] = session_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
         
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'user': {
-                'id': user['id'],
-                'username': user['username'],
-                'role': user['role'],
-                'email': user['email']
-            }
-        })
-    
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'error': 'Invalid credentials'}), 401
+        try:
+            # Log login attempt
+            cursor.execute('''
+                INSERT INTO login_attempts (username, ip_address, success)
+                VALUES (?, ?, ?)
+            ''', (username, request.remote_addr, False))
+            
+            # Check credentials
+            cursor.execute('''
+                SELECT id, username, role, email, is_active
+                FROM users
+                WHERE username = ? AND password_hash = ?
+            ''', (username, password_hash))
+            
+            user = cursor.fetchone()
+            
+            if user and user['is_active']:
+                # Update last login
+                cursor.execute('''
+                    UPDATE users SET last_login = ? WHERE id = ?
+                ''', (datetime.now().isoformat(), user['id']))
+                
+                # Update login attempt as successful
+                cursor.execute('''
+                    UPDATE login_attempts 
+                    SET success = 1 
+                    WHERE id = (SELECT MAX(id) FROM login_attempts WHERE username = ?)
+                ''', (username,))
+                
+                conn.commit()
+                
+                # Create session
+                session_id = create_session(user['id'])
+                session['session_id'] = session_id
+                
+                conn.close()
+                
+                return jsonify({
+                    'success': True,
+                    'user': {
+                        'id': user['id'],
+                        'username': user['username'],
+                        'role': user['role'],
+                        'email': user['email']
+                    }
+                })
+            
+            conn.commit()
+            conn.close()
+            
+            return jsonify({'error': 'Invalid credentials'}), 401
+            
+        except sqlite3.Error as e:
+            conn.rollback()
+            conn.close()
+            print(f"Database error in login: {e}")
+            return jsonify({'error': 'Database error occurred'}), 500
+            
+    except Exception as e:
+        print(f"Login error: {e}")
+        print(traceback.format_exc())
+        return jsonify({'error': 'An error occurred during login'}), 500
 
 @app.route('/api/auth/logout', methods=['POST'])
 @login_required
