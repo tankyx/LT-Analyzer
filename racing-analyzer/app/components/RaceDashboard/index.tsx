@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo, useCallback  } from 'react';
 import TimeDeltaChart from './TimeDeltaChart';
-import SimulationControls from './SimulationControls';
 import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
-import webSocketService, { RaceDataUpdate, TeamsUpdate, GapUpdate, SessionUpdate, MonitoringUpdate, PitConfigUpdate } from '../../services/WebSocketService';
+import webSocketService, { RaceDataUpdate, TeamsUpdate, GapUpdate, SessionUpdate, MonitoringUpdate, PitConfigUpdate, AllTracksStatusUpdate, TrackStatus } from '../../services/WebSocketService';
 import StatusImageIndicator from './StatusImageIndicator';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
 import StintPlanner from './StintPlanner';
 import AdminPanel from './AdminPanel';
+import MultiTrackStatus from './MultiTrackStatus';
 import { useAuth } from '../../contexts/AuthContext';
 
 // Types
@@ -336,7 +336,6 @@ const RaceDashboard = () => {
   const [gapHistory, setGapHistory] = useState<GapHistory>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
-  const [simulating, setSimulating] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
@@ -346,13 +345,12 @@ const RaceDashboard = () => {
   const [alertedPitTeams, setAlertedPitTeams] = useState<Set<string>>(new Set());
   const [requiredPitStops, setRequiredPitStops] = useState(7);
   const [defaultLapTime, setDefaultLapTime] = useState(90);
-  const [isSimulationMode, setIsSimulationMode] = useState(false);
-  const [raceData, setRaceData] = useState<{
-    timing_url?: string;
-    [key: string]: unknown;
-  } | null>(null);
   const [updatedRows, setUpdatedRows] = useState<Map<string, number>>(new Map()); // Track updated rows with timestamps
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
+  const [availableTracks, setAvailableTracks] = useState<Array<{id: number; track_name: string}>>([]);
+  const [selectedTrackId, setSelectedTrackId] = useState<number>(1);
+  const [sessionStatus, setSessionStatus] = useState<{active: boolean; message: string; trackName: string} | null>(null);
+  const [allTracksStatus, setAllTracksStatus] = useState<TrackStatus[]>([]);
 
   const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number, newDefaultLapTime?: number) => {
     try {
@@ -443,49 +441,6 @@ const RaceDashboard = () => {
     }
   }, [myTeam, monitoredTeams]);
 
-  const startSimulation = async (isSimulationMode: boolean = false, timingUrl?: string, websocketUrl?: string, trackId?: number) => {
-    try {
-      const response = await ApiService.startSimulation(isSimulationMode, timingUrl, websocketUrl, trackId);
-    
-      setSimulating(true);
-      setAlerts([...alerts, {
-        id: Date.now(),
-        message: isSimulationMode ? 'Simulation mode started successfully' : 'Real data collection started successfully',
-        type: 'success'
-      }]);
-      return response;
-    } catch (error) {
-      console.error('Error starting:', error);
-      setAlerts([...alerts, {
-        id: Date.now(),
-        message: `Failed to start: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        type: 'error'
-      }]);
-      throw error;
-    }
-  };
-
-  const stopSimulation = async () => {
-    try {
-      const response = await ApiService.stopSimulation();
-    
-      setSimulating(false);
-      setAlerts([...alerts, {
-        id: Date.now(),
-        message: 'Simulation stopped successfully',
-        type: 'info'
-      }]);
-      return response;
-    } catch (error) {
-      console.error('Error stopping simulation:', error);
-      setAlerts([...alerts, {
-        id: Date.now(),
-        message: `Failed to stop simulation: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        type: 'error'
-      }]);
-      throw error;
-    }
-  };
 
   const toggleDarkMode = () => {
     setIsDarkMode(!isDarkMode);
@@ -621,16 +576,11 @@ const RaceDashboard = () => {
         setLastUpdate(data.last_update || '');
         setDeltaData(data.delta_times || {});
         setGapHistory(data.gap_history || {});
-        setIsSimulationMode(data.simulation_mode || false);
         setMyTeam(data.my_team || '');
         setMonitoredTeams(data.monitored_teams || []);
         setPitStopTime(data.pit_config?.pit_time || 158);
         setRequiredPitStops(data.pit_config?.required_stops || 7);
         setDefaultLapTime(data.pit_config?.default_lap_time || 90);
-        setRaceData({
-          ...data,
-          timing_url: data.timing_url || undefined
-        });
         setIsLoading(false);
         setError(null);
         if (data.teams && data.teams.length > 0) {
@@ -684,7 +634,6 @@ const RaceDashboard = () => {
         setGapHistory({});
         setAlertedPitTeams(new Set());
         setUpdatedRows(new Map());
-        setRaceData(null);
         setIsLoading(true);
         setError(null);
         setAlerts(prev => [...prev, {
@@ -692,6 +641,29 @@ const RaceDashboard = () => {
           message: 'Race data cleared - ready for new track',
           type: 'info'
         }]);
+      },
+
+      onSessionStatus: (data) => {
+        console.log('Received session status:', data);
+        setSessionStatus({
+          active: data.active,
+          message: data.message,
+          trackName: data.track_name
+        });
+
+        // Show an alert when session becomes inactive
+        if (!data.active) {
+          setAlerts(prev => [...prev, {
+            id: Date.now(),
+            message: `${data.track_name}: No active session`,
+            type: 'warning'
+          }]);
+        }
+      },
+
+      onAllTracksStatus: (data: AllTracksStatusUpdate) => {
+        console.log('Received all tracks status:', data);
+        setAllTracksStatus(data.tracks);
       }
     });
 
@@ -701,6 +673,41 @@ const RaceDashboard = () => {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkPitStops]); // Only run on mount, teams and updatedRows changes are handled internally
+
+  // Load available tracks on mount
+  useEffect(() => {
+    const loadTracks = async () => {
+      try {
+        const result = await ApiService.getTracks();
+        if (result && result.tracks) {
+          setAvailableTracks(result.tracks);
+          // Auto-join first track
+          if (result.tracks.length > 0) {
+            setSelectedTrackId(result.tracks[0].id);
+            webSocketService.joinTrack(result.tracks[0].id);
+          }
+          // Join all_tracks room for multi-track status monitoring
+          webSocketService.joinAllTracks();
+        }
+      } catch (error) {
+        console.error('Error loading tracks:', error);
+      }
+    };
+    loadTracks();
+
+    return () => {
+      // Leave all_tracks room on unmount
+      webSocketService.leaveAllTracks();
+    };
+  }, []);
+
+  // Handle track selection changes
+  useEffect(() => {
+    if (selectedTrackId) {
+      console.log(`Switching to track ${selectedTrackId}`);
+      webSocketService.joinTrack(selectedTrackId);
+    }
+  }, [selectedTrackId]);
 
   const toggleTeamMonitoring = (kartNum: string) => {
     setIsUserUpdate(true);
@@ -828,15 +835,7 @@ const RaceDashboard = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       <p className="text-lg font-medium mb-2">No race data available</p>
-                      <p className="text-sm mb-4">Click &quot;Start Simulation&quot; to begin loading race data</p>
-                      {!simulating && (
-                        <button 
-                          onClick={() => startSimulation(false, undefined, 'hybrid')}
-                          className={`px-6 py-2 rounded-md transition-colors font-medium ${isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
-                        >
-                          Start Simulation
-                        </button>
-                      )}
+                      <p className="text-sm">Waiting for live race data from the timing system...</p>
                     </>
                   ) : (
                     // No teams in selected class
@@ -1116,16 +1115,40 @@ const RaceDashboard = () => {
           </div>
         </div>
 
-        {/* Simulation Controls */}
-        <SimulationControls
-          onStart={startSimulation}
-          onStop={stopSimulation}
-          isSimulating={simulating}
-          isDarkMode={isDarkMode}
-          isSimulationMode={isSimulationMode}
-          currentTimingUrl={raceData?.timing_url as string | undefined}
-        />
-        
+        {/* Two-column layout: Controls on left, Multi-track status on right */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 lg:items-start">
+          {/* Left Column: Track controls */}
+          <div className="space-y-6" id="left-column-controls">
+            {/* Track Selector */}
+            {availableTracks.length > 0 && (
+              <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
+                <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                  Select Track
+                </label>
+                <select
+                  value={selectedTrackId}
+                  onChange={(e) => setSelectedTrackId(parseInt(e.target.value))}
+                  className={`w-full p-2 border rounded-lg ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                >
+                  {availableTracks.map(track => (
+                    <option key={track.id} value={track.id}>
+                      {track.track_name}
+                    </option>
+                  ))}
+                </select>
+                <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Real-time updates from selected track. Backend collects all tracks simultaneously.
+                </p>
+                {sessionStatus && (
+                  <div className={`mt-2 flex items-center gap-2 ${sessionStatus.active ? 'text-green-600' : 'text-yellow-600'}`}>
+                    <span className="text-sm font-medium">
+                      {sessionStatus.active ? '● Session Active' : '○ No Active Session'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
         {/* Pit Stop Config */}
         {monitoredTeams.length > 0 && (
           <PitStopConfig
@@ -1148,64 +1171,50 @@ const RaceDashboard = () => {
           />
         )}
 
-        {/* Team Selection */}
-        <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
-          <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-            My Team
-          </label>
-          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
-            <select 
-              value={myTeam}
-              onChange={(e) => {
-                setIsUserUpdate(true);
-                setMyTeam(e.target.value);
-              }}
-              className={`w-full md:w-1/2 p-2 border rounded-lg ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
-            >
-              <option value="">Select Your Team</option>
-              {teams.length > 0 ? (
-                teams.map(team => (
-                  <option key={team.Kart} value={team.Kart}>
-                    {team.Team} (Kart #{team.Kart})
-                  </option>
-                ))
-              ) : (
-                <option value="" disabled>No teams available - Start simulation to load data</option>
-              )}
-            </select>
-            
-            {myTeam && (
-              <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                {teams.find(t => t.Kart === myTeam)?.Team} - Position: {teams.find(t => t.Kart === myTeam)?.Position || 'N/A'}
-              </div>
-            )}
-          </div>
-        </div>
+            {/* Team Selection */}
+            <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
+              <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+                My Team
+              </label>
+              <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                <select
+                  value={myTeam}
+                  onChange={(e) => {
+                    setIsUserUpdate(true);
+                    setMyTeam(e.target.value);
+                  }}
+                  className={`w-full md:w-1/2 p-2 border rounded-lg ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+                >
+                  <option value="">Select Your Team</option>
+                  {teams.length > 0 ? (
+                    teams.map(team => (
+                      <option key={team.Kart} value={team.Kart}>
+                        {team.Team} (Kart #{team.Kart})
+                      </option>
+                    ))
+                  ) : (
+                    <option value="" disabled>No teams available - Waiting for race data</option>
+                  )}
+                </select>
 
-        {/* Session Info */}
-        <div className={`rounded-lg p-4 mb-6 ${isDarkMode ? 'bg-gray-700' : 'bg-indigo-50'}`}>
-          <div className="flex items-center gap-2 mb-2">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <h2 className="font-semibold">Session Information</h2>
-          </div>
-          <div className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-blue-800'}`}>
-            {sessionInfo.dyn1 || (teams.length === 0 ? 'No active session - Start simulation to begin' : 'No session information available')}
-          </div>
-          {sessionInfo.dyn2 && (
-            <div className={`mt-1 ${isDarkMode ? 'text-gray-300' : 'text-blue-600'}`}>
-              {sessionInfo.dyn2}
+                {myTeam && (
+                  <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                    {teams.find(t => t.Kart === myTeam)?.Team} - Position: {teams.find(t => t.Kart === myTeam)?.Position || 'N/A'}
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-          {sessionInfo.light && (
-            <div className="flex items-center mt-2 gap-2">
-              <span className={`inline-block w-3 h-3 rounded-full ${sessionInfo.light === 'green' ? 'bg-green-500' : sessionInfo.light === 'red' ? 'bg-red-500' : sessionInfo.light === 'yellow' ? 'bg-yellow-400' : 'bg-gray-400'}`}></span>
-              <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                {sessionInfo.light.charAt(0).toUpperCase() + sessionInfo.light.slice(1)} flag
-              </span>
-            </div>
-          )}
+          </div>
+
+          {/* Right Column: Multi-track Status */}
+          <div className="lg:max-h-[400px]">
+            <MultiTrackStatus
+              tracks={allTracksStatus}
+              selectedTrackId={selectedTrackId}
+              onSelectTrack={(trackId) => setSelectedTrackId(trackId)}
+              isDarkMode={isDarkMode}
+            />
+          </div>
         </div>
 
         {/* Connection Status */}
@@ -1358,11 +1367,11 @@ const RaceDashboard = () => {
           {StandingsTab}
           {MonitoredTeamsTab}
           {ChartTab}
-          <StintPlanner 
-            isDarkMode={isDarkMode} 
+          <StintPlanner
+            isDarkMode={isDarkMode}
             myTeam={myTeam}
             teams={teams}
-            isSimulating={simulating}
+            isSimulating={true}
             sessionInfo={sessionInfo}
           />
           {user?.role === 'admin' && (

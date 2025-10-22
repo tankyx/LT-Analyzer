@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
+import { API_BASE_URL } from '../../utils/config';
 
 interface User {
   id: number;
@@ -71,7 +72,7 @@ export default function AdminDashboard() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/api/admin/users', {
+      const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
         credentials: 'include',
       });
       if (response.ok) {
@@ -88,7 +89,7 @@ export default function AdminDashboard() {
   const fetchTracks = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/api/admin/tracks', {
+      const response = await fetch(`${API_BASE_URL}/api/admin/tracks`, {
         credentials: 'include',
       });
       if (response.ok) {
@@ -104,7 +105,7 @@ export default function AdminDashboard() {
 
   const handleCreateUser = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/admin/users', {
+      const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -132,7 +133,7 @@ export default function AdminDashboard() {
     if (userForm.password) updates.password = userForm.password;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/admin/users/${editingUser.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -156,7 +157,7 @@ export default function AdminDashboard() {
     if (!confirm('Are you sure you want to delete this user?')) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/admin/users/${userId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -171,7 +172,7 @@ export default function AdminDashboard() {
 
   const handleCreateTrack = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/admin/tracks', {
+      const response = await fetch(`${API_BASE_URL}/api/admin/tracks`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -205,7 +206,7 @@ export default function AdminDashboard() {
     if (!editingTrack) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/admin/tracks/${editingTrack.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/tracks/${editingTrack.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -240,7 +241,7 @@ export default function AdminDashboard() {
     if (!confirm('Are you sure you want to delete this track?')) return;
 
     try {
-      const response = await fetch(`http://localhost:5000/api/admin/tracks/${trackId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/admin/tracks/${trackId}`, {
         method: 'DELETE',
         credentials: 'include',
       });

@@ -122,6 +122,36 @@ export interface DeltaChangeUpdate {
   timestamp: string;
 }
 
+export interface TrackUpdate {
+  track_id: number;
+  track_name: string;
+  teams: Team[];
+  session_id: number;
+  timestamp: string;
+}
+
+export interface SessionStatus {
+  track_id: number;
+  track_name: string;
+  active: boolean;
+  message: string;
+  timestamp: string;
+}
+
+export interface TrackStatus {
+  track_id: number;
+  track_name: string;
+  active: boolean;
+  last_update?: string;
+  teams_count?: number;
+  is_connected?: boolean;
+}
+
+export interface AllTracksStatusUpdate {
+  tracks: TrackStatus[];
+  timestamp: string;
+}
+
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 interface WebSocketCallbacks {
@@ -134,6 +164,8 @@ interface WebSocketCallbacks {
   onConnectionStatusChange?: (status: ConnectionStatus) => void;
   onRaceDataReset?: () => void;
   onDeltaChange?: (data: DeltaChangeUpdate) => void;
+  onSessionStatus?: (data: SessionStatus) => void;
+  onAllTracksStatus?: (data: AllTracksStatusUpdate) => void;
 }
 
 class WebSocketService {
@@ -144,6 +176,7 @@ class WebSocketService {
   private reconnectDelay = 1000; // Start with 1 second
   private maxReconnectDelay = 30000; // Max 30 seconds
   private connectionStatus: ConnectionStatus = 'disconnected';
+  private currentTrackId: number | null = null;
 
   constructor() {
     // Only connect on client side
@@ -207,6 +240,18 @@ class WebSocketService {
       this.callbacks.onRaceDataUpdate?.(data);
     });
 
+    // Track-specific update events
+    this.socket.on('track_update', (data: TrackUpdate) => {
+      console.log(`Received track_update for track ${data.track_id}:`, data.track_name);
+      // Convert track update to race data format
+      if (this.callbacks.onTeamsUpdate && data.teams) {
+        this.callbacks.onTeamsUpdate({
+          teams: data.teams,
+          last_update: data.timestamp
+        });
+      }
+    });
+
     this.socket.on('teams_update', (data: TeamsUpdate) => {
       this.callbacks.onTeamsUpdate?.(data);
     });
@@ -235,6 +280,18 @@ class WebSocketService {
     // Handle delta change events
     this.socket.on('delta_change', (data: DeltaChangeUpdate) => {
       this.callbacks.onDeltaChange?.(data);
+    });
+
+    // Handle session status events (active/inactive sessions)
+    this.socket.on('session_status', (data: SessionStatus) => {
+      console.log(`Session status for track ${data.track_id} (${data.track_name}): ${data.active ? 'active' : 'inactive'}`);
+      this.callbacks.onSessionStatus?.(data);
+    });
+
+    // Handle all tracks status events
+    this.socket.on('all_tracks_status', (data: AllTracksStatusUpdate) => {
+      console.log(`Received status for ${data.tracks.length} tracks`);
+      this.callbacks.onAllTracksStatus?.(data);
     });
   }
 
@@ -273,6 +330,61 @@ class WebSocketService {
       this.socket.emit(event, data);
     } else {
       console.warn('Cannot emit event - WebSocket not connected');
+    }
+  }
+
+  // Join a track-specific room
+  joinTrack(trackId: number): void {
+    if (this.currentTrackId === trackId) {
+      console.log(`Already subscribed to track ${trackId}`);
+      return;
+    }
+
+    // Leave current track if any
+    if (this.currentTrackId !== null) {
+      this.leaveTrack(this.currentTrackId);
+    }
+
+    if (this.socket?.connected) {
+      console.log(`Joining track ${trackId} room`);
+      this.socket.emit('join_track', { track_id: trackId });
+      this.currentTrackId = trackId;
+    } else {
+      console.warn('Cannot join track - WebSocket not connected');
+    }
+  }
+
+  // Leave a track-specific room
+  leaveTrack(trackId: number): void {
+    if (this.socket?.connected) {
+      console.log(`Leaving track ${trackId} room`);
+      this.socket.emit('leave_track', { track_id: trackId });
+      if (this.currentTrackId === trackId) {
+        this.currentTrackId = null;
+      }
+    }
+  }
+
+  // Get current track ID
+  getCurrentTrackId(): number | null {
+    return this.currentTrackId;
+  }
+
+  // Join the all_tracks room for multi-track status updates
+  joinAllTracks(): void {
+    if (this.socket?.connected) {
+      console.log('Joining all_tracks room');
+      this.socket.emit('join_all_tracks');
+    } else {
+      console.warn('Cannot join all_tracks room - WebSocket not connected');
+    }
+  }
+
+  // Leave the all_tracks room
+  leaveAllTracks(): void {
+    if (this.socket?.connected) {
+      console.log('Leaving all_tracks room');
+      this.socket.emit('leave_all_tracks');
     }
   }
 }

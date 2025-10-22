@@ -18,12 +18,13 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 
 from apex_timing_websocket import ApexTimingWebSocketParser
 from database_manager import TrackDatabase
+from multi_track_manager import MultiTrackManager
 
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # For session management
 CORS(app, 
-     origins=["http://localhost:3000", "https://krranalyser.fr", "http://krranalyser.fr"],
+     origins=["http://localhost:3000", "https://krranalyser.fr", "http://krranalyser.fr", "https://tpresearch.fr", "http://tpresearch.fr", "https://www.tpresearch.fr", "http://www.tpresearch.fr"],
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
@@ -83,6 +84,11 @@ update_thread = None
 stop_event = threading.Event()
 simulation_teams = []
 
+# Multi-track manager for monitoring all tracks simultaneously
+multi_track_manager = None
+multi_track_loop = None
+multi_track_thread = None
+
 # WebSocket tracking
 connected_clients = set()
 last_race_data_hash = None
@@ -127,6 +133,46 @@ def handle_disconnect():
     connected_clients.discard(request.sid)
     leave_room('race_updates')
     leave_room('standings_stream')
+
+@socketio.on('join_track')
+def handle_join_track(data):
+    """Handle client joining a track-specific room"""
+    track_id = data.get('track_id')
+    if track_id:
+        room = f'track_{track_id}'
+        join_room(room)
+        print(f"Client {request.sid} joined {room}")
+        emit('track_joined', {'track_id': track_id})
+
+@socketio.on('leave_track')
+def handle_leave_track(data):
+    """Handle client leaving a track-specific room"""
+    track_id = data.get('track_id')
+    if track_id:
+        room = f'track_{track_id}'
+        leave_room(room)
+        print(f"Client {request.sid} left {room}")
+
+@socketio.on('join_all_tracks')
+def handle_join_all_tracks():
+    """Handle client joining the all_tracks room for multi-track status updates"""
+    join_room('all_tracks')
+    print(f"Client {request.sid} joined all_tracks room")
+
+    # Send initial status for all tracks
+    global multi_track_manager
+    if multi_track_manager:
+        tracks_status = multi_track_manager.get_all_tracks_status()
+        emit('all_tracks_status', {
+            'tracks': tracks_status,
+            'timestamp': datetime.now().isoformat()
+        })
+
+@socketio.on('leave_all_tracks')
+def handle_leave_all_tracks():
+    """Handle client leaving the all_tracks room"""
+    leave_room('all_tracks')
+    print(f"Client {request.sid} left all_tracks room")
 
 @socketio.on('subscribe_standings')
 def handle_standings_subscription(data=None):
@@ -464,11 +510,11 @@ def get_standings_with_deltas():
     is_qualification = any(keyword in session_type.lower() for keyword in ['qualification', 'session', 'practice', 'qualify'])
     
     # Sort teams by position
-    sorted_teams = sorted(teams, key=lambda t: int(t.get('Position', '999')))
-    
+    sorted_teams = sorted(teams, key=lambda t: int(t.get('Position', '999') or '999'))
+
     standings = []
     for i, team in enumerate(sorted_teams):
-        position = int(team.get('Position', '0'))
+        position = int(team.get('Position', '0') or '0')
         kart_num = team.get('Kart', '')
         
         # Get current team's gap/best lap
@@ -535,7 +581,8 @@ def get_standings_with_deltas():
             else:
                 # Normal race mode - use gap
                 prev_gap = 0.0
-                if int(prev_team.get('Position', '0')) > 1:
+                prev_position = prev_team.get('Position', '0') or '0'
+                if int(prev_position) > 1:
                     prev_gap_str = prev_team.get('Gap', '0')
                     if 'Tour' in prev_gap_str:
                         prev_laps = int(prev_gap_str.split()[0])
@@ -805,7 +852,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                         
                         # Check all teams between the two positions
                         for t in teams:
-                            team_pos = int(t.get('Position', '0'))
+                            team_pos = int(t.get('Position', '0') or '0')
                             if start_pos < team_pos < end_pos:
                                 team_gap = t.get('Gap', '0')
                                 if 'Tour' in team_gap:
@@ -813,9 +860,9 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                                     lap_diff += int(team_gap.split()[0])
                         
                         return lap_diff
-                    
-                    my_position = int(my_team.get('Position', '0'))
-                    mon_position = int(monitored_team.get('Position', '0'))
+
+                    my_position = int(my_team.get('Position', '0') or '0')
+                    mon_position = int(monitored_team.get('Position', '0') or '0')
                     
                     # In qualification/practice, use best lap times
                     if is_qualification:
@@ -868,7 +915,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                                         avg_lap_time = get_average_lap_time()
                                         
                                         # Also consider the specific teams' recent lap times if available
-                                        team_karts = [int(my_team.get('Kart', 0)), int(monitored_team.get('Kart', 0))]
+                                        team_karts = [int(my_team.get('Kart', '0') or '0'), int(monitored_team.get('Kart', '0') or '0')]
                                         team_avg = get_average_lap_time(kart_numbers=team_karts)
                                         if team_avg != 90.0:  # If we got valid team-specific data
                                             avg_lap_time = team_avg
@@ -888,7 +935,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                                         avg_lap_time = get_average_lap_time()
                                         
                                         # Also consider the specific teams' recent lap times if available
-                                        team_karts = [int(my_team.get('Kart', 0)), int(monitored_team.get('Kart', 0))]
+                                        team_karts = [int(my_team.get('Kart', '0') or '0'), int(monitored_team.get('Kart', '0') or '0')]
                                         team_avg = get_average_lap_time(kart_numbers=team_karts)
                                         if team_avg != 90.0:  # If we got valid team-specific data
                                             avg_lap_time = team_avg
@@ -953,7 +1000,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                         'gap': real_gap,
                         'adjusted_gap': adjusted_gap,
                         'team_name': monitored_team.get('Team', ''),
-                        'position': int(monitored_team.get('Position', '0')),
+                        'position': int(monitored_team.get('Position', '0') or '0'),
                         'last_lap': last_lap,
                         'best_lap': monitored_team.get('Best Lap', ''),
                         'pit_stops': str(mon_pit_stops),
@@ -1358,35 +1405,35 @@ def create_session(user_id):
     """Create a new session for user"""
     session_id = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(hours=24)
-    
+
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO sessions (id, user_id, expires_at)
+        INSERT INTO sessions (session_token, user_id, expires_at)
         VALUES (?, ?, ?)
     ''', (session_id, user_id, expires_at.isoformat()))
     conn.commit()
     conn.close()
-    
+
     return session_id
 
 def verify_session(session_id):
     """Verify if session is valid and return user info"""
     if not session_id:
         return None
-        
+
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
         SELECT u.id, u.username, u.role, u.email
         FROM sessions s
         JOIN users u ON s.user_id = u.id
-        WHERE s.id = ? AND s.expires_at > ?
+        WHERE s.session_token = ? AND s.expires_at > ?
     ''', (session_id, datetime.now().isoformat()))
-    
+
     user = cursor.fetchone()
     conn.close()
-    
+
     return dict(user) if user else None
 
 def login_required(f):
@@ -1887,6 +1934,28 @@ def get_tracks():
     tracks = track_db.get_all_tracks()
     return jsonify({'tracks': tracks})
 
+@app.route('/api/tracks/active', methods=['GET'])
+def get_active_tracks():
+    """Get list of currently monitored tracks with their status"""
+    global multi_track_manager
+
+    if not multi_track_manager:
+        return jsonify({'tracks': []})
+
+    active_tracks = multi_track_manager.get_active_tracks()
+    return jsonify({'tracks': active_tracks})
+
+@app.route('/api/tracks/status', methods=['GET'])
+def get_all_tracks_status():
+    """Get session status for all tracks"""
+    global multi_track_manager
+
+    if not multi_track_manager:
+        return jsonify({'tracks': []})
+
+    tracks_status = multi_track_manager.get_all_tracks_status()
+    return jsonify({'tracks': tracks_status})
+
 @app.route('/api/tracks/<int:track_id>', methods=['GET'])
 def get_track(track_id):
     """Get a specific track by ID"""
@@ -1902,24 +1971,24 @@ def admin_get_tracks():
     """Get all tracks with full details (admin only)"""
     # Use track_db which connects to tracks.db
     tracks = track_db.get_all_tracks()
-    
+
     # Map fields to match admin panel expectations
     mapped_tracks = []
     for track in tracks:
         mapped_tracks.append({
             'id': track['id'],
             'name': track['track_name'],  # Map track_name to name
-            'location': '',  # Not in tracks.db
-            'length_meters': None,  # Not in tracks.db
-            'description': '',  # Not in tracks.db
+            'location': track.get('location', ''),
+            'length_meters': track.get('length_meters'),
+            'description': track.get('description', ''),
             'timing_url': track['timing_url'],
             'websocket_url': track['websocket_url'],
             'column_mappings': track['column_mappings'],
-            'is_active': True,  # Default to active
+            'is_active': track.get('is_active', True),
             'created_at': track['created_at'],
             'updated_at': track['updated_at']
         })
-    
+
     return jsonify(mapped_tracks)
 
 @app.route('/api/admin/tracks', methods=['POST'])
@@ -1929,18 +1998,22 @@ def admin_add_track():
     data = request.json
     if not data or 'name' not in data:
         return jsonify({'error': 'Track name is required'}), 400
-    
+
     # Use track_db to add the track
     result = track_db.add_track(
         track_name=data['name'],
         timing_url=data.get('timing_url', ''),
         websocket_url=data.get('websocket_url'),
-        column_mappings=data.get('column_mappings')
+        column_mappings=data.get('column_mappings'),
+        location=data.get('location'),
+        length_meters=data.get('length_meters'),
+        description=data.get('description'),
+        is_active=data.get('is_active', True)
     )
-    
+
     if 'error' in result:
         return jsonify({'error': result['error']}), 400
-    
+
     return jsonify({
         'success': True,
         'track': {
@@ -1956,19 +2029,23 @@ def admin_update_track(track_id):
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
-    
+
     # Use track_db to update the track
     result = track_db.update_track(
         track_id=track_id,
         track_name=data.get('name'),
         timing_url=data.get('timing_url'),
         websocket_url=data.get('websocket_url'),
-        column_mappings=data.get('column_mappings')
+        column_mappings=data.get('column_mappings'),
+        location=data.get('location'),
+        length_meters=data.get('length_meters'),
+        description=data.get('description'),
+        is_active=data.get('is_active')
     )
-    
+
     if 'error' in result:
         return jsonify({'error': result['error']}), 400
-    
+
     return jsonify({'success': True})
 
 @app.route('/api/admin/tracks/<int:track_id>', methods=['DELETE'])
@@ -1976,11 +2053,90 @@ def admin_update_track(track_id):
 def admin_delete_track(track_id):
     """Delete a track (admin only)"""
     result = track_db.delete_track(track_id)
-    
+
     if 'error' in result:
         return jsonify({'error': result['error']}), 404
-    
+
     return jsonify({'success': True})
+
+# Test endpoints for simulating track sessions
+@app.route('/api/test/simulate-session/<int:track_id>', methods=['POST'])
+def simulate_track_session(track_id):
+    """Simulate an active session on a track for testing purposes"""
+    global multi_track_manager
+
+    if not multi_track_manager:
+        return jsonify({'error': 'Multi-track manager not initialized'}), 500
+
+    # Check if track exists
+    if track_id not in multi_track_manager.parsers:
+        return jsonify({'error': f'Track {track_id} not found'}), 404
+
+    parser = multi_track_manager.parsers[track_id]
+
+    # Simulate active session by updating last_data_time
+    from datetime import datetime
+    parser.last_data_time = datetime.now()
+    parser.session_active_status = True
+
+    # Broadcast session status update for this specific track
+    room = f'track_{track_id}'
+    socketio.emit('session_status', {
+        'track_id': track_id,
+        'track_name': parser.track_name,
+        'active': True,
+        'message': 'Simulated session active',
+        'timestamp': datetime.now().isoformat()
+    }, room=room)
+
+    # Broadcast all tracks status update
+    multi_track_manager.broadcast_all_tracks_status()
+
+    return jsonify({
+        'success': True,
+        'message': f'Simulated active session for track {track_id} ({parser.track_name})',
+        'track_id': track_id,
+        'track_name': parser.track_name
+    })
+
+@app.route('/api/test/stop-session/<int:track_id>', methods=['POST'])
+def stop_simulated_session(track_id):
+    """Stop simulated session on a track"""
+    global multi_track_manager
+
+    if not multi_track_manager:
+        return jsonify({'error': 'Multi-track manager not initialized'}), 500
+
+    # Check if track exists
+    if track_id not in multi_track_manager.parsers:
+        return jsonify({'error': f'Track {track_id} not found'}), 404
+
+    parser = multi_track_manager.parsers[track_id]
+
+    # Mark session as inactive
+    parser.last_data_time = None
+    parser.session_active_status = False
+
+    # Broadcast session status update for this specific track
+    from datetime import datetime
+    room = f'track_{track_id}'
+    socketio.emit('session_status', {
+        'track_id': track_id,
+        'track_name': parser.track_name,
+        'active': False,
+        'message': 'Simulated session stopped',
+        'timestamp': datetime.now().isoformat()
+    }, room=room)
+
+    # Broadcast all tracks status update
+    multi_track_manager.broadcast_all_tracks_status()
+
+    return jsonify({
+        'success': True,
+        'message': f'Stopped simulated session for track {track_id} ({parser.track_name})',
+        'track_id': track_id,
+        'track_name': parser.track_name
+    })
 
 # Keep original track routes for backwards compatibility
 @app.route('/api/tracks', methods=['POST'])
@@ -2033,7 +2189,7 @@ def delete_track(track_id):
 def reset_race_data():
     """Reset all race data when switching tracks"""
     global race_data
-    
+
     # Preserve configuration settings
     preserved_config = {
         'pit_config': race_data.get('pit_config', {
@@ -2043,7 +2199,7 @@ def reset_race_data():
         'my_team': race_data.get('my_team'),
         'monitored_teams': race_data.get('monitored_teams', [])
     }
-    
+
     # Reset race data
     race_data = {
         'teams': [],
@@ -2061,21 +2217,599 @@ def reset_race_data():
         'websocket_url': None,
         'column_mappings': None
     }
-    
+
     # Emit reset event to all connected clients
     socketio.emit('race_data_reset', room='race_updates')
-    
+
     return jsonify({'status': 'success', 'message': 'Race data reset'})
 
-if __name__ == '__main__':
-    # Don't automatically start the update thread - wait for user to choose mode
-    # start_update_thread()
-    
+# Team data analysis API endpoints
+@app.route('/api/team-data/common-sessions', methods=['POST'])
+def get_common_sessions():
+    """Get sessions where all specified teams participated"""
     try:
-        # Run the Flask app with SocketIO
+        data = request.json
+        team_names = data.get('teams', [])
+        track_id = data.get('track_id', 1)  # Default to track 1
+
+        if not team_names or len(team_names) < 1:
+            return jsonify({'sessions': []})
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        # Get sessions where all teams participated
+        placeholders = ','.join(['?' for _ in team_names])
+        team_names_lower = [name.strip().lower() for name in team_names]
+
+        query = f"""
+            WITH team_sessions AS (
+                SELECT DISTINCT
+                    lt.session_id,
+                    LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) as team_name
+                FROM lap_times lt
+                WHERE LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) IN ({placeholders})
+                AND lt.team_name LIKE '_ - %'
+            )
+            SELECT
+                rs.session_id,
+                rs.start_time,
+                rs.name,
+                rs.track,
+                COUNT(DISTINCT ts.team_name) as teams_present
+            FROM race_sessions rs
+            JOIN team_sessions ts ON rs.session_id = ts.session_id
+            GROUP BY rs.session_id
+            HAVING COUNT(DISTINCT ts.team_name) = ?
+            ORDER BY rs.start_time DESC
+        """
+
+        cursor.execute(query, team_names_lower + [len(team_names)])
+        sessions = [{
+            'session_id': row[0],
+            'start_time': row[1],
+            'name': row[2],
+            'track': row[3],
+            'teams_present': row[4]
+        } for row in cursor.fetchall()]
+
+        conn.close()
+
+        return jsonify({'sessions': sessions})
+    except Exception as e:
+        print(f"Error getting common sessions: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/search', methods=['GET'])
+def search_teams():
+    """Search for teams by name (case-insensitive, removes class prefix)"""
+    try:
+        search_query = request.args.get('q', '').strip()
+        session_id = request.args.get('session_id', None)
+        track_id = request.args.get('track_id', 1, type=int)  # Default to track 1
+
+        if not search_query:
+            return jsonify({'teams': []})
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        # Build query to search teams, removing class prefix
+        query = """
+            SELECT DISTINCT
+                LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) as team_name_clean,
+                GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1)) as classes
+            FROM lap_times
+            WHERE team_name LIKE '_ - %'
+            AND LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) LIKE ?
+            GROUP BY LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+            ORDER BY team_name_clean
+            LIMIT 20
+        """
+
+        cursor.execute(query, (f'%{search_query.lower()}%',))
+        teams = [{'name': row[0], 'classes': row[1]} for row in cursor.fetchall()]
+
+        conn.close()
+
+        return jsonify({'teams': teams})
+    except Exception as e:
+        print(f"Error searching teams: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/stats', methods=['GET'])
+def get_team_stats():
+    """Get statistics for a specific team"""
+    try:
+        team_name = request.args.get('team', '').strip().lower()
+        session_id = request.args.get('session_id', None)
+        track_id = request.args.get('track_id', 1, type=int)  # Default to track 1
+
+        if not team_name:
+            return jsonify({'error': 'Team name required'}), 400
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        # Get overall statistics
+        stats_query = """
+            SELECT
+                COUNT(*) as total_records,
+                MIN(best_lap) as best_lap_time,
+                COUNT(DISTINCT session_id) as sessions_participated,
+                GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1)) as classes_raced,
+                MAX(pit_stops) as max_pit_stops
+            FROM lap_times
+            WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
+            AND team_name LIKE '_ - %'
+        """
+
+        cursor.execute(stats_query, (team_name,))
+        stats = cursor.fetchone()
+
+        # Calculate total laps using the race leader's lap count from gap field
+        # For each session, find winner's lap count and calculate this team's laps
+        session_filter = ""
+        query_params = [team_name]
+        if session_id:
+            session_filter = "AND tfg.session_id = ?"
+            query_params.append(int(session_id))
+
+        lap_count_query = f"""
+            WITH leader_laps AS (
+                SELECT
+                    session_id,
+                    MAX(CASE
+                        WHEN position = 1 AND gap LIKE 'Tour %'
+                        THEN CAST(SUBSTR(gap, 6) AS INTEGER)
+                        ELSE 0
+                    END) as total_laps
+                FROM lap_times
+                WHERE gap LIKE 'Tour %'
+                GROUP BY session_id
+            ),
+            team_final_gap AS (
+                SELECT DISTINCT
+                    lt.session_id,
+                    FIRST_VALUE(lt.gap) OVER (PARTITION BY lt.session_id ORDER BY lt.timestamp DESC) as final_gap
+                FROM lap_times lt
+                WHERE LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) = ?
+                AND lt.team_name LIKE '_ - %'
+            )
+            SELECT
+                SUM(CASE
+                    WHEN tfg.final_gap LIKE '% Tour%' THEN
+                        ll.total_laps - CAST(SUBSTR(tfg.final_gap, 1, INSTR(tfg.final_gap, ' ') - 1) AS INTEGER)
+                    ELSE
+                        ll.total_laps
+                END) as total_laps_all_sessions
+            FROM team_final_gap tfg
+            JOIN leader_laps ll ON tfg.session_id = ll.session_id
+            WHERE ll.total_laps > 0 {session_filter}
+        """
+
+        cursor.execute(lap_count_query, query_params)
+        lap_count_result = cursor.fetchone()
+        total_laps = lap_count_result[0] if lap_count_result and lap_count_result[0] else 0
+
+        # Get lap history statistics for average lap time
+        lap_history_session_filter = ""
+        lap_history_params = [team_name]
+        if session_id:
+            lap_history_session_filter = "AND session_id = ?"
+            lap_history_params.append(int(session_id))
+
+        lap_history_query = f"""
+            SELECT
+                AVG(lap_seconds) as avg_lap_seconds
+            FROM (
+                SELECT DISTINCT
+                    session_id,
+                    lap_number,
+                    CAST(SUBSTR(lap_time, 1, 1) AS REAL) * 60 + CAST(SUBSTR(lap_time, 3) AS REAL) as lap_seconds
+                FROM lap_history
+                WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
+                AND team_name LIKE '_ - %'
+                AND lap_time IS NOT NULL
+                AND lap_time != ''
+                AND lap_time NOT LIKE '%Tour%'
+                {lap_history_session_filter}
+            )
+        """
+
+        cursor.execute(lap_history_query, lap_history_params)
+        lap_stats = cursor.fetchone()
+
+        # Get session breakdown
+        session_query = """
+            SELECT
+                rs.session_id,
+                rs.start_time,
+                rs.name as session_name,
+                COUNT(lt.id) as lap_records,
+                MIN(lt.best_lap) as best_lap
+            FROM race_sessions rs
+            LEFT JOIN lap_times lt ON rs.session_id = lt.session_id
+            WHERE LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) = ?
+            AND lt.team_name LIKE '_ - %'
+            GROUP BY rs.session_id
+            ORDER BY rs.start_time DESC
+        """
+
+        cursor.execute(session_query, (team_name,))
+        sessions = [{'session_id': row[0], 'start_time': row[1], 'name': row[2],
+                    'lap_records': row[3], 'best_lap': row[4]} for row in cursor.fetchall()]
+
+        conn.close()
+
+        return jsonify({
+            'team_name': team_name,
+            'total_records': stats[0] if stats else 0,
+            'best_lap_time': stats[1] if stats else None,
+            'sessions_participated': stats[2] if stats else 0,
+            'classes_raced': stats[3].split(',') if stats and stats[3] else [],
+            'max_pit_stops': stats[4] if stats else 0,
+            'total_laps_completed': total_laps,  # Use calculated total from leader's lap count
+            'avg_lap_seconds': round(lap_stats[0], 3) if lap_stats and lap_stats[0] else None,
+            'total_pit_stops': stats[4] if stats else 0,  # Use max_pit_stops from lap_times table
+            'sessions': sessions
+        })
+    except Exception as e:
+        print(f"Error getting team stats: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/lap-details', methods=['POST'])
+def get_lap_details():
+    """Get detailed lap-by-lap data for teams in a session"""
+    try:
+        data = request.json
+        team_names = data.get('teams', [])
+        session_id = data.get('session_id', None)
+        track_id = data.get('track_id', 1)  # Default to track 1
+
+        if not team_names or not session_id:
+            return jsonify({'error': 'Teams and session_id required'}), 400
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        lap_details = {}
+
+        for team_name in team_names:
+            team_name_lower = team_name.strip().lower()
+
+            # Debug: Count total records for this team in session
+            debug_count_query = """
+                SELECT COUNT(*) FROM lap_times
+                WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
+                AND team_name LIKE '_ - %'
+                AND session_id = ?
+            """
+            cursor.execute(debug_count_query, (team_name_lower, int(session_id)))
+            total_records = cursor.fetchone()[0]
+            print(f"DEBUG: Team {team_name} has {total_records} total records in session {session_id}")
+
+            # Get all laps from lap_times by detecting when last_lap changes
+            lap_query = """
+                WITH lap_changes AS (
+                    SELECT
+                        timestamp,
+                        last_lap,
+                        LAG(last_lap) OVER (ORDER BY timestamp) as prev_last_lap,
+                        pit_stops,
+                        LAG(pit_stops, 1, 0) OVER (ORDER BY timestamp) as prev_pit_stops
+                    FROM lap_times
+                    WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
+                    AND team_name LIKE '_ - %'
+                    AND session_id = ?
+                    AND last_lap IS NOT NULL
+                    AND last_lap <> ''
+                    ORDER BY timestamp
+                ),
+                lap_completions AS (
+                    SELECT
+                        ROW_NUMBER() OVER (ORDER BY timestamp) as lap_number,
+                        last_lap,
+                        CASE
+                            WHEN last_lap LIKE '%:%' THEN
+                                CAST(SUBSTR(last_lap, 1, INSTR(last_lap, ':') - 1) AS REAL) * 60 +
+                                CAST(SUBSTR(last_lap, INSTR(last_lap, ':') + 1) AS REAL)
+                            ELSE 0
+                        END as lap_seconds,
+                        CASE WHEN pit_stops > prev_pit_stops THEN 1 ELSE 0 END as had_pit
+                    FROM lap_changes
+                    WHERE last_lap <> prev_last_lap OR prev_last_lap IS NULL
+                )
+                SELECT
+                    lap_number,
+                    lap_seconds,
+                    had_pit
+                FROM lap_completions
+                WHERE lap_seconds > 50 AND lap_seconds < 600
+                ORDER BY lap_number ASC
+            """
+
+            cursor.execute(lap_query, (team_name_lower, int(session_id)))
+            laps_raw = cursor.fetchall()
+            print(f"DEBUG: Team {team_name} - Query returned {len(laps_raw)} laps")
+
+            laps = []
+            for (lap_number, lap_seconds, pit_this_lap) in laps_raw:
+                laps.append({
+                    'lap_number': lap_number,
+                    'lap_time': lap_seconds,
+                    'pit_stop': pit_this_lap > 0
+                })
+
+            lap_details[team_name] = laps
+
+        # Detect stints for all teams based on pit stop laps (3:40 - 3:50 = 220-230 seconds)
+        stints = []
+        for team_name, laps in lap_details.items():
+            team_stints = []
+            stint_start = 1
+            stint_number = 1
+
+            for i, lap in enumerate(laps):
+                # Detect pit stop lap (lap time >= 225 seconds or 3:45)
+                if lap['lap_time'] >= 225:
+                    # End current stint before the pit lap
+                    if lap['lap_number'] > stint_start:
+                        team_stints.append({
+                            'stint_number': stint_number,
+                            'start_lap': stint_start,
+                            'end_lap': lap['lap_number'] - 1,
+                            'lap_count': lap['lap_number'] - stint_start
+                        })
+                        stint_number += 1
+                    # Next stint starts after the pit lap
+                    stint_start = lap['lap_number'] + 1
+
+            # Add final stint (from last pit to end of race)
+            if laps and stint_start <= laps[-1]['lap_number']:
+                team_stints.append({
+                    'stint_number': stint_number,
+                    'start_lap': stint_start,
+                    'end_lap': laps[-1]['lap_number'],
+                    'lap_count': laps[-1]['lap_number'] - stint_start + 1
+                })
+
+            stints.append({
+                'team_name': team_name,
+                'stints': team_stints
+            })
+
+        conn.close()
+
+        return jsonify({
+            'lap_details': lap_details,
+            'stints': stints
+        })
+    except Exception as e:
+        print(f"Error getting lap details: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/compare', methods=['POST'])
+def compare_teams():
+    """Compare statistics for multiple teams"""
+    try:
+        data = request.json
+        team_names = data.get('teams', [])
+        session_id = data.get('session_id', None)
+        track_id = data.get('track_id', 1)  # Default to track 1
+
+        if not team_names or len(team_names) < 2:
+            return jsonify({'error': 'At least 2 teams required for comparison'}), 400
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        comparison = []
+
+        for team_name in team_names:
+            team_name_lower = team_name.strip().lower()
+
+            # Build session filter
+            session_filter_stats = ""
+            stats_params = [team_name_lower]
+            if session_id:
+                session_filter_stats = "AND session_id = ?"
+                stats_params.append(int(session_id))
+
+            # Get overall statistics
+            stats_query = f"""
+                SELECT
+                    COUNT(*) as total_records,
+                    MIN(best_lap) as best_lap_time,
+                    COUNT(DISTINCT session_id) as sessions_participated,
+                    GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1)) as classes_raced
+                FROM lap_times
+                WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
+                AND team_name LIKE '_ - %'
+                {session_filter_stats}
+            """
+
+            cursor.execute(stats_query, stats_params)
+            stats = cursor.fetchone()
+
+            # Calculate total laps using the race leader's lap count from gap field
+            session_filter_laps = ""
+            lap_count_params = [team_name_lower]
+            if session_id:
+                session_filter_laps = "AND tfg.session_id = ?"
+                lap_count_params.append(int(session_id))
+
+            lap_count_query = f"""
+                WITH leader_laps AS (
+                    SELECT
+                        session_id,
+                        MAX(CASE
+                            WHEN position = 1 AND gap LIKE 'Tour %'
+                            THEN CAST(SUBSTR(gap, 6) AS INTEGER)
+                            ELSE 0
+                        END) as total_laps
+                    FROM lap_times
+                    WHERE gap LIKE 'Tour %'
+                    GROUP BY session_id
+                ),
+                team_final_gap AS (
+                    SELECT DISTINCT
+                        lt.session_id,
+                        FIRST_VALUE(lt.gap) OVER (PARTITION BY lt.session_id ORDER BY lt.timestamp DESC) as final_gap
+                    FROM lap_times lt
+                    WHERE LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) = ?
+                    AND lt.team_name LIKE '_ - %'
+                )
+                SELECT
+                    SUM(CASE
+                        WHEN tfg.final_gap LIKE '% Tour%' THEN
+                            ll.total_laps - CAST(SUBSTR(tfg.final_gap, 1, INSTR(tfg.final_gap, ' ') - 1) AS INTEGER)
+                        ELSE
+                            ll.total_laps
+                    END) as total_laps_all_sessions
+                FROM team_final_gap tfg
+                JOIN leader_laps ll ON tfg.session_id = ll.session_id
+                WHERE ll.total_laps > 0 {session_filter_laps}
+            """
+
+            cursor.execute(lap_count_query, lap_count_params)
+            lap_count_result = cursor.fetchone()
+            total_laps = lap_count_result[0] if lap_count_result and lap_count_result[0] else 0
+
+            # Get lap history statistics for average lap time
+            session_filter_history = ""
+            lap_history_params = [team_name_lower]
+            if session_id:
+                session_filter_history = "AND session_id = ?"
+                lap_history_params.append(int(session_id))
+
+            lap_history_query = f"""
+                SELECT
+                    AVG(lap_seconds) as avg_lap_seconds
+                FROM (
+                    SELECT DISTINCT
+                        session_id,
+                        lap_number,
+                        CAST(SUBSTR(lap_time, 1, 1) AS REAL) * 60 + CAST(SUBSTR(lap_time, 3) AS REAL) as lap_seconds
+                    FROM lap_history
+                    WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
+                    AND team_name LIKE '_ - %'
+                    AND lap_time IS NOT NULL
+                    AND lap_time != ''
+                    AND lap_time NOT LIKE '%Tour%'
+                    {session_filter_history}
+                )
+            """
+
+            cursor.execute(lap_history_query, lap_history_params)
+            lap_stats = cursor.fetchone()
+
+            # Get lap time distribution (last 50 unique laps) - use DISTINCT to avoid duplicates
+            session_filter_dist = ""
+            lap_dist_params = [team_name_lower]
+            if session_id:
+                session_filter_dist = "AND session_id = ?"
+                lap_dist_params.append(int(session_id))
+
+            lap_dist_query = f"""
+                SELECT DISTINCT
+                    session_id,
+                    lap_number,
+                    lap_time
+                FROM lap_history
+                WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
+                AND team_name LIKE '_ - %'
+                AND lap_time IS NOT NULL
+                AND lap_time != ''
+                AND lap_time NOT LIKE '%Tour%'
+                {session_filter_dist}
+                ORDER BY session_id DESC, lap_number DESC
+                LIMIT 50
+            """
+
+            cursor.execute(lap_dist_query, lap_dist_params)
+            lap_times_raw = cursor.fetchall()
+
+            # Parse lap times to seconds
+            lap_times = []
+            for (session_id, lap_number, lap_time) in lap_times_raw:
+                try:
+                    if ':' in lap_time:
+                        parts = lap_time.split(':')
+                        if len(parts) == 2:
+                            minutes = int(parts[0])
+                            seconds = float(parts[1].replace(',', '.'))
+                            lap_seconds = minutes * 60 + seconds
+                            if 50 < lap_seconds < 150:  # Filter unrealistic times
+                                lap_times.append(lap_seconds)
+                except:
+                    continue
+
+            comparison.append({
+                'team_name': team_name,
+                'total_records': stats[0] if stats else 0,
+                'best_lap_time': stats[1] if stats else None,
+                'sessions_participated': stats[2] if stats else 0,
+                'classes_raced': stats[3].split(',') if stats and stats[3] else [],
+                'total_laps_completed': total_laps,  # Use calculated total from leader's lap count
+                'avg_lap_seconds': round(lap_stats[0], 3) if lap_stats and lap_stats[0] else None,
+                'lap_times': lap_times[:20]  # Return last 20 laps for charting
+            })
+
+        conn.close()
+
+        return jsonify({'comparison': comparison})
+    except Exception as e:
+        print(f"Error comparing teams: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+def start_multi_track_monitoring():
+    """Start monitoring all configured tracks automatically"""
+    global multi_track_manager, multi_track_loop, multi_track_thread
+
+    def run_multi_track_loop():
+        """Run the async event loop for multi-track monitoring"""
+        global multi_track_loop, multi_track_manager
+
+        multi_track_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(multi_track_loop)
+
+        multi_track_manager = MultiTrackManager(socketio=socketio)
+
+        try:
+            print("Starting multi-track monitoring...")
+            multi_track_loop.run_until_complete(multi_track_manager.start_all_parsers())
+        except Exception as e:
+            print(f"Error in multi-track monitoring: {e}")
+            traceback.print_exc()
+        finally:
+            multi_track_loop.close()
+
+    # Start in a separate thread
+    multi_track_thread = threading.Thread(target=run_multi_track_loop, daemon=True)
+    multi_track_thread.start()
+    print("Multi-track monitoring thread started")
+
+def get_database_path(track_id: int) -> str:
+    """Get the database file path for a specific track"""
+    return f'race_data_track_{track_id}.db'
+
+def get_track_db_connection(track_id: int):
+    """Get database connection for a specific track"""
+    db_path = get_database_path(track_id)
+    return sqlite3.connect(db_path)
+
+if __name__ == '__main__':
+    try:
+        # Auto-start multi-track monitoring
         print("Starting Flask-SocketIO server on port 5000...")
-        print("Ready to start data collection - use the web interface to choose mode")
-        
+        print("Auto-starting data collection for all configured tracks...")
+        start_multi_track_monitoring()
+
         # For development/pm2, allow unsafe werkzeug (in production, use gunicorn with eventlet)
         socketio.run(app, host='127.0.0.1', port=5000, debug=False, allow_unsafe_werkzeug=True)
     except Exception as e:
@@ -2086,10 +2820,22 @@ if __name__ == '__main__':
         if update_thread and update_thread.is_alive():
             stop_event.set()
             update_thread.join(timeout=5)
-        
+
         # Clean up the parser
         if parser:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(parser.cleanup())
             loop.close()
+
+        # Clean up multi-track manager
+        if multi_track_manager and multi_track_loop:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    multi_track_manager.stop_all_parsers(),
+                    multi_track_loop
+                )
+                if multi_track_thread and multi_track_thread.is_alive():
+                    multi_track_thread.join(timeout=5)
+            except Exception as e:
+                print(f"Error stopping multi-track manager: {e}")

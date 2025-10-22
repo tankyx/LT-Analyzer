@@ -75,8 +75,10 @@ class TrackDatabase:
             self.logger.error(f"Error checking table existence: {e}")
             raise
     
-    def add_track(self, track_name: str, timing_url: str, websocket_url: Optional[str] = None, 
-                  column_mappings: Optional[Dict] = None) -> Dict:
+    def add_track(self, track_name: str, timing_url: str, websocket_url: Optional[str] = None,
+                  column_mappings: Optional[Dict] = None, location: Optional[str] = None,
+                  length_meters: Optional[int] = None, description: Optional[str] = None,
+                  is_active: bool = True) -> Dict:
         """Add a new track to the database"""
         self.ensure_table_exists()  # Ensure table exists before operation
         try:
@@ -85,19 +87,25 @@ class TrackDatabase:
                 cursor = conn.cursor()
                 mappings_json = json.dumps(column_mappings or {})
                 cursor.execute('''
-                    INSERT INTO tracks (track_name, timing_url, websocket_url, column_mappings)
-                    VALUES (?, ?, ?, ?)
-                ''', (track_name, timing_url, websocket_url, mappings_json))
-                
+                    INSERT INTO tracks (track_name, timing_url, websocket_url, column_mappings,
+                                        location, length_meters, description, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (track_name, timing_url, websocket_url, mappings_json,
+                      location, length_meters, description, is_active))
+
                 track_id = cursor.lastrowid
                 conn.commit()
-                
+
                 return {
                     'id': track_id,
                     'track_name': track_name,
                     'timing_url': timing_url,
                     'websocket_url': websocket_url,
                     'column_mappings': column_mappings or {},
+                    'location': location,
+                    'length_meters': length_meters,
+                    'description': description,
+                    'is_active': is_active,
                     'message': 'Track added successfully'
                 }
         except sqlite3.IntegrityError:
@@ -115,11 +123,13 @@ class TrackDatabase:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT id, track_name, timing_url, websocket_url, column_mappings, created_at, updated_at
+                    SELECT id, track_name, timing_url, websocket_url, column_mappings,
+                           location, length_meters, description, is_active,
+                           created_at, updated_at
                     FROM tracks
                     ORDER BY track_name
                 ''')
-                
+
                 tracks = []
                 for row in cursor.fetchall():
                     mappings = {}
@@ -128,17 +138,21 @@ class TrackDatabase:
                             mappings = json.loads(row['column_mappings'])
                     except:
                         pass
-                    
+
                     tracks.append({
                         'id': row['id'],
                         'track_name': row['track_name'],
                         'timing_url': row['timing_url'],
                         'websocket_url': row['websocket_url'],
                         'column_mappings': mappings,
+                        'location': row['location'],
+                        'length_meters': row['length_meters'],
+                        'description': row['description'],
+                        'is_active': row['is_active'],
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at']
                     })
-                
+
                 return tracks
         except Exception as e:
             self.logger.error(f"Error getting tracks: {e}")
@@ -153,11 +167,13 @@ class TrackDatabase:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT id, track_name, timing_url, websocket_url, column_mappings, created_at, updated_at
+                    SELECT id, track_name, timing_url, websocket_url, column_mappings,
+                           location, length_meters, description, is_active,
+                           created_at, updated_at
                     FROM tracks
                     WHERE id = ?
                 ''', (track_id,))
-                
+
                 row = cursor.fetchone()
                 if row:
                     mappings = {}
@@ -166,13 +182,17 @@ class TrackDatabase:
                             mappings = json.loads(row['column_mappings'])
                     except:
                         pass
-                        
+
                     return {
                         'id': row['id'],
                         'track_name': row['track_name'],
                         'timing_url': row['timing_url'],
                         'websocket_url': row['websocket_url'],
                         'column_mappings': mappings,
+                        'location': row['location'],
+                        'length_meters': row['length_meters'],
+                        'description': row['description'],
+                        'is_active': row['is_active'],
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at']
                     }
@@ -181,50 +201,68 @@ class TrackDatabase:
             self.logger.error(f"Error getting track: {e}")
             return None
     
-    def update_track(self, track_id: int, track_name: Optional[str] = None, 
+    def update_track(self, track_id: int, track_name: Optional[str] = None,
                      timing_url: Optional[str] = None, websocket_url: Optional[str] = None,
-                     column_mappings: Optional[Dict] = None) -> Dict:
+                     column_mappings: Optional[Dict] = None, location: Optional[str] = None,
+                     length_meters: Optional[int] = None, description: Optional[str] = None,
+                     is_active: Optional[bool] = None) -> Dict:
         """Update a track's information"""
         self.ensure_table_exists()  # Ensure table exists before operation
         try:
             import json
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                
+
                 # Build update query dynamically based on provided fields
                 update_fields = []
                 params = []
-                
+
                 if track_name is not None:
                     update_fields.append("track_name = ?")
                     params.append(track_name)
-                
+
                 if timing_url is not None:
                     update_fields.append("timing_url = ?")
                     params.append(timing_url)
-                
+
                 if websocket_url is not None:
                     update_fields.append("websocket_url = ?")
                     params.append(websocket_url)
-                
+
                 if column_mappings is not None:
                     update_fields.append("column_mappings = ?")
                     params.append(json.dumps(column_mappings))
-                
+
+                if location is not None:
+                    update_fields.append("location = ?")
+                    params.append(location)
+
+                if length_meters is not None:
+                    update_fields.append("length_meters = ?")
+                    params.append(length_meters)
+
+                if description is not None:
+                    update_fields.append("description = ?")
+                    params.append(description)
+
+                if is_active is not None:
+                    update_fields.append("is_active = ?")
+                    params.append(is_active)
+
                 if not update_fields:
                     return {'error': 'No fields to update'}
-                
+
                 params.append(track_id)
                 query = f"UPDATE tracks SET {', '.join(update_fields)} WHERE id = ?"
-                
+
                 cursor.execute(query, params)
-                
+
                 if cursor.rowcount == 0:
                     return {'error': 'Track not found'}
-                
+
                 conn.commit()
                 return {'message': 'Track updated successfully'}
-                
+
         except sqlite3.IntegrityError:
             return {'error': 'Track with this name already exists'}
         except Exception as e:

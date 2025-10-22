@@ -243,6 +243,101 @@ export const ApiService = {
       console.error('Error resetting race data:', error);
       throw error;
     }
+  },
+
+  // Team data analysis API methods
+  searchTeams: async (query: string, trackId: number = 1) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/team-data/search?q=${encodeURIComponent(query)}&track_id=${trackId}`);
+      if (!response.ok) {
+        throw new Error('Failed to search teams');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error searching teams:', error);
+      throw error;
+    }
+  },
+
+  getTeamStats: async (teamName: string, sessionId?: number, trackId: number = 1) => {
+    try {
+      let url = `${API_BASE_URL}/api/team-data/stats?team=${encodeURIComponent(teamName)}&track_id=${trackId}`;
+      if (sessionId) {
+        url += `&session_id=${sessionId}`;
+      }
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Failed to get team stats');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error getting team stats:', error);
+      throw error;
+    }
+  },
+
+  compareTeams: async (teamNames: string[], sessionId?: number, trackId: number = 1) => {
+    try {
+      const body: { teams: string[]; session_id?: number; track_id: number } = {
+        teams: teamNames,
+        track_id: trackId
+      };
+      if (sessionId) {
+        body.session_id = sessionId;
+      }
+      const response = await fetch(`${API_BASE_URL}/api/team-data/compare`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to compare teams');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error comparing teams:', error);
+      throw error;
+    }
+  },
+
+  getCommonSessions: async (teamNames: string[], trackId: number = 1) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/team-data/common-sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ teams: teamNames, track_id: trackId }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to get common sessions');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error getting common sessions:', error);
+      throw error;
+    }
+  },
+
+  getLapDetails: async (teamNames: string[], sessionId: number, trackId: number = 1) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/team-data/lap-details`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ teams: teamNames, session_id: sessionId, track_id: trackId }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to get lap details');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error getting lap details:', error);
+      throw error;
+    }
   }
 };
 
