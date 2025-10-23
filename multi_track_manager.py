@@ -128,18 +128,26 @@ class MultiTrackManager:
             parser = TrackSpecificParser(track_id, track_name, self.get_database_path(track_id), self.socketio, manager=self)
 
             # Set column mappings if available
-            if track.get('column_mappings'):
+            column_mappings = track.get('column_mappings')
+            self.logger.debug(f"Track {track_id} column_mappings value: {repr(column_mappings)}")
+            if column_mappings:
                 try:
-                    mappings = json.loads(track['column_mappings'])
+                    self.logger.debug(f"Loading column mappings for track {track_id}: {column_mappings}")
+                    mappings = json.loads(column_mappings)
+                    self.logger.debug(f"Parsed mappings: {mappings}")
                     parser.set_column_mappings(mappings)
-                except:
-                    pass
+                except Exception as e:
+                    self.logger.error(f"Error setting column mappings for track {track_id}: {e}")
+                    import traceback
+                    self.logger.error(traceback.format_exc())
+            else:
+                self.logger.debug(f"No column mappings for track {track_id}")
 
             self.parsers[track_id] = parser
 
-            # Start the parser
+            # Start the parser with full monitoring (includes message loop)
             self.logger.info(f"Starting parser for track {track_id} ({track_name}): {websocket_url}")
-            await parser.connect_websocket(websocket_url)
+            await parser.start_monitoring(websocket_url)
 
         except Exception as e:
             self.logger.error(f"Error starting parser for track {track_id}: {e}")
@@ -360,10 +368,11 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
         if status_changed and self.manager:
             self.manager.broadcast_all_tracks_status()
 
-    async def connect_websocket(self, ws_url: str):
-        """Override to start session monitoring after connection"""
-        # Call parent's connect_websocket
-        await super().connect_websocket(ws_url)
+    async def start_monitoring(self, ws_url: str):
+        """Start WebSocket monitoring with message loop and session tracking"""
+        # Create/get session ID
+        session_id = self.create_or_get_session(f"{self.track_name} - Live Session", self.track_name)
+        reconnect_delay = 5
 
         # Start session monitoring thread
         if self.monitor_thread is None or not self.monitor_thread.is_alive():
@@ -374,7 +383,122 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                 daemon=True
             )
             self.monitor_thread.start()
-            self.logger.info(f"Started session monitoring for track {self.track_id} ({self.track_name})")
+            self.logger.info(f"Started session monitoring thread for track {self.track_id} ({self.track_name})")
+
+        # Start WebSocket connection and message loop
+        while True:
+            try:
+                # Connect to WebSocket
+                if not await self.connect_websocket(ws_url):
+                    self.logger.warning(f"Track {self.track_id}: Retrying connection in {reconnect_delay} seconds...")
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, 60)  # Exponential backoff
+                    continue
+
+                reconnect_delay = 5  # Reset on successful connection
+
+                # Send initial message to request data (some WebSocket servers require this)
+                try:
+                    await self.websocket.send("init")
+                    self.logger.debug(f"Track {self.track_id}: Sent init message to WebSocket")
+                except Exception as e:
+                    self.logger.warning(f"Track {self.track_id}: Could not send init message: {e}")
+
+                # Listen for messages
+                self.logger.info(f"Track {self.track_id} ({self.track_name}): Listening for WebSocket messages...")
+                message_count = 0
+                async for message in self.websocket:
+                    message_count += 1
+                    try:
+                        # Log the message at debug level
+                        self.logger.debug(f"Track {self.track_id} WebSocket message #{message_count}: {len(message)} bytes")
+
+                        # Log message content for debugging (sample every 20 messages)
+                        if message_count % 20 == 0:
+                            self.logger.debug(f"Track {self.track_id} message sample: {message[:200]}")
+
+                        # Split message by newlines as it contains multiple commands
+                        lines = message.strip().split('\n')
+
+                        for i, line in enumerate(lines):
+                            if not line.strip():
+                                continue
+
+                            # Parse each command line
+                            parsed = self.parse_websocket_message(line)
+                            if not parsed:
+                                continue
+
+                            command = parsed['command']
+
+                            # Log commands for debugging (sample every 50 messages to avoid spam)
+                            if message_count % 50 == 0 or command == 'update':
+                                self.logger.debug(f"Track {self.track_id}: Command '{command}' param='{parsed.get('parameter', '')}' value_len={len(parsed.get('value', ''))}")
+
+                            # Process different message types
+                            if command == 'init':
+                                self.process_init_message(parsed)
+                            elif command == 'grid':
+                                self.process_grid_message(parsed)
+                            elif command == 'update':
+                                self.process_update_message(parsed)
+                            elif command == 'css':
+                                self.process_css_message(parsed)
+                            elif command == 'title1':
+                                self.session_info['title1'] = parsed['value']
+                            elif command == 'title2':
+                                self.session_info['title2'] = parsed['value']
+                            elif command == 'title':
+                                self.process_title_message(parsed)
+                            elif command == 'clear':
+                                # Clear data for the specified element
+                                if parsed['parameter'] == 'grid':
+                                    self.grid_data.clear()
+                                    self.row_map.clear()
+                            elif command == 'com':
+                                # Comment/info message
+                                self.session_info['comment'] = parsed['value']
+                            elif command == 'msg':
+                                # Message (best lap info etc)
+                                self.session_info['message'] = parsed['value']
+                            elif command == 'track':
+                                # Track info
+                                self.session_info['track'] = parsed['value']
+                            elif command.startswith('r') and 'c' in command:
+                                # This is a cell update command (e.g. r114c10|ti|17.821)
+                                # The cell ID is the command, not a parameter
+                                # Restructure to call process_update_message correctly
+                                self.process_update_message({
+                                    'command': 'update',
+                                    'parameter': command,  # Cell ID like r114c10
+                                    'value': f"{parsed['parameter']}|{parsed['value']}"  # type|value like ti|17.821
+                                })
+
+                        # After processing all lines, store the data
+                        df = self.get_current_standings()
+                        if not df.empty:
+                            self.store_lap_data(session_id, df)
+
+                    except Exception as e:
+                        self.logger.error(f"Track {self.track_id}: Error processing message: {e}")
+                        import traceback
+                        self.logger.error(traceback.format_exc())
+
+            except Exception as e:
+                import websockets
+                if isinstance(e, websockets.exceptions.ConnectionClosed):
+                    self.logger.warning(f"Track {self.track_id}: WebSocket connection closed: {e}")
+                else:
+                    self.logger.error(f"Track {self.track_id}: WebSocket error: {e}")
+                    import traceback
+                    self.logger.error(traceback.format_exc())
+                self.is_connected = False
+                await asyncio.sleep(reconnect_delay)
+
+    async def connect_websocket(self, ws_url: str):
+        """Override to just connect without starting message loop"""
+        # Call parent's connect_websocket
+        return await super().connect_websocket(ws_url)
 
     async def cleanup(self):
         """Override cleanup to stop monitoring thread"""
@@ -432,6 +556,15 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                 else:
                     runtime = int(runtime_str) if runtime_str.strip() else 0
 
+                # Handle Pit Stops - can be count (e.g. "3") or time (e.g. "00:22")
+                pit_stops_str = row.get('Pit Stops', '0').strip()
+                if ':' in pit_stops_str:
+                    # This is pit time in MM:SS format, store as 0 for count
+                    pit_stops = 0
+                else:
+                    # This is a count
+                    pit_stops = int(pit_stops_str) if pit_stops_str and pit_stops_str.isdigit() else 0
+
                 current_records.append((
                     session_id,
                     timestamp,
@@ -442,7 +575,7 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                     row.get('Best Lap', ''),
                     row.get('Gap', ''),
                     runtime,
-                    int(row.get('Pit Stops', '0'))
+                    pit_stops
                 ))
 
                 # Check for new laps
@@ -462,11 +595,14 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                                 runtime,
                                 current_last_lap,
                                 position,
-                                int(row.get('Pit Stops', '0'))
+                                pit_stops  # Use the already parsed pit_stops value
                             ))
 
             except Exception as e:
-                self.logger.warning(f"Error processing row {row}: {e}")
+                self.logger.warning(f"Track {self.track_id}: Error processing row: {e}")
+                self.logger.warning(f"Track {self.track_id}: Row data: {dict(row)}")
+                import traceback
+                self.logger.warning(f"Track {self.track_id}: Traceback: {traceback.format_exc()}")
                 continue
 
         if current_records:
@@ -488,7 +624,7 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                         ''', lap_history_records)
 
                     conn.commit()
-                    self.logger.debug(f"Stored {len(current_records)} records, {len(lap_history_records)} lap history records")
+                    self.logger.debug(f"Track {self.track_id}: Stored {len(current_records)} records, {len(lap_history_records)} lap history records")
 
                 # Broadcast update to Socket.IO room for this track
                 if self.socketio:

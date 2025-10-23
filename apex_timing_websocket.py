@@ -24,8 +24,28 @@ class ApexTimingWebSocketParser:
         self.row_map = {}  # Map row IDs to kart numbers
         self.column_map = {}  # Map column indices to field names
         self.custom_column_map = None  # Custom column mappings from track config
+        self.data_type_column_map = {}  # Map column indices based on data-type attributes
         self.session_info = {}
         self.is_connected = False
+
+        # Standard data-type to field name mapping
+        self.DATA_TYPE_MAP = {
+            'sta': 'Status',
+            'rk': 'Position',
+            'no': 'Kart',
+            'dr': 'Team',
+            'llp': 'Last Lap',
+            'blp': 'Best Lap',
+            'gap': 'Gap',
+            'int': 'Interval',
+            'otr': 'RunTime',
+            'pit': 'Pit Stops',
+            'tlp': 'Total Laps',
+            's1': None,  # Skip sector times
+            's2': None,
+            's3': None,
+            'grp': None,  # Skip group
+        }
         
     def setup_logging(self):
         """Setup logging configuration"""
@@ -96,15 +116,18 @@ class ApexTimingWebSocketParser:
             self.logger.error(f"Database setup error: {e}")
             raise
             
-    def set_column_mappings(self, mappings: Dict[str, int]) -> None:
+    def set_column_mappings(self, mappings: Dict[str, str]) -> None:
         """Set custom column mappings from track configuration"""
         if mappings:
             self.custom_column_map = {}
-            # Convert from 1-based to 0-based indexing
-            for field, col_num in mappings.items():
-                if col_num and isinstance(col_num, int):
-                    self.custom_column_map[col_num - 1] = self._field_name_mapping(field)
-            self.logger.debug(f"Custom column mappings set: {self.custom_column_map}")
+            # mappings come as {"0": "Status", "1": "Position", ...} where keys are 0-based indices
+            for col_idx_str, field_name in mappings.items():
+                try:
+                    col_idx = int(col_idx_str)
+                    self.custom_column_map[col_idx] = field_name
+                except (ValueError, TypeError):
+                    self.logger.warning(f"Invalid column index: {col_idx_str}")
+            self.logger.info(f"Custom column mappings set: {self.custom_column_map}")
     
     def _field_name_mapping(self, field: str) -> str:
         """Map frontend field names to internal field names"""
@@ -189,9 +212,14 @@ class ApexTimingWebSocketParser:
                     cells = row.find_all('td')
                     
                     for i, cell in enumerate(cells):
-                        if i in self.column_map:
+                        # Use custom column map if available, otherwise use auto-detected map
+                        if self.custom_column_map and i in self.custom_column_map:
+                            field = self.custom_column_map[i]
+                        elif i in self.column_map:
                             field = self.column_map[i]
-                            
+                        else:
+                            continue
+
                             # Special handling for different cell types
                             if field == 'Kart':
                                 # Kart number might be in a div
@@ -225,103 +253,134 @@ class ApexTimingWebSocketParser:
             self.grid_data.clear()
             self.row_map.clear()
             self.column_map.clear()
-            
-            # Find header row to build column map
+            self.data_type_column_map.clear()
+
+            # Find header row to build column maps
+            # ALWAYS extract data-type based mappings (highest priority)
             header_row = soup.find('tr', {'class': 'head'})
             if header_row:
                 cells = header_row.find_all('td')
                 for i, cell in enumerate(cells):
                     data_type = cell.get('data-type', '')
                     text = cell.text.strip()
-                    
-                    # Map column based on data-type or text content
-                    if data_type == 'sta':
-                        self.column_map[i] = 'Status'
-                    elif data_type == 'rk' or 'Clt' in text or 'Pos' in text:
-                        self.column_map[i] = 'Position'
-                    elif data_type == 'no' or 'Kart' in text:
-                        self.column_map[i] = 'Kart'
-                    elif data_type == 'dr' or 'Team' in text or 'Equipe' in text:
-                        self.column_map[i] = 'Team'
-                    elif data_type == 'llp' or 'Dernier' in text or 'Last' in text:
-                        self.column_map[i] = 'Last Lap'
-                    elif data_type == 'blp' or 'Meilleur' in text or 'Best' in text:
-                        self.column_map[i] = 'Best Lap'
-                    elif data_type == 'gap' or 'Ecart' in text or 'Gap' in text:
-                        self.column_map[i] = 'Gap'
-                    elif data_type == 'int' or 'Interv' in text:
-                        self.column_map[i] = 'Interval'
-                    elif data_type == 'otr' or 'piste' in text or 'RunTime' in text:
-                        self.column_map[i] = 'RunTime'
-                    elif data_type == 'pit' or 'Stands' in text or 'Pit' in text:
-                        self.column_map[i] = 'Pit Stops'
-                        
-                self.logger.debug(f"Column map initialized: {self.column_map}")
+
+                    # First: Build data-type based column map (PRIORITY 1)
+                    if data_type and data_type in self.DATA_TYPE_MAP:
+                        field_name = self.DATA_TYPE_MAP[data_type]
+                        if field_name:  # Skip None values (sectors, etc.)
+                            self.data_type_column_map[i] = field_name
+
+                    # Also build text-based auto-detection as fallback (PRIORITY 3)
+                    if not self.custom_column_map:
+                        if data_type == 'sta':
+                            self.column_map[i] = 'Status'
+                        elif data_type == 'rk' or 'Clt' in text or 'Pos' in text or 'Rnk' in text:
+                            self.column_map[i] = 'Position'
+                        elif data_type == 'no' or 'Kart' in text:
+                            self.column_map[i] = 'Kart'
+                        elif data_type == 'dr' or 'Team' in text or 'Equipe' in text or 'Driver' in text:
+                            self.column_map[i] = 'Team'
+                        elif data_type == 'llp' or 'Dernier' in text or 'Last' in text:
+                            self.column_map[i] = 'Last Lap'
+                        elif data_type == 'blp' or 'Meilleur' in text or 'Best' in text:
+                            self.column_map[i] = 'Best Lap'
+                        elif data_type == 'gap' or 'Ecart' in text or 'Gap' in text:
+                            self.column_map[i] = 'Gap'
+                        elif data_type == 'int' or 'Interv' in text:
+                            self.column_map[i] = 'Interval'
+                        elif data_type == 'otr' or 'piste' in text or 'RunTime' in text or 'On track' in text:
+                            self.column_map[i] = 'RunTime'
+                        elif data_type == 'pit' or 'Stands' in text or 'Pit' in text:
+                            self.column_map[i] = 'Pit Stops'
+                        elif data_type == 'tlp':  # Total laps
+                            self.column_map[i] = 'RunTime'  # Map to RunTime field for tracks that show lap count instead
+
+                if self.data_type_column_map:
+                    self.logger.info(f"Data-type column map extracted: {self.data_type_column_map}")
+                if self.column_map:
+                    self.logger.debug(f"Text-based column map auto-detected: {self.column_map}")
+                if self.custom_column_map:
+                    self.logger.debug(f"Custom column map loaded: {self.custom_column_map}")
             
             # Process data rows
             data_rows = soup.find_all('tr', {'data-id': True})
             for row in data_rows:
                 if row.get('class') and 'head' in row.get('class'):
                     continue
-                    
+
                 row_id = row.get('data-id')
                 if row_id:
                     self.grid_data[row_id] = {}
                     cells = row.find_all('td')
-                    
+
                     for i, cell in enumerate(cells):
-                        if i in self.column_map:
+                        # Priority order: data-type map > custom map > text-based map
+                        if i in self.data_type_column_map:
+                            field = self.data_type_column_map[i]
+                        elif self.custom_column_map and i in self.custom_column_map:
+                            field = self.custom_column_map[i]
+                        elif i in self.column_map:
                             field = self.column_map[i]
-                            
-                            # Special handling for different cell types
-                            if field == 'Status':
-                                # Check for status classes
-                                cell_class = cell.get('class', [])
-                                if 'si' in cell_class:
-                                    value = 'Pit-in'
-                                elif 'so' in cell_class:
-                                    value = 'Pit-out'
-                                elif 'sf' in cell_class:
-                                    value = 'Finished'
-                                else:
-                                    value = 'On Track'
-                            elif field == 'Kart':
-                                # Kart number might be in a div
-                                div = cell.find('div')
-                                value = div.text.strip() if div else cell.text.strip()
-                            elif field == 'Position':
-                                # Position might be in a p tag
-                                p = cell.find('p')
-                                value = p.text.strip() if p else cell.text.strip()
+                        else:
+                            continue
+
+                        # Special handling for different cell types
+                        if field == 'Status':
+                            # Check for status classes
+                            cell_class = cell.get('class', [])
+                            if 'si' in cell_class:
+                                value = 'Pit-in'
+                            elif 'so' in cell_class:
+                                value = 'Pit-out'
+                            elif 'sf' in cell_class:
+                                value = 'Finished'
                             else:
-                                value = cell.text.strip()
-                                
-                            self.grid_data[row_id][field] = value
-                            
-                            # Store kart mapping
-                            if field == 'Kart' and value:
-                                self.row_map[row_id] = value
+                                value = 'On Track'
+                        elif field == 'Kart':
+                            # Kart number might be in a div
+                            div = cell.find('div')
+                            value = div.text.strip() if div else cell.text.strip()
+                        elif field == 'Position':
+                            # Position might be in a p tag
+                            p = cell.find('p')
+                            value = p.text.strip() if p else cell.text.strip()
+                        else:
+                            value = cell.text.strip()
+
+                        self.grid_data[row_id][field] = value
+
+                        # Store kart mapping
+                        if field == 'Kart' and value:
+                            self.row_map[row_id] = value
                                 
             self.logger.debug(f"Grid initialized with {len(self.grid_data)} rows")
         else:
             # This might be a row update
             row_id = data['parameter']
             values = data['value'].split('|')
-            
+
             self.logger.debug(f"Processing grid row update for row {row_id}, {len(values)} values")
-            
+
             if row_id not in self.grid_data:
                 self.grid_data[row_id] = {}
-                
+
             # Update grid data for this row
             for i, value in enumerate(values):
-                if i in self.column_map:
+                # Priority order: data-type map > custom map > text-based map
+                if i in self.data_type_column_map:
+                    field = self.data_type_column_map[i]
+                elif self.custom_column_map and i in self.custom_column_map:
+                    field = self.custom_column_map[i]
+                elif i in self.column_map:
                     field = self.column_map[i]
-                    self.grid_data[row_id][field] = value.strip()
-                    
-                    # If this is the kart number column, store the mapping
-                    if field == 'Kart' and value.strip():
-                        self.row_map[row_id] = value.strip()
+                else:
+                    continue
+
+                self.grid_data[row_id][field] = value.strip()
+
+                # If this is the kart number column, store the mapping
+                if field == 'Kart' and value.strip():
+                    self.row_map[row_id] = value.strip()
                     
     def process_update_message(self, data: Dict):
         """Process cell update messages"""
@@ -329,32 +388,51 @@ class ApexTimingWebSocketParser:
         # Example: r900005625c1|su| or r900005625c2||13
         parts = data['value'].split('|')
         cell_id = data['parameter']
-        
+
         # The actual value is the last part (could be empty)
         value = parts[1] if len(parts) > 1 else ''
-        
+
         # Parse cell ID (format: r{row}c{col})
         match = re.match(r'r(\d+)c(\d+)', cell_id)
         if not match:
             self.logger.debug(f"Could not parse cell ID: {cell_id}")
             return
-            
+
         row_id = f"r{match.group(1)}"
         col_idx = int(match.group(2)) - 1  # Column index is 1-based, convert to 0-based
-        
+
+        # Log incoming update for debugging
+        self.logger.debug(f"Cell update: {row_id} col={col_idx} (1-based={match.group(2)}) value='{value}' parts={parts}")
+
         # Initialize row if needed
         if row_id not in self.grid_data:
             self.grid_data[row_id] = {}
             self.logger.debug(f"Created new row: {row_id}")
-            
+
         # Update the specific cell
-        if col_idx in self.column_map:
+        # Priority order: data-type map > custom map > text-based map
+        updated = False
+        field = None
+
+        if col_idx in self.data_type_column_map:
+            field = self.data_type_column_map[col_idx]
+            self.grid_data[row_id][field] = value.strip()
+            self.logger.debug(f"Updated via data-type map: {row_id}[{field}] = '{value}'")
+            updated = True
+        elif self.custom_column_map and col_idx in self.custom_column_map:
+            field = self.custom_column_map[col_idx]
+            self.grid_data[row_id][field] = value.strip()
+            self.logger.debug(f"Updated via custom map: {row_id}[{field}] = '{value}'")
+            updated = True
+        elif col_idx in self.column_map:
             field = self.column_map[col_idx]
             self.grid_data[row_id][field] = value.strip()
-            
-            # Special handling for status updates
-            if col_idx == 0 and len(parts) > 0:
-                # First column is often status, parts[0] contains the status class
+            self.logger.debug(f"Updated via text-based map: {row_id}[{field}] = '{value}'")
+            updated = True
+
+        if updated and field:
+            # Special handling for status updates (check CSS class in parts[0])
+            if field == 'Status' and len(parts) > 0:
                 status_class = parts[0]
                 if status_class == 'si':
                     self.grid_data[row_id]['Status'] = 'Pit-in'
@@ -366,12 +444,13 @@ class ApexTimingWebSocketParser:
                     self.grid_data[row_id]['Status'] = 'Down'
                 elif status_class == 'sr':
                     self.grid_data[row_id]['Status'] = 'On Track'
-            
+
             # Update kart mapping if this is a kart number
             if field == 'Kart' and value.strip():
                 self.row_map[row_id] = value.strip()
-                
-            self.logger.debug(f"Updated {row_id}[{field}] = {value}")
+
+        if not updated:
+            self.logger.debug(f"Column {col_idx} not in any column maps (data-type: {list(self.data_type_column_map.keys())}, custom: {list(self.custom_column_map.keys()) if self.custom_column_map else 'None'}, text: {list(self.column_map.keys())})")
                 
     def process_css_message(self, data: Dict):
         """Process CSS class update messages (used for status indicators)"""
@@ -419,11 +498,20 @@ class ApexTimingWebSocketParser:
         
         for row_id, row_data in self.grid_data.items():
             if 'Kart' in row_data and row_data['Kart']:
+                team_name = row_data.get('Team', '')
+
+                # Validate team name - warn if it looks like a lap time
+                if team_name and ':' in team_name and '.' in team_name:
+                    # Check if it matches lap time format (M:SS.mmm or MM:SS.mmm)
+                    import re
+                    if re.match(r'^\d{1,2}:\d{2}\.\d{3}$', team_name):
+                        self.logger.warning(f"Team name looks like lap time for kart {row_data.get('Kart', '')}: '{team_name}' - possible column mapping issue")
+
                 team_data = {
                     'Status': row_data.get('Status', 'On Track'),
                     'Position': row_data.get('Position', ''),
                     'Kart': row_data.get('Kart', ''),
-                    'Team': row_data.get('Team', ''),
+                    'Team': team_name,
                     'Last Lap': row_data.get('Last Lap', ''),
                     'Best Lap': row_data.get('Best Lap', ''),
                     'Gap': row_data.get('Gap', ''),
@@ -757,45 +845,37 @@ class ApexTimingWebSocketParser:
                                             if field_name == 'Kart' and value:
                                                 self.row_map[row_id] = value
                                     elif col_idx == 0:  # c1 - Status (default mapping)
-                                        if update_type == 'gs':
-                                            self.grid_data[row_id]['Status'] = 'On Track'
-                                        elif update_type == 'si':
-                                            self.grid_data[row_id]['Status'] = 'Pit-in'
-                                        elif update_type == 'so':
-                                            self.grid_data[row_id]['Status'] = 'Pit-out'
-                                    elif col_idx == 1:  # c2 - Position changes
-                                        if update_type == 'su':
-                                            self.grid_data[row_id]['Status'] = 'Up'
-                                        elif update_type == 'sd':
-                                            self.grid_data[row_id]['Status'] = 'Down'
-                                    elif col_idx == 2:  # c3 - Position number
+                                        if update_type in ['sr', 'si', 'so', 'su', 'sd', 'in']:
+                                            if update_type == 'sr' or update_type == 'in':
+                                                self.grid_data[row_id]['Status'] = 'On Track'
+                                            elif update_type == 'si':
+                                                self.grid_data[row_id]['Status'] = 'Pit-in'
+                                            elif update_type == 'so':
+                                                self.grid_data[row_id]['Status'] = 'Pit-out'
+                                            elif update_type == 'su':
+                                                self.grid_data[row_id]['Status'] = 'Up'
+                                            elif update_type == 'sd':
+                                                self.grid_data[row_id]['Status'] = 'Down'
+                                    elif col_idx == 1:  # c2 - Position
                                         self.grid_data[row_id]['Position'] = value
-                                    elif col_idx == 3:  # c4 - Kart number
+                                    elif col_idx == 2:  # c3 - Kart number
                                         self.grid_data[row_id]['Kart'] = value
                                         if value:
                                             self.row_map[row_id] = value
-                                    elif col_idx == 4:  # c5 - Team name
+                                    elif col_idx == 3:  # c4 - Team name
                                         self.grid_data[row_id]['Team'] = value
-                                    elif col_idx == 5:  # c6 - Last Lap
-                                        if update_type == 'ti':  # Time improvement
-                                            self.grid_data[row_id]['Last Lap'] = value
-                                        else:
-                                            self.grid_data[row_id]['Last Lap'] = value
-                                    elif col_idx == 6:  # c7 - Best Lap
-                                        if update_type == 'ib':  # Improved best
-                                            self.grid_data[row_id]['Best Lap'] = value
-                                        else:
-                                            self.grid_data[row_id]['Best Lap'] = value
-                                    elif col_idx == 7:  # c8 - Gap
-                                        if update_type == 'in':  # Interval
-                                            self.grid_data[row_id]['Gap'] = value
-                                        else:
-                                            self.grid_data[row_id]['Gap'] = value
-                                    elif col_idx == 8:  # c9 - Pit Stops
-                                        if update_type == 'in':
-                                            self.grid_data[row_id]['Pit Stops'] = value
-                                        else:
-                                            self.grid_data[row_id]['Pit Stops'] = value
+                                    elif col_idx == 4:  # c5 - Last Lap
+                                        self.grid_data[row_id]['Last Lap'] = value
+                                    elif col_idx == 5:  # c6 - Gap
+                                        self.grid_data[row_id]['Gap'] = value
+                                    elif col_idx == 6:  # c7 - Interval
+                                        self.grid_data[row_id]['Interval'] = value
+                                    elif col_idx == 7:  # c8 - Best Lap
+                                        self.grid_data[row_id]['Best Lap'] = value
+                                    elif col_idx == 8:  # c9 - RunTime
+                                        self.grid_data[row_id]['RunTime'] = value
+                                    elif col_idx == 9:  # c10 - Pit Stops
+                                        self.grid_data[row_id]['Pit Stops'] = value
                                     
                                     self.logger.debug(f"Cell update: {cell_id} col={col_idx+1} type={update_type} value={value}")
                             elif command.startswith('r'):

@@ -214,7 +214,8 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
    - `race_data_track_N.db` - One database per track with race data and lap times
      - Tables: `race_sessions`, `lap_times`, `lap_history`
    - `tracks.db` - Track information and configuration
-     - Fields: `id`, `track_name`, `timing_url`, `websocket_url`, `column_mappings`, `location`, `length_meters`, `description`, `is_active`, `created_at`, `updated_at`
+     - Fields: `id`, `track_name`, `timing_url`, `websocket_url`, `column_mappings` (legacy, optional), `location`, `length_meters`, `description`, `is_active`, `created_at`, `updated_at`
+     - Note: `column_mappings` is optional; system primarily uses data-type based detection
    - `auth.db` - User authentication for admin panel
      - Tables: `users`, `sessions`, `login_attempts`
 
@@ -290,6 +291,43 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
     - Updates broadcast automatically whenever race data updates (same frequency as track updates)
     - Test client available: `python test_team_socket.py`
     - Use case: Mobile apps monitoring specific team performance in real-time
+
+16. **Data-Type Based Column Detection** (`apex_timing_websocket.py`):
+    - **Layout-Agnostic Design**: System uses HTML `data-type` attributes instead of fixed column indices
+    - **Universal Compatibility**: All Apex Timing tracks worldwide use standardized data-type codes
+    - **Standard Data-Type Codes**:
+      - `sta` = Status (On Track, Pit-in, Pit-out, Finished)
+      - `rk` = Position/Rank
+      - `no` = Kart Number
+      - `dr` = Driver/Team Name
+      - `llp` = Last Lap Time
+      - `blp` = Best Lap Time
+      - `gap` = Gap to Leader
+      - `int` = Interval to Car Ahead
+      - `otr` = On-Track Runtime
+      - `pit` = Pit Stops (handles both count and time formats)
+      - `tlp` = Total Laps
+      - `s1/s2/s3` = Sector times (skipped)
+    - **Priority-Based Detection** (`apex_timing_websocket.py:316-325`, `apex_timing_websocket.py:412-453`):
+      1. **Data-type map** (highest priority) - Uses `data-type` HTML attributes
+      2. **Custom map** (medium priority) - Legacy `column_mappings` from database
+      3. **Text-based map** (fallback) - Auto-detection from column header text
+    - **Adaptive to Layout Changes**: Handles different column orders between:
+      - Qualifying vs Race sessions
+      - Different track configurations
+      - Hidden/visible columns (sectors, intervals)
+    - **Cell Update Message Format**: Apex Timing sends `r{row}c{col}|type|value` (e.g., `r114c10|ti|17.821`)
+      - Cell ID itself is the command (not prefixed with "update")
+      - Parser detects and restructures for processing (`multi_track_manager.py:467-475`)
+    - **Flexible Pit Stops Handling** (`multi_track_manager.py:559-566`):
+      - Detects format: time (`"00:22"`) vs count (`"3"`)
+      - Time format (MM:SS): Stored as 0 for count compatibility
+      - Count format: Stored as integer
+    - **Benefits**:
+      - No manual column mapping configuration needed
+      - Works with any Apex Timing track out-of-the-box
+      - Survives layout changes without code updates
+      - Single codebase supports all tracks worldwide
 
 ## Multi-Track System Flow
 

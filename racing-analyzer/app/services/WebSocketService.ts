@@ -223,6 +223,13 @@ class WebSocketService {
       console.log('WebSocket connected');
       this.reconnectAttempts = 0;
       this.updateConnectionStatus('connected');
+
+      // Rejoin track room if we were subscribed to one
+      if (this.currentTrackId !== null) {
+        console.log(`Rejoining track ${this.currentTrackId} room after reconnection`);
+        this.socket?.emit('join_track', { track_id: this.currentTrackId });
+        this.socket?.emit('join_all_tracks');
+      }
     });
 
     this.socket.on('disconnect', (reason) => {
@@ -345,12 +352,14 @@ class WebSocketService {
       this.leaveTrack(this.currentTrackId);
     }
 
+    // Save track ID regardless of connection status
+    this.currentTrackId = trackId;
+
     if (this.socket?.connected) {
       console.log(`Joining track ${trackId} room`);
       this.socket.emit('join_track', { track_id: trackId });
-      this.currentTrackId = trackId;
     } else {
-      console.warn('Cannot join track - WebSocket not connected');
+      console.warn(`Cannot join track ${trackId} yet - WebSocket not connected, will join when connected`);
     }
   }
 
