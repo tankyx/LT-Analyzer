@@ -174,6 +174,97 @@ def handle_leave_all_tracks():
     leave_room('all_tracks')
     print(f"Client {request.sid} left all_tracks room")
 
+@socketio.on('join_team_room')
+def handle_join_team_room(data):
+    """Handle client joining a team-specific room for a track"""
+    track_id = data.get('track_id')
+    team_name = data.get('team_name')
+
+    if not track_id or not team_name:
+        emit('team_room_error', {
+            'error': 'Both track_id and team_name are required',
+            'timestamp': datetime.now().isoformat()
+        })
+        return
+
+    try:
+        # Validate track exists
+        track_info = track_db.get_track(track_id)
+        if not track_info:
+            emit('team_room_error', {
+                'error': f'Track {track_id} not found',
+                'timestamp': datetime.now().isoformat()
+            })
+            return
+
+        # Validate team exists on this track by checking current standings
+        db_path = f'race_data_track_{track_id}.db'
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            # Check if team exists in lap_times table (most recent data)
+            cursor.execute('''
+                SELECT DISTINCT team_name
+                FROM lap_times
+                WHERE team_name = ?
+                ORDER BY timestamp DESC
+                LIMIT 1
+            ''', (team_name,))
+            result = cursor.fetchone()
+
+            if not result:
+                emit('team_room_error', {
+                    'error': f'Team "{team_name}" not found on track {track_id}',
+                    'track_id': track_id,
+                    'track_name': track_info['track_name'],
+                    'timestamp': datetime.now().isoformat()
+                })
+                return
+
+        # Join the team-specific room
+        room = f'team_track_{track_id}_{team_name}'
+        join_room(room)
+        print(f"Client {request.sid} joined team room: {room}")
+
+        # Send confirmation with team and track info
+        emit('team_room_joined', {
+            'track_id': track_id,
+            'track_name': track_info['track_name'],
+            'team_name': team_name,
+            'room': room,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        print(f"Error handling join_team_room: {e}")
+        emit('team_room_error', {
+            'error': f'Failed to join team room: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        })
+
+@socketio.on('leave_team_room')
+def handle_leave_team_room(data):
+    """Handle client leaving a team-specific room"""
+    track_id = data.get('track_id')
+    team_name = data.get('team_name')
+
+    if not track_id or not team_name:
+        emit('team_room_error', {
+            'error': 'Both track_id and team_name are required',
+            'timestamp': datetime.now().isoformat()
+        })
+        return
+
+    room = f'team_track_{track_id}_{team_name}'
+    leave_room(room)
+    print(f"Client {request.sid} left team room: {room}")
+
+    emit('team_room_left', {
+        'track_id': track_id,
+        'team_name': team_name,
+        'room': room,
+        'timestamp': datetime.now().isoformat()
+    })
+
 @socketio.on('subscribe_standings')
 def handle_standings_subscription(data=None):
     """Handle subscription to standings stream with deltas"""

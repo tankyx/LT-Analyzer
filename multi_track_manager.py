@@ -10,6 +10,7 @@ import threading
 from typing import Dict, List, Optional
 from datetime import datetime
 import json
+import pandas as pd
 from apex_timing_websocket import ApexTimingWebSocketParser
 
 
@@ -507,11 +508,120 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                                 'timestamp': timestamp
                             }, room=room)
                             self.logger.debug(f"Emitted update to room {room} with {len(teams_data)} teams")
+
+                            # Emit team-specific updates to individual team rooms
+                            self.emit_team_specific_updates(standings_df, session_id, timestamp)
+
                     except Exception as emit_error:
                         self.logger.error(f"Error emitting Socket.IO update: {emit_error}")
 
             except Exception as e:
                 self.logger.error(f"Error storing lap data: {e}")
+
+    def emit_team_specific_updates(self, standings_df: pd.DataFrame, session_id: int, timestamp: str):
+        """
+        Emit team-specific updates to individual team rooms.
+        Each team gets their position, lap times, pit stops, runtime, and gaps to other teams.
+        """
+        if not self.socketio or standings_df.empty:
+            return
+
+        try:
+            # Convert standings to list of dicts for easier processing
+            teams = standings_df.to_dict('records')
+
+            # Process each team
+            for idx, team in enumerate(teams):
+                team_name = team.get('Team', '')
+                if not team_name:
+                    continue
+
+                # Extract team data
+                position_str = team.get('Position', '')
+                position = int(position_str) if position_str and str(position_str).isdigit() else idx + 1
+
+                kart = team.get('Kart', '')
+                status = team.get('Status', 'On Track')
+                last_lap = team.get('Last Lap', '')
+                best_lap = team.get('Best Lap', '')
+                runtime = team.get('RunTime', '')
+                pit_stops = team.get('Pit Stops', '0')
+                gap_str = team.get('Gap', '')
+
+                # Calculate gaps
+                gap_to_leader = gap_str if gap_str else '0.000' if position == 1 else ''
+                gap_to_front = None
+                gap_to_behind = None
+
+                # Parse gap values for calculations
+                def parse_gap(gap_string):
+                    """Convert gap string like '+12.456' or '12.456' to float"""
+                    if not gap_string or gap_string in ['LEADER', 'Leader', '']:
+                        return 0.0
+                    # Remove + sign and convert to float
+                    try:
+                        return float(gap_string.replace('+', '').strip())
+                    except (ValueError, AttributeError):
+                        return 0.0
+
+                current_gap = parse_gap(gap_str)
+
+                # Calculate gap to front (team ahead)
+                if position > 1 and idx > 0:
+                    front_team = teams[idx - 1]
+                    front_gap = parse_gap(front_team.get('Gap', ''))
+                    gap_diff = current_gap - front_gap
+                    gap_to_front = f"+{gap_diff:.3f}" if gap_diff > 0 else f"{gap_diff:.3f}"
+
+                # Calculate gap to behind (team behind)
+                if idx < len(teams) - 1:
+                    behind_team = teams[idx + 1]
+                    behind_gap = parse_gap(behind_team.get('Gap', ''))
+                    gap_diff = behind_gap - current_gap
+                    gap_to_behind = f"-{gap_diff:.3f}" if gap_diff > 0 else f"{gap_diff:.3f}"
+
+                # Count total laps from database
+                try:
+                    with self.get_db_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            SELECT COUNT(DISTINCT lap_number)
+                            FROM lap_history
+                            WHERE session_id = ? AND team_name = ?
+                        ''', (session_id, team_name))
+                        result = cursor.fetchone()
+                        total_laps = result[0] if result else 0
+                except Exception as e:
+                    self.logger.error(f"Error getting lap count for {team_name}: {e}")
+                    total_laps = 0
+
+                # Prepare team-specific update payload
+                team_update = {
+                    'track_id': self.track_id,
+                    'track_name': self.track_name,
+                    'team_name': team_name,
+                    'position': position,
+                    'kart': kart,
+                    'status': status,
+                    'last_lap': last_lap,
+                    'best_lap': best_lap,
+                    'total_laps': total_laps,
+                    'runtime': runtime,
+                    'gap_to_leader': gap_to_leader,
+                    'gap_to_front': gap_to_front,
+                    'gap_to_behind': gap_to_behind,
+                    'pit_stops': pit_stops,
+                    'session_id': session_id,
+                    'timestamp': timestamp
+                }
+
+                # Emit to team-specific room
+                room = f'team_track_{self.track_id}_{team_name}'
+                self.socketio.emit('team_specific_update', team_update, room=room)
+                self.logger.debug(f"Emitted team update to room {room} for position {position}")
+
+        except Exception as e:
+            self.logger.error(f"Error emitting team-specific updates: {e}")
 
     def create_or_get_session(self, session_name: str, track_name: str) -> int:
         """Override to use track-specific database"""

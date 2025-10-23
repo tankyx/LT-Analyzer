@@ -153,6 +153,11 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
   - Payload: `{ track_id: number }`
 - `join_all_tracks` - Join the all_tracks room for multi-track status updates
 - `leave_all_tracks` - Leave the all_tracks room
+- `join_team_room` - Join a team-specific room for a track to receive team updates
+  - Payload: `{ track_id: number, team_name: string }`
+  - Validates track and team exist before joining
+- `leave_team_room` - Leave a team-specific room
+  - Payload: `{ track_id: number, team_name: string }`
 
 ### Server → Client:
 - `track_update` - Real-time updates for a specific track (sent to track room only)
@@ -161,6 +166,15 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
   - Payload: `{ track_id, track_name, active, message, timestamp }`
 - `all_tracks_status` - Status update for all tracks (sent to all_tracks room)
   - Payload: `{ tracks: [{ track_id, track_name, active, last_update, teams_count, is_connected }], timestamp }`
+- `team_specific_update` - Real-time updates for a specific team on a track (sent to team room only)
+  - Payload: `{ track_id, track_name, team_name, position, kart, status, last_lap, best_lap, total_laps, runtime, gap_to_leader, gap_to_front, gap_to_behind, pit_stops, session_id, timestamp }`
+  - Room: `team_track_{track_id}_{team_name}`
+- `team_room_joined` - Confirmation of joining team room
+  - Payload: `{ track_id, track_name, team_name, room, timestamp }`
+- `team_room_left` - Confirmation of leaving team room
+  - Payload: `{ track_id, team_name, room, timestamp }`
+- `team_room_error` - Error when joining/leaving team room
+  - Payload: `{ error, track_id?, track_name?, timestamp }`
 - `teams_update` - Team positions and status updates (legacy)
 - `gap_update` - Delta time updates for monitored teams
 - `session_update` - Session info changes (flags, status)
@@ -260,6 +274,22 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
     - Instantly recalculates stint table when selecting different presets
     - Saved per-browser in localStorage (track-specific)
     - UI in Stint Planner tab with dropdown selector, save/delete buttons
+
+15. **Team-Specific Socket.IO Rooms** (`race_ui.py`, `multi_track_manager.py`):
+    - External apps can subscribe to real-time updates for a specific team on a specific track
+    - Room naming convention: `team_track_{track_id}_{team_name}`
+    - Client emits `join_team_room` with `{ track_id, team_name }`
+    - Backend validates track and team exist before allowing join
+    - Server emits `team_specific_update` to team room with:
+      - Position, kart number, status
+      - Last lap, best lap, total laps completed
+      - Runtime (total race time for team)
+      - Gap to leader, gap to team in front, gap to team behind
+      - Pit stops count
+      - Session ID and timestamp
+    - Updates broadcast automatically whenever race data updates (same frequency as track updates)
+    - Test client available: `python test_team_socket.py`
+    - Use case: Mobile apps monitoring specific team performance in real-time
 
 ## Multi-Track System Flow
 
