@@ -137,6 +137,30 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
 - `PUT /api/admin/users/<id>` - Update user
 - `DELETE /api/admin/users/<id>` - Delete user
 
+### Team Data Analysis (/data page)
+- `GET /api/team-data/top-teams` - Get top N teams ranked by best lap time
+  - Parameters: `track_id`, `limit` (10/20/30)
+  - Returns: team name, best lap, avg lap, total laps, sessions count, classes
+  - Handles mixed best_lap formats (MM:SS.mmm and raw seconds)
+  - Works with/without class prefix ("1 - TEAMNAME" or "TEAMNAME")
+- `GET /api/team-data/search` - Search for teams by name (case-insensitive)
+  - Parameters: `q` (query string), `track_id`
+- `GET /api/team-data/stats` - Get detailed statistics for a specific team
+  - Parameters: `team`, `track_id`, optional `session_id`
+  - Returns: best lap, avg lap, total laps, sessions, pit stops
+- `POST /api/team-data/compare` - Compare statistics for multiple teams
+  - Body: `teams[]`, `track_id`, optional `session_id`
+  - Returns: comparison data with lap times for charting
+- `POST /api/team-data/common-sessions` - Get sessions where all specified teams participated
+  - Body: `teams[]`, `track_id`
+- `POST /api/team-data/lap-details` - Get detailed lap-by-lap data for teams in a session
+  - Body: `teams[]`, `session_id`, `track_id`
+  - Returns: lap details and stint information
+- `POST /api/team-data/delete-best-lap` - Delete (nullify) a team's best lap time (admin only)
+  - Body: `team_name`, `track_id`, `best_lap_time`
+  - Sets best_lap field to NULL (preserves record, second-best becomes new best)
+  - Requires admin authentication
+
 ### Testing & Development
 - `POST /api/test/simulate-session/<track_id>` - Simulate active session on a track (for testing)
 - `POST /api/test/stop-session/<track_id>` - Stop simulated session on a track
@@ -328,6 +352,35 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
       - Works with any Apex Timing track out-of-the-box
       - Survives layout changes without code updates
       - Single codebase supports all tracks worldwide
+
+17. **Team Data Analysis (/data page)** (`racing-analyzer/app/data/page.tsx`, `race_ui.py`):
+    - **Top Teams Table**: Shows top 10/20/30 teams ranked by best lap time
+      - Configurable limit selector
+      - Click team to add to comparison (max 2 teams)
+      - Visual indicators for selected teams
+      - Auto-loads when track or limit changes
+    - **Mixed Data Format Support**:
+      - Handles both `best_lap` formats: "MM:SS.mmm" (e.g., "1:02.499") and raw seconds (e.g., "58.800")
+      - Converts to seconds for proper MIN() comparison in queries
+      - Formats output consistently as "M:SS.mmm"
+      - Works with/without class prefix: "1 - TEAMNAME" or "TEAMNAME"
+    - **Team Comparison Features**:
+      - Search teams by name (case-insensitive)
+      - View detailed stats: best lap, avg lap, total laps, sessions, pit stops
+      - Compare up to 2 teams side-by-side
+      - Common sessions detection (sessions where both teams participated)
+      - Lap-by-lap comparison charts and tables
+      - Stint analysis with pit stop detection
+      - 10-lap rolling average charts
+    - **Delete Best Lap (Admin Only)** (`race_ui.py:3097-3167`):
+      - Trash icon (🗑️) next to each team's best lap in top teams table
+      - Only visible to users with `role === 'admin'`
+      - Confirmation dialog before deletion
+      - Nullifies `best_lap` field (sets to NULL) instead of deleting record
+      - Preserves full data history for audit trail
+      - Second-best lap automatically becomes new best lap on next query
+      - Use case: Remove outlier lap times from track cuts or data errors
+      - Endpoint: `POST /api/team-data/delete-best-lap` (requires admin auth)
 
 ## Multi-Track System Flow
 

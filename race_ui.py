@@ -2409,6 +2409,138 @@ def search_teams():
         print(f"Error searching teams: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/team-data/top-teams', methods=['GET'])
+def get_top_teams():
+    """Get top N teams ranked by best lap time"""
+    try:
+        limit = request.args.get('limit', 10, type=int)
+        track_id = request.args.get('track_id', 1, type=int)  # Default to track 1
+
+        # Validate limit
+        if limit not in [10, 20, 30]:
+            limit = 10
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        # Query to get top teams with their stats
+        # Handles both formats: with class prefix "1 - TEAMNAME" and without "TEAMNAME"
+        # Handles mixed best_lap formats: "MM:SS.mmm" and raw seconds
+        query = """
+            WITH team_stats AS (
+                SELECT
+                    CASE
+                        WHEN team_name LIKE '_ - %' THEN
+                            LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                        ELSE
+                            LOWER(TRIM(team_name))
+                    END as team_name_clean,
+                    MIN(
+                        CASE
+                            WHEN best_lap LIKE '%:%' THEN
+                                CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                                CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                            ELSE
+                                CAST(best_lap AS REAL)
+                        END
+                    ) as best_lap_seconds,
+                    COUNT(DISTINCT session_id) as sessions_count,
+                    GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1)) as classes
+                FROM lap_times
+                WHERE best_lap IS NOT NULL
+                AND best_lap != ''
+                AND team_name IS NOT NULL
+                AND team_name != ''
+                GROUP BY team_name_clean
+            ),
+            team_laps AS (
+                SELECT
+                    CASE
+                        WHEN lt.team_name LIKE '_ - %' THEN
+                            LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
+                        ELSE
+                            LOWER(TRIM(lt.team_name))
+                    END as team_name_clean,
+                    SUM(CASE
+                        WHEN lt.position = 1 AND lt.gap LIKE 'Tour %'
+                        THEN CAST(SUBSTR(lt.gap, 6) AS INTEGER)
+                        WHEN lt.gap LIKE '+% Tour%'
+                        THEN CAST(SUBSTR(lt.gap, 6) AS INTEGER) - CAST(SUBSTR(lt.gap, INSTR(lt.gap, '+') + 1, INSTR(lt.gap, ' ') - 2) AS INTEGER)
+                        ELSE 0
+                    END) as total_laps
+                FROM lap_times lt
+                WHERE lt.team_name IS NOT NULL
+                AND lt.team_name != ''
+                GROUP BY team_name_clean
+            ),
+            avg_laps AS (
+                SELECT
+                    CASE
+                        WHEN team_name LIKE '_ - %' THEN
+                            LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                        ELSE
+                            LOWER(TRIM(team_name))
+                    END as team_name_clean,
+                    AVG(
+                        CASE
+                            WHEN last_lap LIKE '%:%' THEN
+                                CAST(SUBSTR(last_lap, 1, INSTR(last_lap, ':') - 1) AS REAL) * 60 +
+                                CAST(SUBSTR(last_lap, INSTR(last_lap, ':') + 1) AS REAL)
+                            ELSE NULL
+                        END
+                    ) as avg_lap_seconds
+                FROM lap_times
+                WHERE last_lap IS NOT NULL
+                AND last_lap != ''
+                AND last_lap LIKE '%:%'
+                AND team_name IS NOT NULL
+                AND team_name != ''
+                GROUP BY team_name_clean
+            )
+            SELECT
+                ts.team_name_clean,
+                ts.best_lap_seconds,
+                COALESCE(al.avg_lap_seconds, 0) as avg_lap_seconds,
+                COALESCE(tl.total_laps, 0) as total_laps,
+                ts.sessions_count,
+                ts.classes
+            FROM team_stats ts
+            LEFT JOIN team_laps tl ON ts.team_name_clean = tl.team_name_clean
+            LEFT JOIN avg_laps al ON ts.team_name_clean = al.team_name_clean
+            WHERE ts.best_lap_seconds IS NOT NULL
+            ORDER BY ts.best_lap_seconds ASC
+            LIMIT ?
+        """
+
+        cursor.execute(query, (limit,))
+        teams = []
+        for row in cursor.fetchall():
+            best_lap_seconds = row[1]
+            # Format best_lap_seconds to MM:SS.mmm
+            if best_lap_seconds:
+                mins = int(best_lap_seconds // 60)
+                secs = best_lap_seconds % 60
+                best_lap_formatted = f"{mins}:{secs:06.3f}"
+            else:
+                best_lap_formatted = None
+
+            teams.append({
+                'name': row[0],
+                'best_lap_time': best_lap_formatted,
+                'avg_lap_seconds': row[2],
+                'total_laps': row[3],
+                'sessions_count': row[4],
+                'classes': row[5]
+            })
+
+        conn.close()
+
+        return jsonify({'teams': teams, 'limit': limit})
+    except Exception as e:
+        print(f"Error getting top teams: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/team-data/stats', methods=['GET'])
 def get_team_stats():
     """Get statistics for a specific team"""
@@ -2424,16 +2556,30 @@ def get_team_stats():
         cursor = conn.cursor()
 
         # Get overall statistics
+        # Handles both formats: with class prefix "1 - TEAMNAME" and without "TEAMNAME"
         stats_query = """
             SELECT
                 COUNT(*) as total_records,
-                MIN(best_lap) as best_lap_time,
+                MIN(
+                    CASE
+                        WHEN best_lap LIKE '%:%' THEN
+                            CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                            CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                        WHEN best_lap IS NOT NULL AND best_lap != '' THEN
+                            CAST(best_lap AS REAL)
+                        ELSE NULL
+                    END
+                ) as best_lap_seconds,
                 COUNT(DISTINCT session_id) as sessions_participated,
                 GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1)) as classes_raced,
                 MAX(pit_stops) as max_pit_stops
             FROM lap_times
-            WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
-            AND team_name LIKE '_ - %'
+            WHERE CASE
+                    WHEN team_name LIKE '_ - %' THEN
+                        LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                    ELSE
+                        LOWER(TRIM(team_name))
+                END = ?
         """
 
         cursor.execute(stats_query, (team_name,))
@@ -2454,10 +2600,12 @@ def get_team_stats():
                     MAX(CASE
                         WHEN position = 1 AND gap LIKE 'Tour %'
                         THEN CAST(SUBSTR(gap, 6) AS INTEGER)
+                        WHEN position = 1 AND gap LIKE 'Lap %'
+                        THEN CAST(SUBSTR(gap, 5) AS INTEGER)
                         ELSE 0
                     END) as total_laps
                 FROM lap_times
-                WHERE gap LIKE 'Tour %'
+                WHERE gap LIKE 'Tour %' OR gap LIKE 'Lap %'
                 GROUP BY session_id
             ),
             team_final_gap AS (
@@ -2465,12 +2613,18 @@ def get_team_stats():
                     lt.session_id,
                     FIRST_VALUE(lt.gap) OVER (PARTITION BY lt.session_id ORDER BY lt.timestamp DESC) as final_gap
                 FROM lap_times lt
-                WHERE LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) = ?
-                AND lt.team_name LIKE '_ - %'
+                WHERE CASE
+                        WHEN lt.team_name LIKE '_ - %' THEN
+                            LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
+                        ELSE
+                            LOWER(TRIM(lt.team_name))
+                    END = ?
             )
             SELECT
                 SUM(CASE
                     WHEN tfg.final_gap LIKE '% Tour%' THEN
+                        ll.total_laps - CAST(SUBSTR(tfg.final_gap, 1, INSTR(tfg.final_gap, ' ') - 1) AS INTEGER)
+                    WHEN tfg.final_gap LIKE '% Lap%' THEN
                         ll.total_laps - CAST(SUBSTR(tfg.final_gap, 1, INSTR(tfg.final_gap, ' ') - 1) AS INTEGER)
                     ELSE
                         ll.total_laps
@@ -2500,11 +2654,16 @@ def get_team_stats():
                     lap_number,
                     CAST(SUBSTR(lap_time, 1, 1) AS REAL) * 60 + CAST(SUBSTR(lap_time, 3) AS REAL) as lap_seconds
                 FROM lap_history
-                WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
-                AND team_name LIKE '_ - %'
+                WHERE CASE
+                        WHEN team_name LIKE '_ - %' THEN
+                            LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                        ELSE
+                            LOWER(TRIM(team_name))
+                    END = ?
                 AND lap_time IS NOT NULL
                 AND lap_time != ''
                 AND lap_time NOT LIKE '%Tour%'
+                AND lap_time NOT LIKE '%Lap%'
                 {lap_history_session_filter}
             )
         """
@@ -2519,25 +2678,62 @@ def get_team_stats():
                 rs.start_time,
                 rs.name as session_name,
                 COUNT(lt.id) as lap_records,
-                MIN(lt.best_lap) as best_lap
+                MIN(
+                    CASE
+                        WHEN lt.best_lap LIKE '%:%' THEN
+                            CAST(SUBSTR(lt.best_lap, 1, INSTR(lt.best_lap, ':') - 1) AS REAL) * 60 +
+                            CAST(SUBSTR(lt.best_lap, INSTR(lt.best_lap, ':') + 1) AS REAL)
+                        WHEN lt.best_lap IS NOT NULL AND lt.best_lap != '' THEN
+                            CAST(lt.best_lap AS REAL)
+                        ELSE NULL
+                    END
+                ) as best_lap_seconds
             FROM race_sessions rs
             LEFT JOIN lap_times lt ON rs.session_id = lt.session_id
-            WHERE LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) = ?
-            AND lt.team_name LIKE '_ - %'
+            WHERE CASE
+                    WHEN lt.team_name LIKE '_ - %' THEN
+                        LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
+                    ELSE
+                        LOWER(TRIM(lt.team_name))
+                END = ?
             GROUP BY rs.session_id
             ORDER BY rs.start_time DESC
         """
 
         cursor.execute(session_query, (team_name,))
-        sessions = [{'session_id': row[0], 'start_time': row[1], 'name': row[2],
-                    'lap_records': row[3], 'best_lap': row[4]} for row in cursor.fetchall()]
+        sessions = []
+        for row in cursor.fetchall():
+            best_lap_secs = row[4]
+            if best_lap_secs:
+                mins = int(best_lap_secs // 60)
+                secs = best_lap_secs % 60
+                best_lap_formatted = f"{mins}:{secs:06.3f}"
+            else:
+                best_lap_formatted = None
+
+            sessions.append({
+                'session_id': row[0],
+                'start_time': row[1],
+                'name': row[2],
+                'lap_records': row[3],
+                'best_lap': best_lap_formatted
+            })
 
         conn.close()
+
+        # Format best_lap_seconds to MM:SS.mmm
+        best_lap_seconds = stats[1] if stats else None
+        if best_lap_seconds:
+            mins = int(best_lap_seconds // 60)
+            secs = best_lap_seconds % 60
+            best_lap_time = f"{mins}:{secs:06.3f}"
+        else:
+            best_lap_time = None
 
         return jsonify({
             'team_name': team_name,
             'total_records': stats[0] if stats else 0,
-            'best_lap_time': stats[1] if stats else None,
+            'best_lap_time': best_lap_time,
             'sessions_participated': stats[2] if stats else 0,
             'classes_raced': stats[3].split(',') if stats and stats[3] else [],
             'max_pit_stops': stats[4] if stats else 0,
@@ -2714,12 +2910,25 @@ def compare_teams():
             stats_query = f"""
                 SELECT
                     COUNT(*) as total_records,
-                    MIN(best_lap) as best_lap_time,
+                    MIN(
+                        CASE
+                            WHEN best_lap LIKE '%:%' THEN
+                                CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                                CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                            WHEN best_lap IS NOT NULL AND best_lap != '' THEN
+                                CAST(best_lap AS REAL)
+                            ELSE NULL
+                        END
+                    ) as best_lap_seconds,
                     COUNT(DISTINCT session_id) as sessions_participated,
                     GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1)) as classes_raced
                 FROM lap_times
-                WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
-                AND team_name LIKE '_ - %'
+                WHERE CASE
+                        WHEN team_name LIKE '_ - %' THEN
+                            LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                        ELSE
+                            LOWER(TRIM(team_name))
+                    END = ?
                 {session_filter_stats}
             """
 
@@ -2740,10 +2949,12 @@ def compare_teams():
                         MAX(CASE
                             WHEN position = 1 AND gap LIKE 'Tour %'
                             THEN CAST(SUBSTR(gap, 6) AS INTEGER)
+                            WHEN position = 1 AND gap LIKE 'Lap %'
+                            THEN CAST(SUBSTR(gap, 5) AS INTEGER)
                             ELSE 0
                         END) as total_laps
                     FROM lap_times
-                    WHERE gap LIKE 'Tour %'
+                    WHERE gap LIKE 'Tour %' OR gap LIKE 'Lap %'
                     GROUP BY session_id
                 ),
                 team_final_gap AS (
@@ -2751,12 +2962,18 @@ def compare_teams():
                         lt.session_id,
                         FIRST_VALUE(lt.gap) OVER (PARTITION BY lt.session_id ORDER BY lt.timestamp DESC) as final_gap
                     FROM lap_times lt
-                    WHERE LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) = ?
-                    AND lt.team_name LIKE '_ - %'
+                    WHERE CASE
+                            WHEN lt.team_name LIKE '_ - %' THEN
+                                LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
+                            ELSE
+                                LOWER(TRIM(lt.team_name))
+                        END = ?
                 )
                 SELECT
                     SUM(CASE
                         WHEN tfg.final_gap LIKE '% Tour%' THEN
+                            ll.total_laps - CAST(SUBSTR(tfg.final_gap, 1, INSTR(tfg.final_gap, ' ') - 1) AS INTEGER)
+                        WHEN tfg.final_gap LIKE '% Lap%' THEN
                             ll.total_laps - CAST(SUBSTR(tfg.final_gap, 1, INSTR(tfg.final_gap, ' ') - 1) AS INTEGER)
                         ELSE
                             ll.total_laps
@@ -2786,11 +3003,16 @@ def compare_teams():
                         lap_number,
                         CAST(SUBSTR(lap_time, 1, 1) AS REAL) * 60 + CAST(SUBSTR(lap_time, 3) AS REAL) as lap_seconds
                     FROM lap_history
-                    WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
-                    AND team_name LIKE '_ - %'
+                    WHERE CASE
+                            WHEN team_name LIKE '_ - %' THEN
+                                LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                            ELSE
+                                LOWER(TRIM(team_name))
+                        END = ?
                     AND lap_time IS NOT NULL
                     AND lap_time != ''
                     AND lap_time NOT LIKE '%Tour%'
+                    AND lap_time NOT LIKE '%Lap%'
                     {session_filter_history}
                 )
             """
@@ -2811,11 +3033,16 @@ def compare_teams():
                     lap_number,
                     lap_time
                 FROM lap_history
-                WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
-                AND team_name LIKE '_ - %'
+                WHERE CASE
+                        WHEN team_name LIKE '_ - %' THEN
+                            LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                        ELSE
+                            LOWER(TRIM(team_name))
+                    END = ?
                 AND lap_time IS NOT NULL
                 AND lap_time != ''
                 AND lap_time NOT LIKE '%Tour%'
+                AND lap_time NOT LIKE '%Lap%'
                 {session_filter_dist}
                 ORDER BY session_id DESC, lap_number DESC
                 LIMIT 50
@@ -2839,10 +3066,19 @@ def compare_teams():
                 except:
                     continue
 
+            # Format best_lap_seconds to MM:SS.mmm
+            best_lap_seconds = stats[1] if stats else None
+            if best_lap_seconds:
+                mins = int(best_lap_seconds // 60)
+                secs = best_lap_seconds % 60
+                best_lap_formatted = f"{mins}:{secs:06.3f}"
+            else:
+                best_lap_formatted = None
+
             comparison.append({
                 'team_name': team_name,
                 'total_records': stats[0] if stats else 0,
-                'best_lap_time': stats[1] if stats else None,
+                'best_lap_time': best_lap_formatted,
                 'sessions_participated': stats[2] if stats else 0,
                 'classes_raced': stats[3].split(',') if stats and stats[3] else [],
                 'total_laps_completed': total_laps,  # Use calculated total from leader's lap count
@@ -2855,6 +3091,78 @@ def compare_teams():
         return jsonify({'comparison': comparison})
     except Exception as e:
         print(f"Error comparing teams: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/delete-best-lap', methods=['POST'])
+@admin_required
+def delete_best_lap():
+    """Delete (nullify) a team's best lap time record (admin only)"""
+    try:
+        data = request.json
+        team_name = data.get('team_name', '').strip().lower()
+        track_id = data.get('track_id', 1)
+        best_lap_time = data.get('best_lap_time', '').strip()
+
+        if not team_name or not best_lap_time:
+            return jsonify({'error': 'team_name and best_lap_time are required'}), 400
+
+        # Parse best_lap_time to seconds for comparison
+        # Format is "M:SS.mmm" or "MM:SS.mmm"
+        try:
+            if ':' in best_lap_time:
+                parts = best_lap_time.split(':')
+                minutes = int(parts[0])
+                seconds = float(parts[1])
+                best_lap_seconds = minutes * 60 + seconds
+            else:
+                best_lap_seconds = float(best_lap_time)
+        except ValueError:
+            return jsonify({'error': 'Invalid best_lap_time format'}), 400
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        # Find and nullify the best_lap field for records matching this team and lap time
+        # Handle both formats: with class prefix "1 - TEAMNAME" and without "TEAMNAME"
+        # Also handle mixed best_lap formats: "MM:SS.mmm" and raw seconds
+        update_query = """
+            UPDATE lap_times
+            SET best_lap = NULL
+            WHERE CASE
+                    WHEN team_name LIKE '_ - %' THEN
+                        LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                    ELSE
+                        LOWER(TRIM(team_name))
+                END = ?
+            AND ABS(
+                CASE
+                    WHEN best_lap LIKE '%:%' THEN
+                        CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                        CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                    WHEN best_lap IS NOT NULL AND best_lap != '' THEN
+                        CAST(best_lap AS REAL)
+                    ELSE 999999
+                END - ?
+            ) < 0.01
+        """
+
+        cursor.execute(update_query, (team_name, best_lap_seconds))
+        rows_updated = cursor.rowcount
+        conn.commit()
+        conn.close()
+
+        if rows_updated == 0:
+            return jsonify({'error': 'No matching lap time found for this team'}), 404
+
+        return jsonify({
+            'success': True,
+            'message': f'Deleted best lap time for {team_name}',
+            'rows_updated': rows_updated
+        })
+
+    except Exception as e:
+        print(f"Error deleting best lap: {e}")
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 

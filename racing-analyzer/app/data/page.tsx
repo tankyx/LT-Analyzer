@@ -80,6 +80,15 @@ interface Track {
   websocket_url: string;
 }
 
+interface TopTeam {
+  name: string;
+  best_lap_time: string;
+  avg_lap_seconds: number;
+  total_laps: number;
+  sessions_count: number;
+  classes: string;
+}
+
 export default function DataPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -100,6 +109,12 @@ export default function DataPage() {
   const [stintEnd, setStintEnd] = useState<number>(50);
   const [teamStints, setTeamStints] = useState<TeamStints[]>([]);
   const [selectedStint, setSelectedStint] = useState<string>('');
+  const [topTeams, setTopTeams] = useState<TopTeam[]>([]);
+  const [topTeamsLimit, setTopTeamsLimit] = useState<number>(10);
+  const [loadingTopTeams, setLoadingTopTeams] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [teamToDelete, setTeamToDelete] = useState<{name: string, bestLap: string} | null>(null);
+  const [deletingLap, setDeletingLap] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -132,6 +147,24 @@ export default function DataPage() {
     setSearchQuery('');
     setSearchResults([]);
   }, [selectedTrackId]);
+
+  // Load top teams when track or limit changes
+  useEffect(() => {
+    const loadTopTeams = async () => {
+      setLoadingTopTeams(true);
+      try {
+        const result = await ApiService.getTopTeams(selectedTrackId, topTeamsLimit);
+        setTopTeams(result.teams || []);
+      } catch (error) {
+        console.error('Error loading top teams:', error);
+        setTopTeams([]);
+      } finally {
+        setLoadingTopTeams(false);
+      }
+    };
+
+    loadTopTeams();
+  }, [selectedTrackId, topTeamsLimit]);
 
   // Search teams with debounce
   useEffect(() => {
@@ -262,6 +295,40 @@ export default function DataPage() {
     } else {
       setComparisonData([]);
     }
+  };
+
+  const handleDeleteBestLap = (teamName: string, bestLapTime: string) => {
+    setTeamToDelete({ name: teamName, bestLap: bestLapTime });
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDeleteBestLap = async () => {
+    if (!teamToDelete) return;
+
+    setDeletingLap(true);
+    try {
+      await ApiService.deleteBestLap(teamToDelete.name, selectedTrackId, teamToDelete.bestLap);
+
+      // Refresh top teams list
+      const result = await ApiService.getTopTeams(selectedTrackId, topTeamsLimit);
+      setTopTeams(result.teams || []);
+
+      // Close dialog
+      setDeleteDialogOpen(false);
+      setTeamToDelete(null);
+
+      alert(`Best lap deleted successfully for ${teamToDelete.name}`);
+    } catch (error) {
+      console.error('Error deleting best lap:', error);
+      alert(`Failed to delete best lap: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setDeletingLap(false);
+    }
+  };
+
+  const cancelDeleteBestLap = () => {
+    setDeleteDialogOpen(false);
+    setTeamToDelete(null);
   };
 
   // Fetch detailed lap data when session and teams change
@@ -416,6 +483,96 @@ export default function DataPage() {
                   <span className="text-sm text-gray-400">Classes: {team.classes}</span>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* Top Teams Section */}
+        <div className="bg-gray-800 rounded-lg p-6 mb-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-white">Top Teams</h2>
+            <select
+              value={topTeamsLimit}
+              onChange={(e) => setTopTeamsLimit(parseInt(e.target.value))}
+              className="px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value={10}>Top 10</option>
+              <option value={20}>Top 20</option>
+              <option value={30}>Top 30</option>
+            </select>
+          </div>
+
+          {loadingTopTeams ? (
+            <div className="text-center text-gray-400 py-8">Loading top teams...</div>
+          ) : topTeams.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-700">
+                  <tr className="text-left border-b border-gray-600">
+                    <th className="px-4 py-3 text-gray-300">Rank</th>
+                    <th className="px-4 py-3 text-gray-300">Team Name</th>
+                    <th className="px-4 py-3 text-gray-300">Best Lap</th>
+                    <th className="px-4 py-3 text-gray-300">Avg Lap</th>
+                    <th className="px-4 py-3 text-gray-300">Total Laps</th>
+                    <th className="px-4 py-3 text-gray-300">Sessions</th>
+                    <th className="px-4 py-3 text-gray-300">Classes</th>
+                    {user?.role === 'admin' && (
+                      <th className="px-4 py-3 text-gray-300">Actions</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {topTeams.map((team, index) => {
+                    const isSelected = selectedTeams.includes(team.name);
+                    return (
+                      <tr
+                        key={team.name}
+                        className={`border-b border-gray-700 transition-colors ${
+                          isSelected
+                            ? 'bg-blue-900 bg-opacity-30'
+                            : 'hover:bg-gray-700'
+                        }`}
+                      >
+                        <td className="px-4 py-3 text-white font-medium">{index + 1}</td>
+                        <td
+                          className="px-4 py-3 text-white capitalize flex items-center gap-2 cursor-pointer"
+                          onClick={() => !isSelected && addTeamToComparison(team.name)}
+                        >
+                          {team.name}
+                          {isSelected && (
+                            <span className="text-green-400 text-xs">✓</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-blue-300">{team.best_lap_time}</td>
+                        <td className="px-4 py-3 text-green-300">
+                          {team.avg_lap_seconds > 0 ? formatLapTime(team.avg_lap_seconds) : 'N/A'}
+                        </td>
+                        <td className="px-4 py-3 text-yellow-300">{team.total_laps}</td>
+                        <td className="px-4 py-3 text-purple-300">{team.sessions_count}</td>
+                        <td className="px-4 py-3 text-gray-400">{team.classes}</td>
+                        {user?.role === 'admin' && (
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteBestLap(team.name, team.best_lap_time);
+                              }}
+                              className="text-red-400 hover:text-red-300 transition-colors"
+                              title="Delete best lap"
+                            >
+                              🗑️
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center text-gray-400 py-8">
+              No teams found for this track. Teams will appear once race data is collected.
             </div>
           )}
         </div>
@@ -805,6 +962,38 @@ export default function DataPage() {
         {selectedTeams.length === 0 && (
           <div className="text-center text-gray-400 py-12">
             <p className="text-lg">Search for teams above to start analyzing and comparing data</p>
+          </div>
+        )}
+
+        {/* Delete Confirmation Dialog */}
+        {deleteDialogOpen && teamToDelete && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-xl font-semibold text-white mb-4">Delete Best Lap?</h3>
+              <p className="text-gray-300 mb-6">
+                Are you sure you want to delete the best lap time of{' '}
+                <span className="font-bold text-blue-300">{teamToDelete.bestLap}</span> for team{' '}
+                <span className="font-bold text-blue-300 capitalize">{teamToDelete.name}</span>?
+                <br /><br />
+                This will make the second-best lap the new best lap time.
+              </p>
+              <div className="flex gap-4 justify-end">
+                <button
+                  onClick={cancelDeleteBestLap}
+                  disabled={deletingLap}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDeleteBestLap}
+                  disabled={deletingLap}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors disabled:opacity-50"
+                >
+                  {deletingLap ? 'Deleting...' : 'Delete'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

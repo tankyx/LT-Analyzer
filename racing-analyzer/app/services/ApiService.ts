@@ -272,6 +272,19 @@ export const ApiService = {
     }
   },
 
+  getTopTeams: async (trackId: number = 1, limit: number = 10) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/team-data/top-teams?track_id=${trackId}&limit=${limit}`);
+      if (!response.ok) {
+        throw new Error('Failed to get top teams');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error getting top teams:', error);
+      throw error;
+    }
+  },
+
   getTeamStats: async (teamName: string, sessionId?: number, trackId: number = 1) => {
     try {
       let url = `${API_BASE_URL}/api/team-data/stats?team=${encodeURIComponent(teamName)}&track_id=${trackId}`;
@@ -349,6 +362,27 @@ export const ApiService = {
       return await response.json();
     } catch (error) {
       console.error('Error getting lap details:', error);
+      throw error;
+    }
+  },
+
+  deleteBestLap: async (teamName: string, trackId: number, bestLapTime: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/team-data/delete-best-lap`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ team_name: teamName, track_id: trackId, best_lap_time: bestLapTime }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete best lap');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error deleting best lap:', error);
       throw error;
     }
   }
