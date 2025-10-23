@@ -1,4 +1,20 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  saveStintConfig,
+  loadStintConfig,
+  saveDriverNames,
+  loadDriverNames,
+  saveStintAssignments,
+  loadStintAssignments,
+  saveCurrentDriverIndex,
+  loadCurrentDriverIndex,
+  StintPreset,
+  getTrackPresets,
+  saveTrackPreset,
+  deleteTrackPreset,
+  setActivePreset,
+  getActivePreset
+} from '../../utils/persistence';
 
 interface StintPlannerProps {
   isDarkMode?: boolean;
@@ -11,6 +27,8 @@ interface StintPlannerProps {
   sessionInfo?: {
     light?: string;
   };
+  trackId?: number;
+  trackName?: string;
 }
 
 interface StintConfig {
@@ -48,29 +66,119 @@ interface ActiveStint {
   isPitStop: boolean;
 }
 
-const StintPlanner: React.FC<StintPlannerProps> = ({ 
-  isDarkMode = false, 
+const StintPlanner: React.FC<StintPlannerProps> = ({
+  isDarkMode = false,
   myTeam,
   teams = [],
   isSimulating = false,
-  sessionInfo
+  sessionInfo,
+  trackId,
+  trackName
 }) => {
-  const [config, setConfig] = useState<StintConfig>({
+  const defaultConfig: StintConfig = {
     numStints: 8,
     minStintTime: 25,
     maxStintTime: 60,
     pitDuration: 5,
     numDrivers: 4,
     totalRaceTime: 360,
-  });
+  };
 
+  // Initialize with default values (not from localStorage due to Next.js SSR)
+  const [config, setConfig] = useState<StintConfig>(defaultConfig);
   const [stintAssignments, setStintAssignments] = useState<StintAssignment[]>([]);
   const [driverNames, setDriverNames] = useState<string[]>(['Driver 1', 'Driver 2', 'Driver 3', 'Driver 4']);
   const [currentDriverIndex, setCurrentDriverIndex] = useState<number>(0);
   const [activeStint, setActiveStint] = useState<ActiveStint | null>(null);
   const [stintHistory, setStintHistory] = useState<{driver: number, duration: number, timestamp: Date}[]>([]);
+  const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPitStatusRef = useRef<string>('');
+
+  // Preset management state
+  const [availablePresets, setAvailablePresets] = useState<StintPreset[]>([]);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('');
+  const [showSavePresetDialog, setShowSavePresetDialog] = useState(false);
+  const [newPresetName, setNewPresetName] = useState('');
+
+  // Load saved values from localStorage on client-side mount (after SSR)
+  useEffect(() => {
+    // Only run on client side
+    if (typeof window !== 'undefined' && !hasLoadedFromStorage) {
+      const savedConfig = loadStintConfig<StintConfig>(defaultConfig);
+      const savedDriverNames = loadDriverNames();
+      const savedStintAssignments = loadStintAssignments<StintAssignment>();
+      const savedDriverIndex = loadCurrentDriverIndex();
+
+      // Apply saved values if they exist
+      if (savedConfig) {
+        setConfig(savedConfig);
+      }
+      if (savedDriverNames && savedDriverNames.length > 0) {
+        setDriverNames(savedDriverNames);
+      }
+      if (savedStintAssignments && savedStintAssignments.length > 0) {
+        setStintAssignments(savedStintAssignments);
+      }
+      setCurrentDriverIndex(savedDriverIndex);
+
+      setHasLoadedFromStorage(true);
+    }
+  }, []); // Run only once on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+  // Load presets when track changes
+  useEffect(() => {
+    if (typeof window !== 'undefined' && trackId !== undefined) {
+      const trackPresets = getTrackPresets(trackId);
+
+      if (trackPresets) {
+        setAvailablePresets(trackPresets.presets);
+
+        // Load the active preset for this track
+        const activePreset = getActivePreset(trackId);
+        if (activePreset) {
+          setSelectedPresetId(activePreset.id);
+          // Apply the preset config
+          setConfig(activePreset.config);
+
+          // Reinitialize stints based on preset config
+          const assignments: StintAssignment[] = [];
+          let currentTime = 0;
+          const totalPitTime = activePreset.config.pitDuration * (activePreset.config.numStints - 1);
+          const availableRaceTime = activePreset.config.totalRaceTime - totalPitTime;
+          const baseStintTime = Math.round(availableRaceTime / activePreset.config.numStints);
+
+          for (let stint = 1; stint <= activePreset.config.numStints; stint++) {
+            const driverIndex = (stint - 1) % activePreset.config.numDrivers;
+
+            assignments.push({
+              driver: driverIndex + 1,
+              stint,
+              duration: baseStintTime,
+              isJoker: false,
+              isLong: false,
+              startTime: currentTime,
+              endTime: currentTime + baseStintTime,
+            });
+
+            currentTime += baseStintTime;
+            if (stint < activePreset.config.numStints) {
+              currentTime += activePreset.config.pitDuration;
+            }
+          }
+
+          setStintAssignments(assignments);
+        } else {
+          setSelectedPresetId('');
+        }
+      } else {
+        // No presets for this track
+        setAvailablePresets([]);
+        setSelectedPresetId('');
+      }
+    }
+  }, [trackId]);
 
   // Pastel colors for drivers (4 opposite colors on color wheel)
   const driverColors = useMemo(() => {
@@ -207,9 +315,21 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     return assignments;
   }, [config]);
 
+  // Reinitialize stints when config changes significantly (numStints or numDrivers)
   useEffect(() => {
-    setStintAssignments(initializeStints);
-  }, [initializeStints]);
+    // Skip on initial mount before loading from storage
+    if (!hasLoadedFromStorage) {
+      return;
+    }
+
+    // Check if config has changed significantly
+    const configStintsChanged = stintAssignments.length > 0 && stintAssignments.length !== config.numStints;
+
+    if (configStintsChanged || stintAssignments.length === 0) {
+      // Reinitialize stint assignments
+      setStintAssignments(initializeStints);
+    }
+  }, [config.numStints, config.numDrivers, initializeStints, hasLoadedFromStorage, stintAssignments.length]);
 
   // Update driver names array when number of drivers changes
   useEffect(() => {
@@ -303,6 +423,26 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       }
     };
   }, [activeStint]);
+
+  // Persist stint configuration to localStorage
+  useEffect(() => {
+    saveStintConfig(config);
+  }, [config]);
+
+  // Persist driver names to localStorage
+  useEffect(() => {
+    saveDriverNames(driverNames);
+  }, [driverNames]);
+
+  // Persist stint assignments to localStorage
+  useEffect(() => {
+    saveStintAssignments(stintAssignments);
+  }, [stintAssignments]);
+
+  // Persist current driver index to localStorage
+  useEffect(() => {
+    saveCurrentDriverIndex(currentDriverIndex);
+  }, [currentDriverIndex]);
 
   const driverStats = useMemo(() => {
     const stats: DriverStats[] = [];
@@ -400,10 +540,166 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     setStintAssignments(newAssignments);
   };
 
+  // Preset handlers
+  const handlePresetSelect = (presetId: string) => {
+    setSelectedPresetId(presetId);
+    if (presetId && trackId !== undefined) {
+      const preset = availablePresets.find(p => p.id === presetId);
+      if (preset) {
+        setConfig(preset.config);
+        setActivePreset(trackId, presetId);
+
+        // Force recalculate stints based on new config
+        const assignments: StintAssignment[] = [];
+        let currentTime = 0;
+        const totalPitTime = preset.config.pitDuration * (preset.config.numStints - 1);
+        const availableRaceTime = preset.config.totalRaceTime - totalPitTime;
+        const baseStintTime = Math.round(availableRaceTime / preset.config.numStints);
+
+        for (let stint = 1; stint <= preset.config.numStints; stint++) {
+          const driverIndex = (stint - 1) % preset.config.numDrivers;
+
+          assignments.push({
+            driver: driverIndex + 1,
+            stint,
+            duration: baseStintTime,
+            isJoker: false,
+            isLong: false,
+            startTime: currentTime,
+            endTime: currentTime + baseStintTime,
+          });
+
+          currentTime += baseStintTime;
+          if (stint < preset.config.numStints) {
+            currentTime += preset.config.pitDuration;
+          }
+        }
+
+        setStintAssignments(assignments);
+      }
+    }
+  };
+
+  const handleSavePreset = () => {
+    if (!newPresetName.trim() || trackId === undefined || !trackName) return;
+
+    const presetId = `preset_${Date.now()}`;
+    const newPreset: StintPreset = {
+      id: presetId,
+      name: newPresetName.trim(),
+      config: { ...config }
+    };
+
+    saveTrackPreset(trackId, trackName, newPreset);
+    setAvailablePresets(prev => [...prev, newPreset]);
+    setSelectedPresetId(presetId);
+    setActivePreset(trackId, presetId);
+    setNewPresetName('');
+    setShowSavePresetDialog(false);
+  };
+
+  const handleDeletePreset = () => {
+    if (!selectedPresetId || trackId === undefined) return;
+
+    if (confirm('Are you sure you want to delete this preset?')) {
+      deleteTrackPreset(trackId, selectedPresetId);
+      const updatedPresets = availablePresets.filter(p => p.id !== selectedPresetId);
+      setAvailablePresets(updatedPresets);
+      setSelectedPresetId(updatedPresets[0]?.id || '');
+    }
+  };
+
   return (
     <div className={`p-6 ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
       <h2 className="text-2xl font-bold mb-6">Stint Planner</h2>
-      
+
+      {/* Preset Selector */}
+      {trackName && (
+        <div className={`mb-6 p-4 rounded-lg border ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-blue-50 border-gray-300'}`}>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+              {trackName} Presets:
+            </label>
+
+            <select
+              value={selectedPresetId}
+              onChange={(e) => handlePresetSelect(e.target.value)}
+              className={`flex-1 min-w-[200px] p-2 rounded border ${
+                isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+              }`}
+              disabled={availablePresets.length === 0}
+            >
+              <option value="">-- No preset selected --</option>
+              {availablePresets.map(preset => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.name}
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={() => setShowSavePresetDialog(!showSavePresetDialog)}
+              className={`px-4 py-2 rounded ${
+                isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
+              }`}
+            >
+              Save Preset
+            </button>
+
+            {selectedPresetId && (
+              <button
+                onClick={handleDeletePreset}
+                className={`px-4 py-2 rounded ${
+                  isDarkMode ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-red-500 hover:bg-red-600 text-white'
+                }`}
+              >
+                Delete
+              </button>
+            )}
+          </div>
+
+          {/* Save Preset Dialog */}
+          {showSavePresetDialog && (
+            <div className="mt-4 flex items-center gap-3">
+              <input
+                type="text"
+                value={newPresetName}
+                onChange={(e) => setNewPresetName(e.target.value)}
+                placeholder="Preset name (e.g., 6 Hour Race)"
+                className={`flex-1 p-2 rounded border ${
+                  isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
+                }`}
+                onKeyPress={(e) => e.key === 'Enter' && handleSavePreset()}
+              />
+              <button
+                onClick={handleSavePreset}
+                disabled={!newPresetName.trim()}
+                className={`px-4 py-2 rounded ${
+                  !newPresetName.trim()
+                    ? 'bg-gray-400 cursor-not-allowed text-gray-200'
+                    : isDarkMode
+                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    : 'bg-green-500 hover:bg-green-600 text-white'
+                }`}
+              >
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setShowSavePresetDialog(false);
+                  setNewPresetName('');
+                }}
+                className={`px-4 py-2 rounded ${
+                  isDarkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-300 hover:bg-gray-400 text-gray-900'
+                }`}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Active Stint Timer */}
       {activeStint && (
         <div 

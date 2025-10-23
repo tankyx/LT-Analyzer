@@ -130,6 +130,19 @@ export const ApiService = {
     }
   },
 
+  getTracksStatus: async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/tracks/status`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch tracks status');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching tracks status:', error);
+      throw error;
+    }
+  },
+
   getTrack: async (id: number) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracks/${id}`);

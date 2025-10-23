@@ -236,6 +236,31 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
 
 12. **Logging**: The WebSocket parser logs to `apex_timing_websocket.log` with automatic log rotation (10MB max, 3 backups)
 
+13. **User Preferences Persistence** (`utils/persistence.ts`):
+    - All user preferences saved to browser localStorage (client-side only)
+    - Persisted data includes:
+      - Selected track ID
+      - "My Team" selection
+      - Stint planner configuration (per track)
+      - Driver names
+      - Current driver index
+      - Track-specific stint presets
+    - Data loads after Next.js SSR hydration to avoid conflicts
+    - Survives page refreshes and browser sessions
+
+14. **Stint Planner Presets** (`StintPlanner.tsx`, `persistence.ts`):
+    - Create multiple race configurations per track (e.g., "6 Hour Race", "12 Hour Endurance", "24h Race")
+    - Each preset stores:
+      - Number of stints
+      - Min/Max stint times
+      - Pit duration
+      - Number of drivers
+      - Total race time
+    - Auto-loads when switching tracks
+    - Instantly recalculates stint table when selecting different presets
+    - Saved per-browser in localStorage (track-specific)
+    - UI in Stint Planner tab with dropdown selector, save/delete buttons
+
 ## Multi-Track System Flow
 
 ### Backend Startup Sequence:

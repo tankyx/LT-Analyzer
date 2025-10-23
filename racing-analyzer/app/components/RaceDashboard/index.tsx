@@ -10,6 +10,7 @@ import StintPlanner from './StintPlanner';
 import AdminPanel from './AdminPanel';
 import MultiTrackStatus from './MultiTrackStatus';
 import { useAuth } from '../../contexts/AuthContext';
+import { saveSelectedTrack, loadSelectedTrack, saveMyTeam, loadMyTeam } from '../../utils/persistence';
 
 // Types
 interface Team {
@@ -674,20 +675,50 @@ const RaceDashboard = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkPitStops]); // Only run on mount, teams and updatedRows changes are handled internally
 
-  // Load available tracks on mount
+  // Load available tracks on mount and restore saved selections
   useEffect(() => {
     const loadTracks = async () => {
       try {
         const result = await ApiService.getTracks();
         if (result && result.tracks) {
           setAvailableTracks(result.tracks);
-          // Auto-join first track
-          if (result.tracks.length > 0) {
-            setSelectedTrackId(result.tracks[0].id);
-            webSocketService.joinTrack(result.tracks[0].id);
+
+          // Try to load saved track selection (client-side only)
+          let trackToSelect = result.tracks[0].id; // Default to first track
+
+          if (typeof window !== 'undefined') {
+            const savedTrackId = loadSelectedTrack();
+            // Validate that saved track ID exists in available tracks
+            if (savedTrackId && result.tracks.some((t: {id: number; track_name: string}) => t.id === savedTrackId)) {
+              trackToSelect = savedTrackId;
+            }
+
+            // Load saved team selection
+            const savedTeam = loadMyTeam();
+            if (savedTeam) {
+              setMyTeam(savedTeam);
+            }
           }
+
+          // Join the selected track
+          if (result.tracks.length > 0) {
+            setSelectedTrackId(trackToSelect);
+            webSocketService.joinTrack(trackToSelect);
+          }
+
           // Join all_tracks room for multi-track status monitoring
           webSocketService.joinAllTracks();
+
+          // Fetch initial tracks status via API as fallback (in case WebSocket hasn't delivered it yet)
+          try {
+            const statusResult = await ApiService.getTracksStatus();
+            if (statusResult && statusResult.tracks) {
+              setAllTracksStatus(statusResult.tracks);
+            }
+          } catch (statusError) {
+            console.error('Error loading tracks status:', statusError);
+            // Not critical - WebSocket will provide updates
+          }
         }
       } catch (error) {
         console.error('Error loading tracks:', error);
@@ -706,8 +737,16 @@ const RaceDashboard = () => {
     if (selectedTrackId) {
       console.log(`Switching to track ${selectedTrackId}`);
       webSocketService.joinTrack(selectedTrackId);
+      saveSelectedTrack(selectedTrackId);
     }
   }, [selectedTrackId]);
+
+  // Save myTeam to localStorage when it changes
+  useEffect(() => {
+    if (myTeam) {
+      saveMyTeam(myTeam);
+    }
+  }, [myTeam]);
 
   const toggleTeamMonitoring = (kartNum: string) => {
     setIsUserUpdate(true);
@@ -1373,6 +1412,8 @@ const RaceDashboard = () => {
             teams={teams}
             isSimulating={true}
             sessionInfo={sessionInfo}
+            trackId={selectedTrackId}
+            trackName={availableTracks.find(t => t.id === selectedTrackId)?.track_name}
           />
           {user?.role === 'admin' && (
             <AdminPanel isDarkMode={isDarkMode} />
