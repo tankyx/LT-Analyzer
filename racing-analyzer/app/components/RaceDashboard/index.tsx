@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback  } from 'react';
+import { useRouter } from 'next/navigation';
 import TimeDeltaChart from './TimeDeltaChart';
 import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
@@ -327,6 +328,7 @@ const StarIcon = ({ filled, onClick }: { filled: boolean; onClick?: () => void }
 
 const RaceDashboard = () => {
   const { user, logout } = useAuth();
+  const router = useRouter();
   const [teams, setTeams] = useState<Team[]>([]);
   const [sessionInfo, setSessionInfo] = useState<SessionInfo>({});
   const [lastUpdate, setLastUpdate] = useState<string>('');
@@ -1185,6 +1187,12 @@ const RaceDashboard = () => {
                     </span>
                   </div>
                 )}
+                <button
+                  onClick={() => router.push('/data')}
+                  className={`mt-3 w-full py-2 px-4 rounded-lg font-medium transition-colors ${isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
+                >
+                  📊 Team Data Analysis
+                </button>
               </div>
             )}
 

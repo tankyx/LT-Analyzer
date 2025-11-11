@@ -55,7 +55,8 @@ LT-Analyzer/
 │   │   │   └── WebSocketService.ts # Socket.IO client with room management
 │   │   ├── admin/             # Admin panel for tracks and users
 │   │   ├── data/              # Data comparison page
-│   │   └── dashboard/         # Main dashboard page
+│   │   ├── dashboard/         # Main dashboard page
+│   │   └── team/[teamName]/   # Team profile pages (dynamic route)
 ├── racing-venv/                # Python virtual environment
 ├── migrations/                 # Archived database migration scripts
 ├── scripts/                    # Utility scripts
@@ -140,7 +141,7 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
 ### Team Data Analysis (/data page)
 - `GET /api/team-data/top-teams` - Get top N teams ranked by best lap time
   - Parameters: `track_id`, `limit` (10/20/30)
-  - Returns: team name, best lap, avg lap, total laps, sessions count, classes
+  - Returns: team name, best lap, best_lap_timestamp, avg lap, total laps, sessions count, classes
   - Handles mixed best_lap formats (MM:SS.mmm and raw seconds)
   - Works with/without class prefix ("1 - TEAMNAME" or "TEAMNAME")
 - `GET /api/team-data/search` - Search for teams by name (case-insensitive)
@@ -156,9 +157,25 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
 - `POST /api/team-data/lap-details` - Get detailed lap-by-lap data for teams in a session
   - Body: `teams[]`, `session_id`, `track_id`
   - Returns: lap details and stint information
+- `GET /api/team-data/all-laps` - Get all laps for a specific team (paginated)
+  - Parameters: `team`, `track_id`, optional `session_id`, `limit` (default 50), `offset` (default 0)
+  - Returns: lap details with lap number, time, session, date, position, pit stops
+- `GET /api/team-data/cross-track-sessions` - Get all sessions for a team across all tracks
+  - Parameters: `team` (supports flexible matching - finds "DELVENNE Simon" and "SIMON DELVENNE")
+  - Returns: sessions list with track info, lap counts, best/avg laps, overall stats
+  - Queries all track databases and aggregates results
+  - Handles name variations (e.g., "First Last" vs "Last First")
+- `GET /api/team-data/session-laps` - Get all lap details for a specific session
+  - Parameters: `team`, `track_id`, `session_id`
+  - Returns: laps with dynamically calculated lap numbers (using ROW_NUMBER based on timestamp)
+  - Lap numbers calculated chronologically since database stores incorrect values
 - `POST /api/team-data/delete-best-lap` - Delete (nullify) a team's best lap time (admin only)
   - Body: `team_name`, `track_id`, `best_lap_time`
   - Sets best_lap field to NULL (preserves record, second-best becomes new best)
+  - Requires admin authentication
+- `POST /api/team-data/mass-delete-laps` - Mass delete laps under a threshold (admin only)
+  - Body: `track_id`, `threshold_seconds`, `delete_type` (lap_history or best_laps)
+  - Deletes all laps faster than threshold (useful for removing data errors)
   - Requires admin authentication
 
 ### Testing & Development
@@ -237,6 +254,9 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
 5. **Database Architecture**: Uses SQLite with per-track databases:
    - `race_data_track_N.db` - One database per track with race data and lap times
      - Tables: `race_sessions`, `lap_times`, `lap_history`
+     - WAL mode enabled for better concurrent access
+     - 7 indexes per database for optimal query performance
+     - 5-second busy timeout for lock handling
    - `tracks.db` - Track information and configuration
      - Fields: `id`, `track_name`, `timing_url`, `websocket_url`, `column_mappings` (legacy, optional), `location`, `length_meters`, `description`, `is_active`, `created_at`, `updated_at`
      - Note: `column_mappings` is optional; system primarily uses data-type based detection
@@ -359,6 +379,8 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
       - Click team to add to comparison (max 2 teams)
       - Visual indicators for selected teams
       - Auto-loads when track or limit changes
+      - Shows best lap timestamp (when the lap was set)
+      - 📊 icon next to each team to view full cross-track profile
     - **Mixed Data Format Support**:
       - Handles both `best_lap` formats: "MM:SS.mmm" (e.g., "1:02.499") and raw seconds (e.g., "58.800")
       - Converts to seconds for proper MIN() comparison in queries
@@ -372,7 +394,11 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
       - Lap-by-lap comparison charts and tables
       - Stint analysis with pit stop detection
       - 10-lap rolling average charts
-    - **Delete Best Lap (Admin Only)** (`race_ui.py:3097-3167`):
+    - **All Laps View** (when single team selected):
+      - Shows all laps for selected team with pagination (50 laps per page)
+      - Displays lap number, time, session, date, position, pit stops
+      - "View Full Profile" button to navigate to team profile page
+    - **Delete Best Lap (Admin Only)**:
       - Trash icon (🗑️) next to each team's best lap in top teams table
       - Only visible to users with `role === 'admin'`
       - Confirmation dialog before deletion
@@ -380,7 +406,64 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
       - Preserves full data history for audit trail
       - Second-best lap automatically becomes new best lap on next query
       - Use case: Remove outlier lap times from track cuts or data errors
-      - Endpoint: `POST /api/team-data/delete-best-lap` (requires admin auth)
+    - **Mass Delete Laps (Admin Only)**:
+      - Delete all laps under a time threshold (track-wide)
+      - Two modes: individual laps (lap_history) or best lap records (lap_times)
+      - Useful for cleaning up data errors (e.g., laps under 50 seconds)
+      - Admin-only UI section with threshold input and confirmation
+
+18. **Team Profile Pages** (`/team/[teamName]`)(`racing-analyzer/app/team/[teamName]/page.tsx`, `race_ui.py`):
+    - **Cross-Track Session History**: Shows all sessions for a team across ALL tracks
+    - **Flexible Name Matching**: Finds teams even with different name formats
+      - Example: "DELVENNE Simon" at Mariembourg, "SIMON DELVENNE" at Eupen
+      - Backend tokenizes names and matches all words regardless of order
+    - **Overall Statistics**:
+      - Total sessions across all tracks
+      - Total laps completed
+      - Number of tracks raced
+      - Best lap overall (across all tracks)
+    - **Sortable Session Table**:
+      - Sort by date, track, total laps, best lap
+      - Track filter dropdown to focus on specific track
+      - Shows session date, track name, lap count, best/avg laps
+    - **Clickable Session Rows**:
+      - Click any session to expand and view all lap details
+      - Shows lap-by-lap data: lap #, time, position, pit stops, timestamp
+      - Lap numbers calculated chronologically (ROW_NUMBER) since database stores 0
+      - Inline scrollable view (max 400px height)
+      - Click again to collapse
+    - **Navigation**:
+      - Accessible via 📊 icon in top teams table
+      - "View Full Profile" button in all laps section
+      - Back button to return to data page
+
+19. **Database Optimizations** (`multi_track_manager.py`):
+    - **In-Memory Caching**:
+      - Previous kart state cached per session to eliminate repeated DB queries
+      - Cache initialized once per session from database
+      - Reduces ~60 database queries per minute per track during active racing
+      - Auto-cleanup keeps only last 2 sessions in cache (memory efficient)
+    - **WAL Mode**: Write-Ahead Logging enabled on all databases
+      - Better concurrent read/write performance
+      - Multiple readers can access while writer updates
+      - Set via `PRAGMA journal_mode=WAL` and `PRAGMA busy_timeout=5000`
+    - **Database Indexes**: 7 indexes per track database for optimal query performance
+      - `lap_times`: session_id+timestamp, session_id+kart_number, team_name+session_id, team_name+best_lap
+      - `lap_history`: session_id+team_name+timestamp, session_id+kart_number+timestamp, team_name+session_id
+    - **Transaction Optimization**:
+      - Single transaction for all read/write operations
+      - Reduced connection overhead
+      - Improved data consistency
+    - **Performance Results**:
+      - Cross-track sessions query: ~76ms
+      - Session lap details: ~28ms
+      - Top teams query: ~6s (complex aggregation, acceptable for one-time load)
+
+20. **Dashboard Navigation**:
+    - **Link to Data Page**: Blue button "📊 Team Data Analysis" in track selector section
+      - One-click access to team analysis features
+      - Positioned below session status indicator
+      - Themed styling (adapts to light/dark mode)
 
 ## Multi-Track System Flow
 

@@ -33,7 +33,10 @@ class MultiTrackManager:
         db_path = self.get_database_path(track_id)
 
         try:
-            with sqlite3.connect(db_path) as conn:
+            with sqlite3.connect(db_path, timeout=5.0) as conn:
+                # Enable WAL mode for better concurrent access
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=5000")
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS race_sessions (
                         session_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,19 +79,41 @@ class MultiTrackManager:
                 ''')
 
                 # Create indices for better query performance
+                # lap_times table indexes
                 conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_lap_times_session
-                    ON lap_times(session_id, timestamp)
+                    CREATE INDEX IF NOT EXISTS idx_lap_times_session_time
+                    ON lap_times(session_id, timestamp DESC)
                 ''')
 
                 conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_lap_times_team
+                    CREATE INDEX IF NOT EXISTS idx_lap_times_session_kart
+                    ON lap_times(session_id, kart_number, timestamp DESC)
+                ''')
+
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_lap_times_team_session
                     ON lap_times(team_name, session_id)
                 ''')
 
                 conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_lap_history_session
-                    ON lap_history(session_id, lap_number)
+                    CREATE INDEX IF NOT EXISTS idx_lap_times_team_best
+                    ON lap_times(team_name, best_lap)
+                ''')
+
+                # lap_history table indexes
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_lap_history_session_team
+                    ON lap_history(session_id, team_name, timestamp ASC)
+                ''')
+
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_lap_history_session_kart
+                    ON lap_history(session_id, kart_number, timestamp ASC)
+                ''')
+
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_lap_history_team
+                    ON lap_history(team_name, session_id)
                 ''')
 
             self.logger.info(f"Initialized database for track {track_id}: {db_path}")
@@ -272,6 +297,17 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
         self.monitor_thread = None
         self.monitor_stop_event = threading.Event()
 
+        # Automatic session detection
+        self.current_session_id = None
+        self.current_leader_lap = None
+        self.last_lap_change_time = None
+        self.STALE_LAP_THRESHOLD = 300  # 5 minutes in seconds
+        self.session_ended = False  # Track if current session has ended
+
+        # In-memory cache for previous state (performance optimization)
+        # Structure: {session_id: {kart_number: {'RunTime': int, 'last_lap': str, 'best_lap': str, 'pit_stops': int}}}
+        self.previous_state_cache = {}
+
         # Now call parent init which will call setup_database()
         super().__init__()
 
@@ -280,6 +316,17 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
         # Database is already initialized by MultiTrackManager
         # Don't create tables here, just log
         self.logger.debug(f"Using database: {self.db_path}")
+
+    def cleanup_old_cache_sessions(self, keep_last_n=2):
+        """Clean up old session data from cache to prevent memory bloat"""
+        if len(self.previous_state_cache) > keep_last_n:
+            # Keep only the most recent N sessions
+            sessions_to_keep = sorted(self.previous_state_cache.keys(), reverse=True)[:keep_last_n]
+            sessions_to_remove = [sid for sid in self.previous_state_cache.keys() if sid not in sessions_to_keep]
+            for sid in sessions_to_remove:
+                del self.previous_state_cache[sid]
+            if sessions_to_remove:
+                self.logger.debug(f"Track {self.track_id}: Cleaned up {len(sessions_to_remove)} old sessions from cache")
 
     def start_session_monitoring(self):
         """Start periodic check for session activity in a background thread"""
@@ -370,8 +417,7 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
 
     async def start_monitoring(self, ws_url: str):
         """Start WebSocket monitoring with message loop and session tracking"""
-        # Create/get session ID
-        session_id = self.create_or_get_session(f"{self.track_name} - Live Session", self.track_name)
+        # Session ID will be determined dynamically based on lap progression
         reconnect_delay = 5
 
         # Start session monitoring thread
@@ -477,7 +523,20 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                         # After processing all lines, store the data
                         df = self.get_current_standings()
                         if not df.empty:
-                            self.store_lap_data(session_id, df)
+                            # Determine session_id based on leader's lap progression
+                            leader_gap = ''
+                            if 'Position' in df.columns and 'Gap' in df.columns:
+                                leader_row = df[df['Position'].astype(str) == '1']
+                                if not leader_row.empty:
+                                    leader_gap = leader_row.iloc[0].get('Gap', '')
+
+                            session_id = self.check_and_update_session(leader_gap)
+
+                            # Only store data if we have an active session
+                            if session_id is not None:
+                                self.store_lap_data(session_id, df)
+                            else:
+                                self.logger.debug(f"Track {self.track_id}: No active session, waiting for Tour 1...")
 
                     except Exception as e:
                         self.logger.error(f"Track {self.track_id}: Error processing message: {e}")
@@ -512,9 +571,14 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
             await super().cleanup()
 
     def get_db_connection(self):
-        """Get connection to track-specific database"""
+        """Get connection to track-specific database with WAL mode and timeout"""
         try:
-            return sqlite3.connect(self.db_path)
+            conn = sqlite3.connect(self.db_path, timeout=5.0)
+            # Enable WAL mode for better concurrent access
+            conn.execute("PRAGMA journal_mode=WAL")
+            # Set busy timeout to 5 seconds
+            conn.execute("PRAGMA busy_timeout=5000")
+            return conn
         except Exception as e:
             self.logger.error(f"Error connecting to database {self.db_path}: {e}")
             raise
@@ -531,18 +595,36 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
         current_records = []
         lap_history_records = []
 
-        try:
-            with self.get_db_connection() as conn:
-                import pandas as pd
-                previous_state = pd.read_sql_query('''
-                    SELECT kart_number, RunTime, last_lap, best_lap, pit_stops
-                    FROM lap_times
-                    WHERE session_id = ?
-                    ORDER BY timestamp DESC
-                ''', conn, params=(session_id,))
-        except:
-            import pandas as pd
-            previous_state = pd.DataFrame()
+        # Get previous state from cache, initialize if needed
+        if session_id not in self.previous_state_cache:
+            # First time seeing this session, initialize cache from DB
+            try:
+                with self.get_db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        SELECT DISTINCT kart_number, RunTime, last_lap, best_lap, pit_stops
+                        FROM lap_times
+                        WHERE session_id = ?
+                        ORDER BY timestamp DESC
+                    ''', (session_id,))
+                    rows = cursor.fetchall()
+                    self.previous_state_cache[session_id] = {}
+                    for row in rows:
+                        kart_num, runtime, last_lap, best_lap, pit_stops = row
+                        # Only keep the most recent state for each kart
+                        if kart_num not in self.previous_state_cache[session_id]:
+                            self.previous_state_cache[session_id][kart_num] = {
+                                'RunTime': runtime,
+                                'last_lap': last_lap,
+                                'best_lap': best_lap,
+                                'pit_stops': pit_stops
+                            }
+                    self.logger.debug(f"Track {self.track_id}: Initialized cache for session {session_id} with {len(self.previous_state_cache[session_id])} karts")
+            except Exception as e:
+                self.logger.warning(f"Track {self.track_id}: Error initializing cache: {e}")
+                self.previous_state_cache[session_id] = {}
+
+        previous_state = self.previous_state_cache.get(session_id, {})
 
         for _, row in df.iterrows():
             try:
@@ -578,25 +660,32 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                     pit_stops
                 ))
 
-                # Check for new laps
-                if not previous_state.empty:
-                    prev_kart_state = previous_state[previous_state['kart_number'] == kart]
-                    if not prev_kart_state.empty:
-                        prev_runtime = prev_kart_state.iloc[0]['RunTime']
-                        prev_last_lap = prev_kart_state.iloc[0]['last_lap']
-                        current_last_lap = row.get('Last Lap', '')
+                # Check for new laps using in-memory cache
+                if kart and kart in previous_state:
+                    prev_runtime = previous_state[kart]['RunTime']
+                    prev_last_lap = previous_state[kart]['last_lap']
+                    current_last_lap = row.get('Last Lap', '')
 
-                        if runtime != prev_runtime and current_last_lap and current_last_lap != prev_last_lap:
-                            lap_history_records.append((
-                                session_id,
-                                timestamp,
-                                kart,
-                                row.get('Team', ''),
-                                runtime,
-                                current_last_lap,
-                                position,
-                                pit_stops  # Use the already parsed pit_stops value
-                            ))
+                    if runtime != prev_runtime and current_last_lap and current_last_lap != prev_last_lap:
+                        lap_history_records.append((
+                            session_id,
+                            timestamp,
+                            kart,
+                            row.get('Team', ''),
+                            runtime,
+                            current_last_lap,
+                            position,
+                            pit_stops  # Use the already parsed pit_stops value
+                        ))
+
+                # Update cache with current state
+                if kart:
+                    self.previous_state_cache[session_id][kart] = {
+                        'RunTime': runtime,
+                        'last_lap': row.get('Last Lap', ''),
+                        'best_lap': row.get('Best Lap', ''),
+                        'pit_stops': pit_stops
+                    }
 
             except Exception as e:
                 self.logger.warning(f"Track {self.track_id}: Error processing row: {e}")
@@ -625,6 +714,10 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
 
                     conn.commit()
                     self.logger.debug(f"Track {self.track_id}: Stored {len(current_records)} records, {len(lap_history_records)} lap history records")
+
+                # Periodically clean up old session caches (every 10 commits)
+                if len(current_records) > 0 and session_id % 10 == 0:
+                    self.cleanup_old_cache_sessions(keep_last_n=2)
 
                 # Broadcast update to Socket.IO room for this track
                 if self.socketio:
@@ -758,6 +851,93 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
 
         except Exception as e:
             self.logger.error(f"Error emitting team-specific updates: {e}")
+
+    def extract_lap_number(self, gap_value: str) -> Optional[int]:
+        """Extract lap number from gap field (e.g., 'Tour 5' -> 5)"""
+        if not gap_value:
+            return None
+
+        try:
+            if gap_value.startswith('Tour '):
+                return int(gap_value[5:])
+            elif gap_value.startswith('Lap '):
+                return int(gap_value[4:])
+        except (ValueError, IndexError):
+            pass
+
+        return None
+
+    def check_and_update_session(self, leader_gap: str) -> Optional[int]:
+        """
+        Check if session should change based on leader's lap number.
+        Returns the current session_id to use for data storage, or None if no session should be active.
+        """
+        current_lap = self.extract_lap_number(leader_gap)
+        current_time = datetime.now()
+
+        # If we can't determine lap number, don't create a session
+        # Wait until we see Tour 1 to start tracking
+        if current_lap is None:
+            return self.current_session_id  # Return existing session or None
+
+        # Detect new session start (lap resets to 1)
+        if current_lap == 1:
+            # Only create new session if:
+            # 1. No current session exists, OR
+            # 2. Previous lap was > 1 (actual reset), OR
+            # 3. Current session was marked as ended
+            if (self.current_session_id is None or
+                (self.current_leader_lap is not None and self.current_leader_lap > 1) or
+                self.session_ended):
+
+                self.logger.info(f"Track {self.track_id}: Detected new session start (lap reset to 1)")
+                self.current_session_id = self.create_new_session()
+                self.current_leader_lap = 1
+                self.last_lap_change_time = current_time
+                self.session_ended = False
+                return self.current_session_id
+
+        # Track lap progression
+        if current_lap != self.current_leader_lap:
+            # Lap number changed - racing is active
+            self.current_leader_lap = current_lap
+            self.last_lap_change_time = current_time
+            self.session_ended = False
+        else:
+            # Same lap number - check if it's been stale too long
+            if self.last_lap_change_time:
+                time_on_same_lap = (current_time - self.last_lap_change_time).total_seconds()
+
+                if time_on_same_lap > self.STALE_LAP_THRESHOLD and not self.session_ended:
+                    self.logger.info(f"Track {self.track_id}: Session ended (lap {current_lap} stale for {time_on_same_lap:.0f}s)")
+                    self.session_ended = True
+
+        # Return current session (may be None if no session started yet)
+        return self.current_session_id
+
+    def create_new_session(self) -> int:
+        """Create a new session and return its ID"""
+        try:
+            with self.get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                timestamp = datetime.now().isoformat()
+                session_name = f"{self.track_name} - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+                cursor.execute('''
+                    INSERT INTO race_sessions (start_time, name, track)
+                    VALUES (?, ?, ?)
+                ''', (timestamp, session_name, self.track_name))
+
+                session_id = cursor.lastrowid
+                conn.commit()
+
+                self.logger.info(f"Track {self.track_id}: Created new session {session_id}: {session_name}")
+                return session_id
+
+        except Exception as e:
+            self.logger.error(f"Track {self.track_id}: Error creating new session: {e}")
+            return 1  # Fallback
 
     def create_or_get_session(self, session_name: str, track_name: str) -> int:
         """Override to use track-specific database"""

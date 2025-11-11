@@ -51,6 +51,14 @@ interface CommonSession {
   teams_present: number;
 }
 
+interface AllSession {
+  session_id: number;
+  start_time: string;
+  name: string;
+  track: string;
+  teams_count: number;
+}
+
 interface LapDetail {
   lap_number: number;
   lap_time: number;
@@ -83,10 +91,22 @@ interface Track {
 interface TopTeam {
   name: string;
   best_lap_time: string;
+  best_lap_timestamp?: string;
   avg_lap_seconds: number;
   total_laps: number;
   sessions_count: number;
   classes: string;
+}
+
+interface LapData {
+  lap_number: number;
+  lap_time: string;
+  session_id: number;
+  session_name: string;
+  session_date: string;
+  timestamp: string;
+  pit_this_lap: boolean;
+  position_after_lap: number;
 }
 
 export default function DataPage() {
@@ -95,6 +115,8 @@ export default function DataPage() {
 
   const [tracks, setTracks] = useState<Track[]>([]);
   const [selectedTrackId, setSelectedTrackId] = useState<number>(1);
+  const [allSessions, setAllSessions] = useState<AllSession[]>([]);
+  const [globalSessionFilter, setGlobalSessionFilter] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Team[]>([]);
   const [searching, setSearching] = useState(false);
@@ -116,6 +138,19 @@ export default function DataPage() {
   const [teamToDelete, setTeamToDelete] = useState<{name: string, bestLap: string} | null>(null);
   const [deletingLap, setDeletingLap] = useState(false);
 
+  // Mass delete state
+  const [massDeleteThreshold, setMassDeleteThreshold] = useState<number>(0);
+  const [massDeleteType, setMassDeleteType] = useState<string>('lap_history');
+  const [massDeleting, setMassDeleting] = useState(false);
+  const [massDeleteResult, setMassDeleteResult] = useState<{success: boolean; message: string; rows_affected?: number; delete_type?: string; threshold_seconds?: number} | null>(null);
+
+  // All laps state
+  const [allLaps, setAllLaps] = useState<LapData[]>([]);
+  const [allLapsPage, setAllLapsPage] = useState<number>(0);
+  const [allLapsPerPage] = useState<number>(50);
+  const [allLapsTotalCount, setAllLapsTotalCount] = useState<number>(0);
+  const [loadingAllLaps, setLoadingAllLaps] = useState(false);
+
   useEffect(() => {
     if (!loading && !user) {
       router.push('/login');
@@ -135,6 +170,20 @@ export default function DataPage() {
     loadTracks();
   }, []);
 
+  // Load all sessions when track changes
+  useEffect(() => {
+    const loadSessions = async () => {
+      try {
+        const result = await ApiService.getAllSessions(selectedTrackId);
+        setAllSessions(result.sessions || []);
+      } catch (error) {
+        console.error('Error loading sessions:', error);
+        setAllSessions([]);
+      }
+    };
+    loadSessions();
+  }, [selectedTrackId]);
+
   // Reset selections when track changes
   useEffect(() => {
     setSelectedTeams([]);
@@ -142,18 +191,23 @@ export default function DataPage() {
     setComparisonData([]);
     setCommonSessions([]);
     setSelectedSession(null);
+    setGlobalSessionFilter(null);
     setLapDetails({});
     setTeamStints([]);
     setSearchQuery('');
     setSearchResults([]);
   }, [selectedTrackId]);
 
-  // Load top teams when track or limit changes
+  // Load top teams when track, limit, or session filter changes
   useEffect(() => {
     const loadTopTeams = async () => {
       setLoadingTopTeams(true);
       try {
-        const result = await ApiService.getTopTeams(selectedTrackId, topTeamsLimit);
+        const result = await ApiService.getTopTeams(
+          selectedTrackId,
+          topTeamsLimit,
+          globalSessionFilter || undefined
+        );
         setTopTeams(result.teams || []);
       } catch (error) {
         console.error('Error loading top teams:', error);
@@ -164,7 +218,7 @@ export default function DataPage() {
     };
 
     loadTopTeams();
-  }, [selectedTrackId, topTeamsLimit]);
+  }, [selectedTrackId, topTeamsLimit, globalSessionFilter]);
 
   // Search teams with debounce
   useEffect(() => {
@@ -194,13 +248,36 @@ export default function DataPage() {
       if (selectedTeams.length >= 1) {
         try {
           const result = await ApiService.getCommonSessions(selectedTeams, selectedTrackId);
-          setCommonSessions(result.sessions || []);
-          // Auto-select most recent session
-          if (result.sessions && result.sessions.length > 0) {
-            setSelectedSession(result.sessions[0].session_id);
+          let sessions = result.sessions || [];
+
+          // If globalSessionFilter is set, ensure it's in the list
+          if (globalSessionFilter) {
+            const filterSessionExists = sessions.some((s: CommonSession) => s.session_id === globalSessionFilter);
+            if (!filterSessionExists) {
+              // Find the filtered session from allSessions and add it
+              const filteredSession = allSessions.find((s: AllSession) => s.session_id === globalSessionFilter);
+              if (filteredSession) {
+                sessions = [{
+                  session_id: filteredSession.session_id,
+                  start_time: filteredSession.start_time,
+                  name: filteredSession.name,
+                  track: filteredSession.track,
+                  teams_present: filteredSession.teams_count
+                }, ...sessions];
+              }
+            }
+            // Auto-select the filtered session
+            setSelectedSession(globalSessionFilter);
           } else {
-            setSelectedSession(null);
+            // Auto-select most recent session
+            if (sessions.length > 0) {
+              setSelectedSession(sessions[0].session_id);
+            } else {
+              setSelectedSession(null);
+            }
           }
+
+          setCommonSessions(sessions);
         } catch (error) {
           console.error('Error fetching common sessions:', error);
           setCommonSessions([]);
@@ -213,7 +290,7 @@ export default function DataPage() {
     };
 
     fetchCommonSessions();
-  }, [selectedTeams, selectedTrackId]);
+  }, [selectedTeams, selectedTrackId, globalSessionFilter, allSessions]);
 
   // Refetch stats when session changes
   useEffect(() => {
@@ -331,12 +408,85 @@ export default function DataPage() {
     setTeamToDelete(null);
   };
 
+  // Mass delete handler
+  const handleMassDelete = async () => {
+    if (!massDeleteThreshold || massDeleteThreshold <= 0) {
+      alert('Please enter a valid threshold value (greater than 0 seconds)');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete all laps UNDER ${massDeleteThreshold} seconds?\n\n` +
+      `Delete Mode: ${massDeleteType === 'lap_history' ? 'Individual Lap Records' : 'Best Lap Records'}\n` +
+      `Track: ${tracks.find(t => t.id === selectedTrackId)?.track_name || 'Unknown'}\n\n` +
+      `This action affects the entire track and CANNOT be undone!`
+    );
+
+    if (!confirmed) return;
+
+    setMassDeleting(true);
+    setMassDeleteResult(null);
+
+    try {
+      const result = await ApiService.massDeleteLaps(
+        selectedTrackId,
+        massDeleteThreshold,
+        massDeleteType
+      );
+      setMassDeleteResult(result);
+
+      // Refresh top teams list
+      const topTeamsResult = await ApiService.getTopTeams(selectedTrackId, topTeamsLimit);
+      setTopTeams(topTeamsResult.teams || []);
+    } catch (error) {
+      setMassDeleteResult({
+        success: false,
+        message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    } finally {
+      setMassDeleting(false);
+    }
+  };
+
+  // Fetch all laps when single team is selected
+  useEffect(() => {
+    const fetchAllLaps = async () => {
+      if (selectedTeams.length === 1) {
+        setLoadingAllLaps(true);
+        try {
+          const result = await ApiService.getAllLaps(
+            selectedTeams[0],
+            selectedTrackId,
+            globalSessionFilter || undefined,
+            allLapsPerPage,
+            allLapsPage * allLapsPerPage
+          );
+          setAllLaps(result.laps || []);
+          setAllLapsTotalCount(result.total_laps || 0);
+        } catch (error) {
+          console.error('Error fetching all laps:', error);
+          setAllLaps([]);
+        } finally {
+          setLoadingAllLaps(false);
+        }
+      } else {
+        setAllLaps([]);
+        setAllLapsTotalCount(0);
+        setAllLapsPage(0);
+      }
+    };
+
+    fetchAllLaps();
+  }, [selectedTeams, selectedTrackId, globalSessionFilter, allLapsPage, allLapsPerPage]);
+
   // Fetch detailed lap data when session and teams change
   useEffect(() => {
     const fetchLapDetails = async () => {
-      if (selectedTeams.length >= 2 && selectedSession) {
+      if (selectedTeams.length >= 2) {
         try {
-          const result = await ApiService.getLapDetails(selectedTeams, selectedSession, selectedTrackId);
+          // Use selectedSession if available, otherwise use globalSessionFilter, otherwise undefined (all sessions)
+          const sessionToUse = selectedSession || globalSessionFilter || undefined;
+          const result = await ApiService.getLapDetails(selectedTeams, sessionToUse, selectedTrackId);
           setLapDetails(result.lap_details || {});
           setTeamStints(result.stints || []);
 
@@ -368,7 +518,7 @@ export default function DataPage() {
     };
 
     fetchLapDetails();
-  }, [selectedTeams, selectedSession, selectedTrackId]);
+  }, [selectedTeams, selectedSession, globalSessionFilter, selectedTrackId]);
 
   // Handle stint selection
   const handleStintSelection = (stintKey: string) => {
@@ -454,6 +604,28 @@ export default function DataPage() {
           </select>
         </div>
 
+        {/* Session Selector */}
+        <div className="bg-gray-800 rounded-lg p-6 mb-6">
+          <h2 className="text-xl font-semibold text-white mb-4">Filter by Session (Optional)</h2>
+          <select
+            value={globalSessionFilter || ''}
+            onChange={(e) => setGlobalSessionFilter(e.target.value ? parseInt(e.target.value) : null)}
+            className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All Sessions</option>
+            {allSessions.map((session) => (
+              <option key={session.session_id} value={session.session_id}>
+                Session {session.session_id} - {session.name} ({session.teams_count} teams)
+              </option>
+            ))}
+          </select>
+          {globalSessionFilter && (
+            <p className="mt-2 text-sm text-gray-400">
+              Filtering all data by selected session. Clear to view all sessions.
+            </p>
+          )}
+        </div>
+
         {/* Search Section */}
         <div className="bg-gray-800 rounded-lg p-6 mb-6">
           <h2 className="text-xl font-semibold text-white mb-4">Search Teams</h2>
@@ -512,6 +684,7 @@ export default function DataPage() {
                     <th className="px-4 py-3 text-gray-300">Rank</th>
                     <th className="px-4 py-3 text-gray-300">Team Name</th>
                     <th className="px-4 py-3 text-gray-300">Best Lap</th>
+                    <th className="px-4 py-3 text-gray-300">Best Lap Set</th>
                     <th className="px-4 py-3 text-gray-300">Avg Lap</th>
                     <th className="px-4 py-3 text-gray-300">Total Laps</th>
                     <th className="px-4 py-3 text-gray-300">Sessions</th>
@@ -534,16 +707,39 @@ export default function DataPage() {
                         }`}
                       >
                         <td className="px-4 py-3 text-white font-medium">{index + 1}</td>
-                        <td
-                          className="px-4 py-3 text-white capitalize flex items-center gap-2 cursor-pointer"
-                          onClick={() => !isSelected && addTeamToComparison(team.name)}
-                        >
-                          {team.name}
-                          {isSelected && (
-                            <span className="text-green-400 text-xs">✓</span>
-                          )}
+                        <td className="px-4 py-3 text-white capitalize">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="cursor-pointer hover:text-blue-300"
+                              onClick={() => !isSelected && addTeamToComparison(team.name)}
+                            >
+                              {team.name}
+                            </span>
+                            {isSelected && (
+                              <span className="text-green-400 text-xs">✓</span>
+                            )}
+                            <button
+                              onClick={() => router.push(`/team/${encodeURIComponent(team.name)}`)}
+                              className="text-blue-400 hover:text-blue-300 text-xs ml-2"
+                              title="View team profile"
+                            >
+                              📊
+                            </button>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-blue-300">{team.best_lap_time}</td>
+                        <td className="px-4 py-3 text-gray-400 text-xs">
+                          {team.best_lap_timestamp
+                            ? new Date(team.best_lap_timestamp).toLocaleString('en-US', {
+                                month: '2-digit',
+                                day: '2-digit',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })
+                            : 'N/A'
+                          }
+                        </td>
                         <td className="px-4 py-3 text-green-300">
                           {team.avg_lap_seconds > 0 ? formatLapTime(team.avg_lap_seconds) : 'N/A'}
                         </td>
@@ -577,6 +773,83 @@ export default function DataPage() {
           )}
         </div>
 
+        {/* Mass Delete Section - Admin Only */}
+        {user?.role === 'admin' && (
+          <div className="bg-gray-800 rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-semibold text-white mb-4">
+              Mass Delete Laps (Track-Wide)
+            </h2>
+            <p className="text-gray-400 text-sm mb-4">
+              Delete all lap times <strong>below</strong> a specified threshold for this track.
+              This is useful for removing invalid data caused by track cuts or data errors.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div>
+                <label className="text-gray-400 text-sm mb-2 block">
+                  Threshold (seconds) - Delete laps UNDER this value
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  placeholder="e.g., 55.0"
+                  value={massDeleteThreshold || ''}
+                  onChange={(e) => setMassDeleteThreshold(parseFloat(e.target.value) || 0)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Laps under {massDeleteThreshold || 0}s will be deleted
+                </p>
+              </div>
+
+              <div>
+                <label className="text-gray-400 text-sm mb-2 block">Delete Type</label>
+                <select
+                  value={massDeleteType}
+                  onChange={(e) => setMassDeleteType(e.target.value)}
+                  className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="lap_history">Individual Laps (lap_history)</option>
+                  <option value="best_laps">Best Lap Records (lap_times)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  {massDeleteType === 'lap_history'
+                    ? 'Deletes individual lap completion records'
+                    : 'Nullifies best lap values in lap_times table'}
+                </p>
+              </div>
+
+              <div className="flex items-end">
+                <button
+                  onClick={handleMassDelete}
+                  disabled={!massDeleteThreshold || massDeleteThreshold <= 0 || massDeleting}
+                  className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {massDeleting ? 'Deleting...' : 'Delete Laps'}
+                </button>
+              </div>
+            </div>
+
+            {massDeleteResult && (
+              <div className={`mt-4 p-4 rounded-lg ${
+                massDeleteResult.success
+                  ? 'bg-green-900 text-green-200'
+                  : 'bg-red-900 text-red-200'
+              }`}>
+                <p className="font-semibold">{massDeleteResult.message}</p>
+                {massDeleteResult.rows_affected !== undefined && (
+                  <p className="text-sm mt-1">
+                    Rows affected: {massDeleteResult.rows_affected}
+                    {massDeleteResult.delete_type && ` (${massDeleteResult.delete_type})`}
+                    {massDeleteResult.threshold_seconds && ` | Threshold: ${massDeleteResult.threshold_seconds}s`}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Selected Teams */}
         {selectedTeams.length > 0 && (
           <div className="bg-gray-800 rounded-lg p-6 mb-6">
@@ -599,6 +872,17 @@ export default function DataPage() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* No Common Sessions Message */}
+        {selectedTeams.length >= 2 && commonSessions.length === 0 && (
+          <div className="bg-yellow-900 border border-yellow-600 rounded-lg p-4 mb-6">
+            <p className="text-yellow-200">
+              <strong>Note:</strong> These teams have not raced together in the same session.
+              Showing comparison data from all their sessions combined.
+              {globalSessionFilter && " (filtered by selected session above)"}
+            </p>
           </div>
         )}
 
@@ -674,6 +958,107 @@ export default function DataPage() {
           </div>
         )}
 
+        {/* All Laps Section - Single Team Only */}
+        {selectedTeams.length === 1 && (
+          <div className="bg-gray-800 rounded-lg p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-semibold text-white">
+                All Laps - {selectedTeams[0]} ({allLapsTotalCount} total)
+              </h2>
+              <button
+                onClick={() => router.push(`/team/${encodeURIComponent(selectedTeams[0])}`)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors flex items-center gap-2"
+              >
+                📊 View Full Profile
+              </button>
+            </div>
+
+            {loadingAllLaps ? (
+              <div className="text-center text-gray-400 py-8">
+                Loading laps...
+              </div>
+            ) : allLaps.length > 0 ? (
+              <>
+                <div className="overflow-x-auto mb-4">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-700">
+                      <tr className="text-left border-b border-gray-600">
+                        <th className="px-4 py-3 text-gray-300">Lap #</th>
+                        <th className="px-4 py-3 text-gray-300">Lap Time</th>
+                        <th className="px-4 py-3 text-gray-300">Session</th>
+                        <th className="px-4 py-3 text-gray-300">Date</th>
+                        <th className="px-4 py-3 text-gray-300">Position</th>
+                        <th className="px-4 py-3 text-gray-300">Pit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allLaps.map((lap, index) => (
+                        <tr
+                          key={`${lap.session_id}-${lap.lap_number}-${index}`}
+                          className="border-b border-gray-700 hover:bg-gray-700 transition-colors"
+                        >
+                          <td className="px-4 py-3 text-white">{lap.lap_number}</td>
+                          <td className="px-4 py-3 text-blue-300">{lap.lap_time}</td>
+                          <td className="px-4 py-3 text-gray-400">{lap.session_name}</td>
+                          <td className="px-4 py-3 text-gray-400 text-xs">
+                            {lap.session_date
+                              ? new Date(lap.session_date).toLocaleDateString('en-US', {
+                                  month: '2-digit',
+                                  day: '2-digit',
+                                  year: 'numeric'
+                                })
+                              : 'N/A'
+                            }
+                          </td>
+                          <td className="px-4 py-3 text-yellow-300">
+                            {lap.position_after_lap ? `P${lap.position_after_lap}` : 'N/A'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {lap.pit_this_lap ? (
+                              <span className="text-orange-400">🛠️</span>
+                            ) : (
+                              <span className="text-gray-600">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {allLapsTotalCount > allLapsPerPage && (
+                  <div className="flex items-center justify-between">
+                    <div className="text-gray-400 text-sm">
+                      Showing {allLapsPage * allLapsPerPage + 1} - {Math.min((allLapsPage + 1) * allLapsPerPage, allLapsTotalCount)} of {allLapsTotalCount} laps
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setAllLapsPage(Math.max(0, allLapsPage - 1))}
+                        disabled={allLapsPage === 0}
+                        className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        onClick={() => setAllLapsPage(allLapsPage + 1)}
+                        disabled={(allLapsPage + 1) * allLapsPerPage >= allLapsTotalCount}
+                        className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center text-gray-400 py-8">
+                No lap data found for this team.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Comparison Charts */}
         {comparisonData.length >= 2 && (
           <div className="space-y-6">
@@ -714,7 +1099,7 @@ export default function DataPage() {
             </div>
 
             {/* Lap Times Comparison with Stint Selector */}
-            {Object.keys(lapDetails).length > 0 && selectedSession && (
+            {Object.keys(lapDetails).length > 0 && (
               <>
                 {/* Stint Selector */}
                 <div className="bg-gray-800 rounded-lg p-6">
@@ -796,12 +1181,12 @@ export default function DataPage() {
                       <YAxis
                         stroke="#9CA3AF"
                         domain={['dataMin - 2', 'dataMax + 2']}
-                        label={{ value: 'Lap Time (seconds)', angle: -90, position: 'insideLeft' }}
+                        label={{ value: 'Lap Time', angle: -90, position: 'insideLeft' }}
                       />
                       <Tooltip
                         contentStyle={{ backgroundColor: '#1F2937', border: 'none' }}
                         labelStyle={{ color: '#fff' }}
-                        formatter={(value: number) => [`${value.toFixed(3)}s`, 'Lap Time']}
+                        formatter={(value: number) => [formatLapTime(value), 'Lap Time']}
                       />
                       <Legend />
                       {Object.entries(lapDetails).map(([teamName, laps], idx) => {
@@ -845,12 +1230,12 @@ export default function DataPage() {
                       <YAxis
                         stroke="#9CA3AF"
                         domain={['dataMin - 1', 'dataMax + 1']}
-                        label={{ value: 'Average Lap Time (seconds)', angle: -90, position: 'insideLeft' }}
+                        label={{ value: 'Average Lap Time', angle: -90, position: 'insideLeft' }}
                       />
                       <Tooltip
                         contentStyle={{ backgroundColor: '#1F2937', border: 'none' }}
                         labelStyle={{ color: '#fff' }}
-                        formatter={(value: number) => [`${value.toFixed(3)}s`, '10-Lap Avg']}
+                        formatter={(value: number) => [formatLapTime(value), '10-Lap Avg']}
                       />
                       <Legend />
                       {Object.entries(lapDetails).map(([teamName, laps], idx) => {

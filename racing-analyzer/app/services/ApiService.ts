@@ -272,15 +272,32 @@ export const ApiService = {
     }
   },
 
-  getTopTeams: async (trackId: number = 1, limit: number = 10) => {
+  getTopTeams: async (trackId: number = 1, limit: number = 10, sessionId?: number) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/team-data/top-teams?track_id=${trackId}&limit=${limit}`);
+      let url = `${API_BASE_URL}/api/team-data/top-teams?track_id=${trackId}&limit=${limit}`;
+      if (sessionId) {
+        url += `&session_id=${sessionId}`;
+      }
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to get top teams');
       }
       return await response.json();
     } catch (error) {
       console.error('Error getting top teams:', error);
+      throw error;
+    }
+  },
+
+  getAllSessions: async (trackId: number = 1) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/team-data/sessions?track_id=${trackId}`);
+      if (!response.ok) {
+        throw new Error('Failed to get sessions');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error getting sessions:', error);
       throw error;
     }
   },
@@ -347,14 +364,22 @@ export const ApiService = {
     }
   },
 
-  getLapDetails: async (teamNames: string[], sessionId: number, trackId: number = 1) => {
+  getLapDetails: async (teamNames: string[], sessionId?: number, trackId: number = 1) => {
     try {
+      const body: { teams: string[]; track_id: number; session_id?: number } = {
+        teams: teamNames,
+        track_id: trackId
+      };
+      if (sessionId !== undefined) {
+        body.session_id = sessionId;
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/team-data/lap-details`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ teams: teamNames, session_id: sessionId, track_id: trackId }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         throw new Error('Failed to get lap details');
@@ -383,6 +408,115 @@ export const ApiService = {
       return await response.json();
     } catch (error) {
       console.error('Error deleting best lap:', error);
+      throw error;
+    }
+  },
+
+  massDeleteLaps: async (trackId: number, thresholdSeconds: number, deleteType: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/team-data/mass-delete-laps`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          track_id: trackId,
+          threshold_seconds: thresholdSeconds,
+          delete_type: deleteType
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to mass delete laps');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error mass deleting laps:', error);
+      throw error;
+    }
+  },
+
+  getAllLaps: async (teamName: string, trackId: number, sessionId?: number, limit: number = 50, offset: number = 0) => {
+    try {
+      const params = new URLSearchParams({
+        team: teamName,
+        track_id: trackId.toString(),
+        limit: limit.toString(),
+        offset: offset.toString()
+      });
+
+      if (sessionId) {
+        params.append('session_id', sessionId.toString());
+      }
+
+      const response = await fetch(`${API_BASE_URL}/api/team-data/all-laps?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch all laps');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching all laps:', error);
+      throw error;
+    }
+  },
+
+  getCrossTrackSessions: async (teamName: string) => {
+    try {
+      const params = new URLSearchParams({
+        team: teamName
+      });
+
+      const response = await fetch(`${API_BASE_URL}/api/team-data/cross-track-sessions?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch cross-track sessions');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching cross-track sessions:', error);
+      throw error;
+    }
+  },
+
+  getSessionLaps: async (teamName: string, trackId: number, sessionId: number) => {
+    try {
+      const params = new URLSearchParams({
+        team: teamName,
+        track_id: trackId.toString(),
+        session_id: sessionId.toString()
+      });
+
+      const response = await fetch(`${API_BASE_URL}/api/team-data/session-laps?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch session laps');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching session laps:', error);
       throw error;
     }
   }

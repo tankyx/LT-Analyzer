@@ -2337,10 +2337,17 @@ def get_common_sessions():
             WITH team_sessions AS (
                 SELECT DISTINCT
                     lt.session_id,
-                    LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) as team_name
+                    CASE
+                        WHEN lt.team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
+                        ELSE LOWER(TRIM(lt.team_name))
+                    END as team_name
                 FROM lap_times lt
-                WHERE LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3))) IN ({placeholders})
-                AND lt.team_name LIKE '_ - %'
+                WHERE (
+                    CASE
+                        WHEN lt.team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
+                        ELSE LOWER(TRIM(lt.team_name))
+                    END
+                ) IN ({placeholders})
             )
             SELECT
                 rs.session_id,
@@ -2372,6 +2379,46 @@ def get_common_sessions():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/team-data/sessions', methods=['GET'])
+def get_all_sessions():
+    """Get all sessions for a track"""
+    try:
+        track_id = request.args.get('track_id', 1, type=int)  # Default to track 1
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        # Get all sessions for the track, ordered by most recent first
+        query = """
+            SELECT
+                rs.session_id,
+                rs.start_time,
+                rs.name,
+                rs.track,
+                COUNT(DISTINCT lt.team_name) as teams_count
+            FROM race_sessions rs
+            LEFT JOIN lap_times lt ON rs.session_id = lt.session_id
+            GROUP BY rs.session_id
+            ORDER BY rs.start_time DESC
+        """
+
+        cursor.execute(query)
+        sessions = [{
+            'session_id': row[0],
+            'start_time': row[1],
+            'name': row[2],
+            'track': row[3],
+            'teams_count': row[4]
+        } for row in cursor.fetchall()]
+
+        conn.close()
+
+        return jsonify({'sessions': sessions})
+    except Exception as e:
+        print(f"Error getting sessions: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/team-data/search', methods=['GET'])
 def search_teams():
     """Search for teams by name (case-insensitive, removes class prefix)"""
@@ -2386,21 +2433,31 @@ def search_teams():
         conn = get_track_db_connection(track_id)
         cursor = conn.cursor()
 
-        # Build query to search teams, removing class prefix
+        # Build query to search teams, handling both with and without class prefix
         query = """
             SELECT DISTINCT
-                LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) as team_name_clean,
-                GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1)) as classes
+                CASE
+                    WHEN team_name LIKE '% - %' THEN TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))
+                    ELSE TRIM(team_name)
+                END as team_name_clean,
+                CASE
+                    WHEN team_name LIKE '% - %' THEN GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1))
+                    ELSE NULL
+                END as classes
             FROM lap_times
-            WHERE team_name LIKE '_ - %'
-            AND LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) LIKE ?
-            GROUP BY LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+            WHERE (
+                CASE
+                    WHEN team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                    ELSE LOWER(TRIM(team_name))
+                END
+            ) LIKE ?
+            GROUP BY team_name_clean
             ORDER BY team_name_clean
             LIMIT 20
         """
 
         cursor.execute(query, (f'%{search_query.lower()}%',))
-        teams = [{'name': row[0], 'classes': row[1]} for row in cursor.fetchall()]
+        teams = [{'name': row[0], 'classes': row[1] if row[1] else ''} for row in cursor.fetchall()]
 
         conn.close()
 
@@ -2415,6 +2472,7 @@ def get_top_teams():
     try:
         limit = request.args.get('limit', 10, type=int)
         track_id = request.args.get('track_id', 1, type=int)  # Default to track 1
+        session_id = request.args.get('session_id', None)
 
         # Validate limit
         if limit not in [10, 20, 30]:
@@ -2423,25 +2481,40 @@ def get_top_teams():
         conn = get_track_db_connection(track_id)
         cursor = conn.cursor()
 
+        # Build session filter
+        session_filter = ""
+        query_params = []
+        if session_id:
+            session_filter = "AND session_id = ?"
+            query_params.append(int(session_id))
+
         # Query to get top teams with their stats
         # Handles both formats: with class prefix "1 - TEAMNAME" and without "TEAMNAME"
         # Handles mixed best_lap formats: "MM:SS.mmm" and raw seconds
-        query = """
+        query = f"""
             WITH team_stats AS (
                 SELECT
                     CASE
-                        WHEN team_name LIKE '_ - %' THEN
+                        WHEN team_name LIKE '% - %' THEN
                             LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
                         ELSE
                             LOWER(TRIM(team_name))
                     END as team_name_clean,
+                    MAX(CASE
+                        WHEN team_name LIKE '% - %' THEN
+                            TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))
+                        ELSE
+                            TRIM(team_name)
+                    END) as team_name_display,
                     MIN(
                         CASE
                             WHEN best_lap LIKE '%:%' THEN
                                 CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
                                 CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
-                            ELSE
+                            WHEN best_lap IS NOT NULL AND best_lap != '' AND LENGTH(TRIM(best_lap)) > 0 THEN
                                 CAST(best_lap AS REAL)
+                            ELSE
+                                NULL
                         END
                     ) as best_lap_seconds,
                     COUNT(DISTINCT session_id) as sessions_count,
@@ -2451,12 +2524,13 @@ def get_top_teams():
                 AND best_lap != ''
                 AND team_name IS NOT NULL
                 AND team_name != ''
+                {session_filter}
                 GROUP BY team_name_clean
             ),
             team_laps AS (
                 SELECT
                     CASE
-                        WHEN lt.team_name LIKE '_ - %' THEN
+                        WHEN lt.team_name LIKE '% - %' THEN
                             LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
                         ELSE
                             LOWER(TRIM(lt.team_name))
@@ -2471,12 +2545,13 @@ def get_top_teams():
                 FROM lap_times lt
                 WHERE lt.team_name IS NOT NULL
                 AND lt.team_name != ''
+                {session_filter}
                 GROUP BY team_name_clean
             ),
             avg_laps AS (
                 SELECT
                     CASE
-                        WHEN team_name LIKE '_ - %' THEN
+                        WHEN team_name LIKE '% - %' THEN
                             LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
                         ELSE
                             LOWER(TRIM(team_name))
@@ -2495,24 +2570,64 @@ def get_top_teams():
                 AND last_lap LIKE '%:%'
                 AND team_name IS NOT NULL
                 AND team_name != ''
+                {session_filter}
                 GROUP BY team_name_clean
+            ),
+            best_lap_timestamps AS (
+                SELECT
+                    subq.team_name_clean,
+                    MIN(subq.timestamp) as best_lap_timestamp
+                FROM (
+                    SELECT
+                        CASE
+                            WHEN team_name LIKE '% - %' THEN
+                                LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                            ELSE
+                                LOWER(TRIM(team_name))
+                        END as team_name_clean,
+                        timestamp,
+                        CASE
+                            WHEN best_lap LIKE '%:%' THEN
+                                CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                                CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                            WHEN best_lap IS NOT NULL AND best_lap != '' AND LENGTH(TRIM(best_lap)) > 0 THEN
+                                CAST(best_lap AS REAL)
+                            ELSE
+                                NULL
+                        END as best_lap_seconds
+                    FROM lap_times
+                    WHERE best_lap IS NOT NULL
+                    AND best_lap != ''
+                    AND team_name IS NOT NULL
+                    AND team_name != ''
+                    {session_filter}
+                ) subq
+                INNER JOIN team_stats ts ON subq.team_name_clean = ts.team_name_clean
+                    AND subq.best_lap_seconds IS NOT NULL
+                    AND ts.best_lap_seconds IS NOT NULL
+                    AND ABS(subq.best_lap_seconds - ts.best_lap_seconds) < 0.01
+                GROUP BY subq.team_name_clean
             )
             SELECT
-                ts.team_name_clean,
+                ts.team_name_display,
                 ts.best_lap_seconds,
                 COALESCE(al.avg_lap_seconds, 0) as avg_lap_seconds,
                 COALESCE(tl.total_laps, 0) as total_laps,
                 ts.sessions_count,
-                ts.classes
+                ts.classes,
+                blt.best_lap_timestamp
             FROM team_stats ts
             LEFT JOIN team_laps tl ON ts.team_name_clean = tl.team_name_clean
             LEFT JOIN avg_laps al ON ts.team_name_clean = al.team_name_clean
+            LEFT JOIN best_lap_timestamps blt ON ts.team_name_clean = blt.team_name_clean
             WHERE ts.best_lap_seconds IS NOT NULL
             ORDER BY ts.best_lap_seconds ASC
             LIMIT ?
         """
 
-        cursor.execute(query, (limit,))
+        # Add limit parameter to query_params
+        query_params_with_limit = query_params * 4 + [limit]  # session_id repeated for each CTE (now 4), then limit
+        cursor.execute(query, query_params_with_limit)
         teams = []
         for row in cursor.fetchall():
             best_lap_seconds = row[1]
@@ -2530,7 +2645,8 @@ def get_top_teams():
                 'avg_lap_seconds': row[2],
                 'total_laps': row[3],
                 'sessions_count': row[4],
-                'classes': row[5]
+                'classes': row[5],
+                'best_lap_timestamp': row[6] if len(row) > 6 else None
             })
 
         conn.close()
@@ -2575,7 +2691,7 @@ def get_team_stats():
                 MAX(pit_stops) as max_pit_stops
             FROM lap_times
             WHERE CASE
-                    WHEN team_name LIKE '_ - %' THEN
+                    WHEN team_name LIKE '% - %' THEN
                         LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
                     ELSE
                         LOWER(TRIM(team_name))
@@ -2614,7 +2730,7 @@ def get_team_stats():
                     FIRST_VALUE(lt.gap) OVER (PARTITION BY lt.session_id ORDER BY lt.timestamp DESC) as final_gap
                 FROM lap_times lt
                 WHERE CASE
-                        WHEN lt.team_name LIKE '_ - %' THEN
+                        WHEN lt.team_name LIKE '% - %' THEN
                             LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
                         ELSE
                             LOWER(TRIM(lt.team_name))
@@ -2655,7 +2771,7 @@ def get_team_stats():
                     CAST(SUBSTR(lap_time, 1, 1) AS REAL) * 60 + CAST(SUBSTR(lap_time, 3) AS REAL) as lap_seconds
                 FROM lap_history
                 WHERE CASE
-                        WHEN team_name LIKE '_ - %' THEN
+                        WHEN team_name LIKE '% - %' THEN
                             LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
                         ELSE
                             LOWER(TRIM(team_name))
@@ -2691,7 +2807,7 @@ def get_team_stats():
             FROM race_sessions rs
             LEFT JOIN lap_times lt ON rs.session_id = lt.session_id
             WHERE CASE
-                    WHEN lt.team_name LIKE '_ - %' THEN
+                    WHEN lt.team_name LIKE '% - %' THEN
                         LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
                     ELSE
                         LOWER(TRIM(lt.team_name))
@@ -2770,8 +2886,12 @@ def get_lap_details():
             # Debug: Count total records for this team in session
             debug_count_query = """
                 SELECT COUNT(*) FROM lap_times
-                WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
-                AND team_name LIKE '_ - %'
+                WHERE (
+                    CASE
+                        WHEN team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                        ELSE LOWER(TRIM(team_name))
+                    END
+                ) = ?
                 AND session_id = ?
             """
             cursor.execute(debug_count_query, (team_name_lower, int(session_id)))
@@ -2788,8 +2908,12 @@ def get_lap_details():
                         pit_stops,
                         LAG(pit_stops, 1, 0) OVER (ORDER BY timestamp) as prev_pit_stops
                     FROM lap_times
-                    WHERE LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))) = ?
-                    AND team_name LIKE '_ - %'
+                    WHERE (
+                        CASE
+                            WHEN team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                            ELSE LOWER(TRIM(team_name))
+                        END
+                    ) = ?
                     AND session_id = ?
                     AND last_lap IS NOT NULL
                     AND last_lap <> ''
@@ -2924,7 +3048,7 @@ def compare_teams():
                     GROUP_CONCAT(DISTINCT SUBSTR(team_name, 1, 1)) as classes_raced
                 FROM lap_times
                 WHERE CASE
-                        WHEN team_name LIKE '_ - %' THEN
+                        WHEN team_name LIKE '% - %' THEN
                             LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
                         ELSE
                             LOWER(TRIM(team_name))
@@ -2963,7 +3087,7 @@ def compare_teams():
                         FIRST_VALUE(lt.gap) OVER (PARTITION BY lt.session_id ORDER BY lt.timestamp DESC) as final_gap
                     FROM lap_times lt
                     WHERE CASE
-                            WHEN lt.team_name LIKE '_ - %' THEN
+                            WHEN lt.team_name LIKE '% - %' THEN
                                 LOWER(TRIM(SUBSTR(lt.team_name, INSTR(lt.team_name, ' - ') + 3)))
                             ELSE
                                 LOWER(TRIM(lt.team_name))
@@ -3004,7 +3128,7 @@ def compare_teams():
                         CAST(SUBSTR(lap_time, 1, 1) AS REAL) * 60 + CAST(SUBSTR(lap_time, 3) AS REAL) as lap_seconds
                     FROM lap_history
                     WHERE CASE
-                            WHEN team_name LIKE '_ - %' THEN
+                            WHEN team_name LIKE '% - %' THEN
                                 LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
                             ELSE
                                 LOWER(TRIM(team_name))
@@ -3034,7 +3158,7 @@ def compare_teams():
                     lap_time
                 FROM lap_history
                 WHERE CASE
-                        WHEN team_name LIKE '_ - %' THEN
+                        WHEN team_name LIKE '% - %' THEN
                             LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
                         ELSE
                             LOWER(TRIM(team_name))
@@ -3120,49 +3244,510 @@ def delete_best_lap():
         except ValueError:
             return jsonify({'error': 'Invalid best_lap_time format'}), 400
 
-        conn = get_track_db_connection(track_id)
-        cursor = conn.cursor()
+        # Retry logic to handle database locks
+        max_retries = 3
+        retry_delay = 0.5  # seconds
+        last_error = None
 
-        # Find and nullify the best_lap field for records matching this team and lap time
-        # Handle both formats: with class prefix "1 - TEAMNAME" and without "TEAMNAME"
-        # Also handle mixed best_lap formats: "MM:SS.mmm" and raw seconds
-        update_query = """
-            UPDATE lap_times
-            SET best_lap = NULL
-            WHERE CASE
-                    WHEN team_name LIKE '_ - %' THEN
-                        LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
-                    ELSE
-                        LOWER(TRIM(team_name))
-                END = ?
-            AND ABS(
-                CASE
-                    WHEN best_lap LIKE '%:%' THEN
-                        CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
-                        CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
-                    WHEN best_lap IS NOT NULL AND best_lap != '' THEN
-                        CAST(best_lap AS REAL)
-                    ELSE 999999
-                END - ?
-            ) < 0.01
-        """
+        for attempt in range(max_retries):
+            try:
+                conn = get_track_db_connection(track_id, timeout=5.0)
+                cursor = conn.cursor()
 
-        cursor.execute(update_query, (team_name, best_lap_seconds))
-        rows_updated = cursor.rowcount
-        conn.commit()
-        conn.close()
+                # Find and nullify the best_lap field for records matching this team and lap time
+                # Handle both formats: with class prefix "1 - TEAMNAME" and without "TEAMNAME"
+                # Also handle mixed best_lap formats: "MM:SS.mmm" and raw seconds
+                update_query = """
+                    UPDATE lap_times
+                    SET best_lap = NULL
+                    WHERE CASE
+                            WHEN team_name LIKE '% - %' THEN
+                                LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                            ELSE
+                                LOWER(TRIM(team_name))
+                        END = ?
+                    AND ABS(
+                        CASE
+                            WHEN best_lap LIKE '%:%' THEN
+                                CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                                CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                            WHEN best_lap IS NOT NULL AND best_lap != '' THEN
+                                CAST(best_lap AS REAL)
+                            ELSE 999999
+                        END - ?
+                    ) < 0.01
+                """
 
-        if rows_updated == 0:
-            return jsonify({'error': 'No matching lap time found for this team'}), 404
+                cursor.execute(update_query, (team_name, best_lap_seconds))
+                rows_updated = cursor.rowcount
+                conn.commit()
+                conn.close()
 
-        return jsonify({
-            'success': True,
-            'message': f'Deleted best lap time for {team_name}',
-            'rows_updated': rows_updated
-        })
+                if rows_updated == 0:
+                    return jsonify({'error': 'No matching lap time found for this team'}), 404
+
+                return jsonify({
+                    'success': True,
+                    'message': f'Deleted best lap time for {team_name}',
+                    'rows_updated': rows_updated
+                })
+
+            except sqlite3.OperationalError as e:
+                last_error = e
+                if 'locked' in str(e).lower() and attempt < max_retries - 1:
+                    print(f"Database locked on attempt {attempt + 1}/{max_retries}, retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
+                else:
+                    raise
+            finally:
+                try:
+                    if 'conn' in locals():
+                        conn.close()
+                except:
+                    pass
+
+        # If we get here, all retries failed
+        raise last_error if last_error else Exception("Unknown error during database operation")
 
     except Exception as e:
         print(f"Error deleting best lap: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/mass-delete-laps', methods=['POST'])
+@admin_required
+def mass_delete_laps():
+    """
+    Delete all lap times under a specified threshold (track-wide, admin only)
+
+    Supports two deletion modes:
+    1. lap_history: Delete individual lap records from lap_history table
+    2. best_laps: Nullify best_lap field in lap_times if below threshold
+    """
+    try:
+        data = request.json
+        track_id = data.get('track_id', 1)
+        threshold_seconds = data.get('threshold_seconds')
+        delete_type = data.get('delete_type', 'lap_history')
+
+        if threshold_seconds is None:
+            return jsonify({'error': 'threshold_seconds is required'}), 400
+
+        # Validate delete_type
+        if delete_type not in ['lap_history', 'best_laps']:
+            return jsonify({'error': 'delete_type must be "lap_history" or "best_laps"'}), 400
+
+        # Retry logic to handle database locks
+        max_retries = 3
+        retry_delay = 0.5
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                conn = get_track_db_connection(track_id, timeout=10.0)
+                cursor = conn.cursor()
+
+                rows_affected = 0
+
+                if delete_type == 'lap_history':
+                    # Delete individual lap records from lap_history
+                    delete_query = """
+                        DELETE FROM lap_history
+                        WHERE CASE
+                                WHEN lap_time LIKE '%:%' THEN
+                                    CAST(SUBSTR(lap_time, 1, INSTR(lap_time, ':') - 1) AS REAL) * 60 +
+                                    CAST(SUBSTR(lap_time, INSTR(lap_time, ':') + 1) AS REAL)
+                                WHEN lap_time IS NOT NULL AND lap_time != '' THEN
+                                    CAST(lap_time AS REAL)
+                                ELSE 999999
+                            END < ?
+                    """
+                    cursor.execute(delete_query, (threshold_seconds,))
+                    rows_affected = cursor.rowcount
+
+                elif delete_type == 'best_laps':
+                    # Nullify best_lap field in lap_times if below threshold
+                    update_query = """
+                        UPDATE lap_times
+                        SET best_lap = NULL
+                        WHERE CASE
+                                WHEN best_lap LIKE '%:%' THEN
+                                    CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                                    CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                                WHEN best_lap IS NOT NULL AND best_lap != '' THEN
+                                    CAST(best_lap AS REAL)
+                                ELSE 999999
+                            END < ?
+                    """
+                    cursor.execute(update_query, (threshold_seconds,))
+                    rows_affected = cursor.rowcount
+
+                conn.commit()
+                conn.close()
+
+                return jsonify({
+                    'success': True,
+                    'message': f'Mass deletion completed',
+                    'rows_affected': rows_affected,
+                    'delete_type': delete_type,
+                    'threshold_seconds': threshold_seconds
+                })
+
+            except sqlite3.OperationalError as e:
+                last_error = e
+                if 'locked' in str(e).lower() and attempt < max_retries - 1:
+                    print(f"Database locked on attempt {attempt + 1}/{max_retries}, retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    raise
+            finally:
+                try:
+                    if 'conn' in locals():
+                        conn.close()
+                except:
+                    pass
+
+        # If we get here, all retries failed
+        raise last_error if last_error else Exception("Unknown error during mass delete operation")
+
+    except Exception as e:
+        print(f"Error in mass delete: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/all-laps', methods=['GET'])
+def get_all_laps():
+    """
+    Get all laps for a specific team on a track
+
+    Parameters:
+    - team (required): team name
+    - track_id (required): track ID
+    - session_id (optional): filter by session
+    - limit (optional): max number of laps to return (default: 50)
+    - offset (optional): pagination offset (default: 0)
+    """
+    try:
+        team_name = request.args.get('team', '').strip().lower()
+        track_id = request.args.get('track_id', 1, type=int)
+        session_id = request.args.get('session_id', None, type=int)
+        limit = request.args.get('limit', 50, type=int)
+        offset = request.args.get('offset', 0, type=int)
+
+        if not team_name:
+            return jsonify({'error': 'team parameter is required'}), 400
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        # Build session filter
+        session_filter = ""
+        query_params = [team_name]
+        if session_id:
+            session_filter = "AND lh.session_id = ?"
+            query_params.append(session_id)
+
+        # Query to get all laps with session information
+        query = f"""
+            SELECT
+                lh.lap_number,
+                lh.lap_time,
+                lh.session_id,
+                rs.name as session_name,
+                rs.start_time as session_date,
+                lh.timestamp,
+                lh.pit_this_lap,
+                lh.position_after_lap
+            FROM lap_history lh
+            JOIN race_sessions rs ON lh.session_id = rs.session_id
+            WHERE CASE
+                    WHEN lh.team_name LIKE '% - %' THEN
+                        LOWER(TRIM(SUBSTR(lh.team_name, INSTR(lh.team_name, ' - ') + 3)))
+                    ELSE
+                        LOWER(TRIM(lh.team_name))
+                END = ?
+            {session_filter}
+            ORDER BY rs.start_time DESC, lh.lap_number ASC
+            LIMIT ? OFFSET ?
+        """
+
+        query_params.extend([limit, offset])
+        cursor.execute(query, query_params)
+
+        laps = []
+        for row in cursor.fetchall():
+            laps.append({
+                'lap_number': row[0],
+                'lap_time': row[1],
+                'session_id': row[2],
+                'session_name': row[3] if row[3] else 'Unknown Session',
+                'session_date': row[4],
+                'timestamp': row[5],
+                'pit_this_lap': bool(row[6]),
+                'position_after_lap': row[7]
+            })
+
+        # Get total count for pagination
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM lap_history lh
+            WHERE CASE
+                    WHEN lh.team_name LIKE '% - %' THEN
+                        LOWER(TRIM(SUBSTR(lh.team_name, INSTR(lh.team_name, ' - ') + 3)))
+                    ELSE
+                        LOWER(TRIM(lh.team_name))
+                END = ?
+            {session_filter}
+        """
+        cursor.execute(count_query, [team_name] + (query_params[1:2] if session_id else []))
+        total_laps = cursor.fetchone()[0]
+
+        conn.close()
+
+        return jsonify({
+            'team_name': team_name,
+            'track_id': track_id,
+            'total_laps': total_laps,
+            'laps': laps,
+            'limit': limit,
+            'offset': offset
+        })
+
+    except Exception as e:
+        print(f"Error getting all laps: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/cross-track-sessions', methods=['GET'])
+def get_cross_track_sessions():
+    """
+    Get all sessions for a team across all tracks
+
+    Parameters:
+    - team (required): team name (supports flexible matching - finds all name variations)
+    """
+    try:
+        team_name = request.args.get('team', '').strip().lower()
+
+        if not team_name:
+            return jsonify({'error': 'team parameter is required'}), 400
+
+        # Tokenize the team name for flexible matching (handles "DELVENNE Simon" vs "SIMON DELVENNE")
+        name_tokens = [token.strip() for token in team_name.split() if token.strip()]
+
+        # Get all tracks from tracks.db
+        tracks_conn = sqlite3.connect('tracks.db')
+        tracks_cursor = tracks_conn.cursor()
+        tracks_cursor.execute('SELECT id, track_name FROM tracks WHERE is_active = 1')
+        tracks = tracks_cursor.fetchall()
+        tracks_conn.close()
+
+        sessions = []
+        total_laps = 0
+        tracks_raced = 0
+        best_lap_overall = None
+        best_lap_overall_seconds = float('inf')
+
+        # Query each track's database
+        for track_id, track_name in tracks:
+            try:
+                conn = get_track_db_connection(track_id)
+                cursor = conn.cursor()
+
+                # Build flexible matching conditions for lap_history
+                lh_conditions = []
+                lh_params = []
+                for token in name_tokens:
+                    lh_conditions.append("LOWER(lh.team_name) LIKE ?")
+                    lh_params.append(f'%{token}%')
+
+                lh_where_clause = " AND ".join(lh_conditions) if lh_conditions else "1=1"
+
+                # Build flexible matching conditions for lap_times
+                lt_conditions = []
+                lt_params = []
+                for token in name_tokens:
+                    lt_conditions.append("LOWER(lt.team_name) LIKE ?")
+                    lt_params.append(f'%{token}%')
+
+                lt_where_clause = " AND ".join(lt_conditions) if lt_conditions else "1=1"
+
+                # Get sessions for this team on this track (using flexible name matching)
+                # Note: We only use lap_history to avoid cartesian product with lap_times
+                query = f"""
+                    SELECT
+                        rs.session_id,
+                        rs.name as session_name,
+                        rs.start_time as session_date,
+                        COUNT(lh.lap_number) as total_laps,
+                        MIN(
+                            CASE
+                                WHEN lh.lap_time LIKE '%:%' THEN
+                                    CAST(SUBSTR(lh.lap_time, 1, INSTR(lh.lap_time, ':') - 1) AS REAL) * 60 +
+                                    CAST(SUBSTR(lh.lap_time, INSTR(lh.lap_time, ':') + 1) AS REAL)
+                                WHEN lh.lap_time IS NOT NULL AND lh.lap_time != '' THEN
+                                    CAST(lh.lap_time AS REAL)
+                                ELSE NULL
+                            END
+                        ) as best_lap_seconds,
+                        AVG(
+                            CASE
+                                WHEN lh.lap_time LIKE '%:%' THEN
+                                    CAST(SUBSTR(lh.lap_time, 1, INSTR(lh.lap_time, ':') - 1) AS REAL) * 60 +
+                                    CAST(SUBSTR(lh.lap_time, INSTR(lh.lap_time, ':') + 1) AS REAL)
+                                WHEN lh.lap_time IS NOT NULL AND lh.lap_time != '' THEN
+                                    CAST(lh.lap_time AS REAL)
+                                ELSE NULL
+                            END
+                        ) as avg_lap_seconds
+                    FROM race_sessions rs
+                    INNER JOIN lap_history lh ON rs.session_id = lh.session_id
+                        AND ({lh_where_clause})
+                    GROUP BY rs.session_id, rs.name, rs.start_time
+                    ORDER BY rs.start_time DESC
+                """
+
+                cursor.execute(query, lh_params)
+                track_sessions = cursor.fetchall()
+                conn.close()
+
+                if track_sessions:
+                    tracks_raced += 1
+
+                for row in track_sessions:
+                    session_id, session_name, session_date, laps_count, best_lap_secs, avg_lap_secs = row
+
+                    # Format best lap
+                    if best_lap_secs:
+                        mins = int(best_lap_secs // 60)
+                        secs = best_lap_secs % 60
+                        best_lap_formatted = f"{mins}:{secs:06.3f}"
+
+                        # Track overall best lap
+                        if best_lap_secs < best_lap_overall_seconds:
+                            best_lap_overall_seconds = best_lap_secs
+                            best_lap_overall = best_lap_formatted
+                    else:
+                        best_lap_formatted = None
+
+                    # Format avg lap
+                    if avg_lap_secs:
+                        mins = int(avg_lap_secs // 60)
+                        secs = avg_lap_secs % 60
+                        avg_lap_formatted = f"{mins}:{secs:06.3f}"
+                    else:
+                        avg_lap_formatted = None
+
+                    sessions.append({
+                        'session_id': session_id,
+                        'track_id': track_id,
+                        'track_name': track_name,
+                        'session_name': session_name if session_name else 'Unknown Session',
+                        'session_date': session_date,
+                        'total_laps': laps_count if laps_count else 0,
+                        'best_lap': best_lap_formatted,
+                        'avg_lap': avg_lap_formatted
+                    })
+
+                    total_laps += laps_count if laps_count else 0
+
+            except Exception as track_error:
+                print(f"Error querying track {track_id}: {track_error}")
+                continue
+
+        return jsonify({
+            'team_name': team_name,
+            'sessions': sessions,
+            'overall_stats': {
+                'total_sessions': len(sessions),
+                'total_laps': total_laps,
+                'tracks_raced': tracks_raced,
+                'best_lap_overall': best_lap_overall
+            }
+        })
+
+    except Exception as e:
+        print(f"Error getting cross-track sessions: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/team-data/session-laps', methods=['GET'])
+def get_session_laps():
+    """
+    Get all lap details for a specific team in a specific session
+
+    Parameters:
+    - team (required): team name (flexible matching)
+    - track_id (required): track ID
+    - session_id (required): session ID
+    """
+    try:
+        team_name = request.args.get('team', '').strip().lower()
+        track_id = request.args.get('track_id', type=int)
+        session_id = request.args.get('session_id', type=int)
+
+        if not team_name:
+            return jsonify({'error': 'team parameter is required'}), 400
+        if not track_id:
+            return jsonify({'error': 'track_id parameter is required'}), 400
+        if not session_id:
+            return jsonify({'error': 'session_id parameter is required'}), 400
+
+        # Tokenize the team name for flexible matching
+        name_tokens = [token.strip() for token in team_name.split() if token.strip()]
+
+        # Build flexible matching conditions
+        conditions = []
+        params = [session_id]
+        for token in name_tokens:
+            conditions.append("LOWER(lh.team_name) LIKE ?")
+            params.append(f'%{token}%')
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        conn = get_track_db_connection(track_id)
+        cursor = conn.cursor()
+
+        # Calculate lap numbers based on chronological order since lap_number field is unreliable
+        query = f"""
+            SELECT
+                ROW_NUMBER() OVER (ORDER BY lh.timestamp ASC) as lap_number,
+                lh.lap_time,
+                lh.timestamp,
+                lh.pit_this_lap,
+                lh.position_after_lap
+            FROM lap_history lh
+            WHERE lh.session_id = ?
+                AND ({where_clause})
+            ORDER BY lh.timestamp ASC
+        """
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        laps = []
+        for row in rows:
+            lap_number, lap_time, timestamp, pit_this_lap, position_after_lap = row
+            laps.append({
+                'lap_number': lap_number,
+                'lap_time': lap_time,
+                'timestamp': timestamp,
+                'pit_this_lap': bool(pit_this_lap),
+                'position_after_lap': position_after_lap
+            })
+
+        return jsonify({
+            'laps': laps,
+            'total_count': len(laps)
+        })
+
+    except Exception as e:
+        print(f"Error getting session laps: {e}")
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
@@ -3197,10 +3782,24 @@ def get_database_path(track_id: int) -> str:
     """Get the database file path for a specific track"""
     return f'race_data_track_{track_id}.db'
 
-def get_track_db_connection(track_id: int):
-    """Get database connection for a specific track"""
+def get_track_db_connection(track_id: int, timeout: float = 5.0):
+    """
+    Get database connection for a specific track with timeout
+
+    Args:
+        track_id: The track ID
+        timeout: Timeout in seconds for database operations (default: 5.0)
+
+    Returns:
+        sqlite3.Connection object
+    """
     db_path = get_database_path(track_id)
-    return sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=timeout)
+    # Enable WAL mode for better concurrent access (if not already enabled)
+    conn.execute("PRAGMA journal_mode=WAL")
+    # Set busy timeout to 5 seconds (5000ms)
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
 
 if __name__ == '__main__':
     try:
