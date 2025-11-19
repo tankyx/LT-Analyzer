@@ -519,7 +519,31 @@ export const ApiService = {
       console.error('Error fetching session laps:', error);
       throw error;
     }
-  }
+  },
+  // Trigger pit alert for a specific team
+  triggerPitAlert: async (data: { track_id: number; team_name: string; alert_message?: string }) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/trigger-pit-alert`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          track_id: data.track_id,
+          team_name: data.team_name,
+          alert_message: data.alert_message || 'PIT NOW!'
+        }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to trigger pit alert');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error triggering pit alert:', error);
+      throw error;
+    }
+  },
+
 };
 
 export default ApiService;
