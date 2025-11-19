@@ -1,0 +1,62 @@
+╔══════════════════════════════════════════════════════════════╗
+║   ✅ BACKEND & FRONTEND RESTARTED SUCCESSFULLY WITH PM2      ║
+╚══════════════════════════════════════════════════════════════╝
+
+📊 PM2 PROCESS STATUS (Saved)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌─────────────────────────────────────────────────────────────┐
+│ lt-analyzer-backend (PID: 1158864)                         │
+├─────────────────────────────────────────────────────────────┤
+│ Status:  ONLINE ✅                                          │
+│ Uptime:  33 seconds                                         │
+│ Port:    5000 (LISTENING)                                   │
+│ Mode:    PM2 Managed                                        │
+│ Logs:    /home/ubuntu/LT-Analyzer/backend.log              │
+│ Config:  Saved to /home/ubuntu/.pm2/dump.pm2              │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ lt-analyzer-frontend (PID: 1157359)                        │
+├─────────────────────────────────────────────────────────────┤
+│ Status:  ONLINE ✅                                          │
+│ Uptime:  15 minutes                                         │
+│ Port:    3000 (LISTENING)                                   │
+│ URL:     https://tpresearch.fr                             │
+│ Mode:    PM2 Managed                                        │
+│ Logs:    PM2 managed                                        │
+└─────────────────────────────────────────────────────────────┘
+
+✅ BOTH SERVICES NOW USE PM2 PROCESS MANAGEMENT
+
+🎯 KEY BENEFITS:
+   • Auto-restart on crash
+   • System reboot persistence
+   • CPU/Memory monitoring
+   • Centralized log management
+   • Easy start/stop/restart commands
+
+🚀 QUICK COMMANDS:
+   pm2 list                    # View all processes
+   pm2 logs backend --lines 20 # View backend logs
+   pm2 logs frontend --lines 20 # View frontend logs
+   pm2 restart all             # Restart both services
+   pm2 stop all                # Stop both services
+   ./monitor_pit_alerts.sh     # Monitor pit alerts
+
+🚨 PIT ALERT SYSTEM: OPERATIONAL
+   API Endpoint: /api/trigger-pit-alert
+   Last Test: 200 OK (Success)
+   Enhanced Logging: Enabled
+   Socket.IO: Active
+
+📄 CONFIGURATION FILES:
+   Backend startup: start-backend-pm2-final.sh
+   Multi-track config: multi-track-config.yml  
+   Status checker: status_check.sh
+   Combined restart: restart_both_pm2.sh
+
+╔══════════════════════════════════════════════════════════════╗
+║  All systems operational. Backend logging enhanced.          ║
+║  Pit alert system ready for use.                             ║
+╚══════════════════════════════════════════════════════════════╝

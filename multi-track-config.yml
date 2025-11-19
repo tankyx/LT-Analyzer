@@ -1,0 +1,23 @@
+tracks:
+  - id: 10
+    name: "Track 10"
+    websocket_url: "wss://apex-timing.com:8443/websocket/track/10"
+    parser_mode: "websocket"
+    active: true
+    
+  - id: 1
+    name: "Track 1"
+    websocket_url: null
+    parser_mode: "playwright"
+    active: false
+    
+  - id: 2
+    name: "Track 2"
+    websocket_url: null
+    parser_mode: "playwright"
+    active: false
+
+defaults:
+  check_interval: 10
+  database_path: "/home/ubuntu/LT-Analyzer/race_data_track_{id}.db"
+  websocket_timeout: 30
