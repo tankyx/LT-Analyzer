@@ -3829,7 +3829,7 @@ def trigger_pit_alert():
             'alert_message': alert_message,
             'timestamp': datetime.now().isoformat(),
             'flash_color': '#FF0000',  # Red flash
-            'duration_ms': 5000,       # Flash for 5 seconds
+            'duration_ms': 80000,      # Flash for 80 seconds
             'priority': 'high'
         }
         
@@ -3845,7 +3845,9 @@ def trigger_pit_alert():
             'timestamp': datetime.now().isoformat()
         }, room=track_room)
         
-        print(f"PIT ALERT triggered for team {team_name} on track {track_id}")
+        print(f"[PIT ALERT] 🚨 PIT ALERT triggered for team '{team_name}' on track {track_id} - Message: '{alert_message}'")
+        print(f"[PIT ALERT] ✅ Successfully emitted 'pit_alert' to room: {room}")
+        print(f"[PIT ALERT] ✅ Successfully emitted 'pit_alert_broadcast' to room: {track_room}")
         
         return jsonify({
             'status': 'success',
@@ -3860,6 +3862,114 @@ def trigger_pit_alert():
             'status': 'error', 
             'message': f'Failed to trigger pit alert: {str(e)}'
         }), 500
+
+# Socket.IO Admin Endpoints - for monitoring room joins
+@socketio.on('join_team_room')
+def handle_join_team_room_monitor(data):
+    """Enhanced version that logs all room joins for monitoring"""
+    """Handle client joining a team-specific room for a track"""
+    track_id = data.get('track_id')
+    team_name = data.get('team_name')
+    
+    if not track_id or not team_name:
+        emit('team_room_error', {
+            'error': 'track_id and team_name are required',
+            'timestamp': datetime.now().isoformat()
+        })
+        return
+    
+    try:
+        # Join the team-specific room
+        room = f'team_track_{track_id}_{team_name}'
+        join_room(room)
+        
+        # Log for monitoring
+        print(f"[ROOM MONITOR] Client {request.sid} JOINED team room: {room}")
+        print(f"[ROOM MONITOR] Active clients in {room}: {len(socketio.server.rooms.get(room, set()))}")
+        
+        # Send confirmation with team and track info
+        emit('team_room_joined', {
+            'track_id': track_id,
+            'team_name': team_name,
+            'room': room,
+            'sid': request.sid
+        })
+        
+    except Exception as e:
+        print(f"Error handling join_team_room: {e}")
+        emit('team_room_error', {
+            'error': f'Failed to join team room: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        })
+
+@socketio.on('leave_team_room')
+def handle_leave_team_room_monitor(data):
+    """Enhanced version that logs all room leaves for monitoring"""
+    """Handle client leaving a team-specific room"""
+    track_id = data.get('track_id')
+    team_name = data.get('team_name')
+    
+    if not track_id or not team_name:
+        return
+    
+    try:
+        room = f'team_track_{track_id}_{team_name}'
+        leave_room(room)
+        
+        # Log for monitoring
+        print(f"[ROOM MONITOR] Client {request.sid} LEFT team room: {room}")
+        print(f"[ROOM MONITOR] Remaining clients in {room}: {len(socketio.server.rooms.get(room, set()))}")
+        
+    except Exception as e:
+        print(f"Error handling leave_team_room: {e}")
+
+@app.route('/api/admin/socketio/rooms', methods=['POST'])
+@admin_required
+def admin_get_socketio_rooms():
+    """Get all active Socket.IO rooms (admin only)"""
+    try:
+        if not hasattr(socketio, 'server') or not hasattr(socketio.server, 'rooms'):
+            return jsonify({'error': 'Socket.IO server not available'}), 503
+        
+        # Get all rooms (this includes Socket.IO internal rooms)
+        rooms = list(socketio.server.rooms.keys())
+        
+        # Filter out internal rooms (those that start with the client SID)
+        non_internal_rooms = [room for room in rooms if not any(sid in room for sid in socketio.server.rooms.keys() if len(room) > 20)]
+        
+        # Return unique rooms
+        unique_rooms = list(set(non_internal_rooms))
+        unique_rooms.sort()
+        
+        return jsonify(unique_rooms)
+    except Exception as e:
+        return jsonify({'error': f'Failed to get rooms: {str(e)}'}), 500
+
+@app.route('/api/admin/socketio/room-info', methods=['POST'])
+@admin_required
+def admin_get_room_info():
+    """Get information about a specific Socket.IO room (admin only)"""
+    try:
+        data = request.json
+        room_name = data.get('room')
+        
+        if not room_name:
+            return jsonify({'error': 'room parameter is required'}), 400
+        
+        if not hasattr(socketio, 'server') or not hasattr(socketio.server, 'rooms'):
+            return jsonify({'error': 'Socket.IO server not available'}), 503
+        
+        # Get clients in the room
+        clients = socketio.server.rooms.get(room_name, set())
+        
+        return jsonify({
+            'room': room_name,
+            'client_count': len(clients),
+            'clients': list(clients),
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'error': f'Failed to get room info: {str(e)}'}), 500
 
 if __name__ == '__main__':
     try:
@@ -3898,62 +4008,5 @@ if __name__ == '__main__':
             except Exception as e:
                 print(f"Error stopping multi-track manager: {e}")
 
-# Pit Alert System - Send alerts from web client to Android overlay
-@app.route('/api/trigger-pit-alert', methods=['POST'])
-def trigger_pit_alert():
-    """Trigger a pit alert for a specific team on a track"""
-    data = request.json
-    
-    track_id = data.get('track_id')
-    team_name = data.get('team_name')
-    alert_message = data.get('alert_message', 'PIT NOW')
-    
-    if not track_id or not team_name:
-        return jsonify({
-            'status': 'error', 
-            'message': 'track_id and team_name are required'
-        }), 400
-    
-    try:
-        # Emit to the team's specific room
-        room = f'team_track_{track_id}_{team_name}'
-        
-        alert_data = {
-            'track_id': track_id,
-            'team_name': team_name,
-            'alert_type': 'pit_required',
-            'alert_message': alert_message,
-            'timestamp': datetime.now().isoformat(),
-            'flash_color': '#FF0000',  # Red flash
-            'duration_ms': 5000,       # Flash for 5 seconds
-            'priority': 'high'
-        }
-        
-        # Emit to team-specific room (Android clients in that room will receive it)
-        socketio.emit('pit_alert', alert_data, room=room)
-        
-        # Also emit to track room for web clients to show the alert
-        track_room = f'track_{track_id}'
-        socketio.emit('pit_alert_broadcast', {
-            'track_id': track_id,
-            'team_name': team_name,
-            'alert_message': alert_message,
-            'timestamp': datetime.now().isoformat()
-        }, room=track_room)
-        
-        print(f"PIT ALERT triggered for team {team_name} on track {track_id}")
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Pit alert sent to {team_name}',
-            'room': room,
-            'alert': alert_data
-        })
-        
-    except Exception as e:
-        print(f"Error triggering pit alert: {e}")
-        return jsonify({
-            'status': 'error', 
-            'message': f'Failed to trigger pit alert: {str(e)}'
-        }), 500
+
 

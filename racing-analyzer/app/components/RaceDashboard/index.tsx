@@ -361,34 +361,6 @@ const PitAlertButton = ({ kartNum, teamName, trackId, onTriggerAlert }: {
 };
 
 
-  const triggerPitAlert = useCallback(async (kartNum: string, teamName: string) => {
-    try {
-      const response = await ApiService.triggerPitAlert({
-        track_id: selectedTrackId,
-        team_name: teamName,
-        alert_message: `PIT NOW! - ${teamName}`
-      });
-      
-      if (response.status === 'success') {
-        setAlerts(prev => [...prev, {
-          id: Date.now(),
-          message: `🚨 PIT ALERT sent to ${teamName}`,
-          type: 'success',
-          teamKart: kartNum
-        }]);
-      } else {
-        throw new Error(response.message || 'Failed to send pit alert');
-      }
-    } catch (error) {
-      console.error('Error triggering pit alert:', error);
-      setAlerts(prev => [...prev, {
-        id: Date.now(),
-        message: `❌ Failed to send pit alert to ${teamName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        type: 'error',
-        teamKart: kartNum
-      }]);
-    }
-  }, [selectedTrackId]);
 
 const RaceDashboard = () => {
   const { user, logout } = useAuth();
@@ -418,6 +390,35 @@ const RaceDashboard = () => {
   const [selectedTrackId, setSelectedTrackId] = useState<number>(1);
   const [sessionStatus, setSessionStatus] = useState<{active: boolean; message: string; trackName: string} | null>(null);
   const [allTracksStatus, setAllTracksStatus] = useState<TrackStatus[]>([]);
+
+  const triggerPitAlert = useCallback(async (kartNum: string, teamName: string) => {
+    try {
+      const response = await ApiService.triggerPitAlert({
+        track_id: selectedTrackId,
+        team_name: teamName,
+        alert_message: `PIT NOW! - ${teamName}`
+      });
+      
+      if (response.status === 'success') {
+        setAlerts(prev => [...prev, {
+          id: Date.now(),
+          message: `🚨 PIT ALERT sent to ${teamName}`,
+          type: 'success',
+          teamKart: kartNum
+        }]);
+      } else {
+        throw new Error(response.message || 'Failed to send pit alert');
+      }
+    } catch (error) {
+      console.error('Error triggering pit alert:', error);
+      setAlerts(prev => [...prev, {
+        id: Date.now(),
+        message: `❌ Failed to send pit alert to ${teamName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        type: 'error',
+        teamKart: kartNum
+      }]);
+    }
+  }, [selectedTrackId]);
 
   const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number, newDefaultLapTime?: number) => {
     try {
@@ -926,7 +927,11 @@ const RaceDashboard = () => {
                       filled={monitoredTeams.includes(team.Kart)} 
                       onClick={() => toggleTeamMonitoring(team.Kart)}
                     />
-                    {monitoredTeams.includes(team.Kart) && team.Status !== 'Pit-in' && (
+                    {monitoredTeams.includes(team.Kart) && 
+                     team.Status !== 'Pit-in' && 
+                     team.Status !== 'Finished' && 
+                     team.Status !== 'DNF' && 
+                     team.Status !== 'DSQ' && (
                       <PitAlertButton 
                         kartNum={team.Kart}
                         teamName={team.Team}
