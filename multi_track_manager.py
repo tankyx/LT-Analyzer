@@ -532,11 +532,21 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
 
                             session_id = self.check_and_update_session(leader_gap)
 
-                            # Only store data if we have an active session
+                            # Only store data if we have an active session, OR create one for mid-session starts
                             if session_id is not None:
                                 self.store_lap_data(session_id, df)
+                                self.session_active_status = True
+                                self.last_data_time = datetime.now()
                             else:
-                                self.logger.debug(f"Track {self.track_id}: No active session, waiting for Tour 1...")
+                                # No session detected - create one automatically for mid-session starts
+                                self.logger.info(f"Track {self.track_id}: No session start detected, creating mid-session session")
+                                session_id = self.create_new_session()
+                                self.current_session_id = session_id
+                                self.current_leader_lap = 1  # Assume racing lap 1 when we start monitoring
+                                self.session_ended = False
+                                self.session_active_status = True
+                                self.last_data_time = datetime.now()
+                                self.store_lap_data(session_id, df)
 
                     except Exception as e:
                         self.logger.error(f"Track {self.track_id}: Error processing message: {e}")
