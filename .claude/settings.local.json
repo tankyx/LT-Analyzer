@@ -56,7 +56,8 @@
       "Bash(then echo \"Enabling WAL mode on $db...\" sqlite3 \"$db\" \"PRAGMA journal_mode=WAL;\" fi done)",
       "Bash(do sqlite3 race_data_track_$i.db \"PRAGMA journal_mode=WAL;\")",
       "Bash(time curl -s \"http://localhost:5000/api/team-data/cross-track-sessions?team=DELVENNE%20Simon\")",
-      "Bash(time curl:*)"
+      "Bash(time curl:*)",
+      "Bash(git push)"
     ]
   },
   "enableAllProjectMcpServers": false
