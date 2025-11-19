@@ -3897,3 +3897,63 @@ if __name__ == '__main__':
                     multi_track_thread.join(timeout=5)
             except Exception as e:
                 print(f"Error stopping multi-track manager: {e}")
+
+# Pit Alert System - Send alerts from web client to Android overlay
+@app.route('/api/trigger-pit-alert', methods=['POST'])
+def trigger_pit_alert():
+    """Trigger a pit alert for a specific team on a track"""
+    data = request.json
+    
+    track_id = data.get('track_id')
+    team_name = data.get('team_name')
+    alert_message = data.get('alert_message', 'PIT NOW')
+    
+    if not track_id or not team_name:
+        return jsonify({
+            'status': 'error', 
+            'message': 'track_id and team_name are required'
+        }), 400
+    
+    try:
+        # Emit to the team's specific room
+        room = f'team_track_{track_id}_{team_name}'
+        
+        alert_data = {
+            'track_id': track_id,
+            'team_name': team_name,
+            'alert_type': 'pit_required',
+            'alert_message': alert_message,
+            'timestamp': datetime.now().isoformat(),
+            'flash_color': '#FF0000',  # Red flash
+            'duration_ms': 5000,       # Flash for 5 seconds
+            'priority': 'high'
+        }
+        
+        # Emit to team-specific room (Android clients in that room will receive it)
+        socketio.emit('pit_alert', alert_data, room=room)
+        
+        # Also emit to track room for web clients to show the alert
+        track_room = f'track_{track_id}'
+        socketio.emit('pit_alert_broadcast', {
+            'track_id': track_id,
+            'team_name': team_name,
+            'alert_message': alert_message,
+            'timestamp': datetime.now().isoformat()
+        }, room=track_room)
+        
+        print(f"PIT ALERT triggered for team {team_name} on track {track_id}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Pit alert sent to {team_name}',
+            'room': room,
+            'alert': alert_data
+        })
+        
+    except Exception as e:
+        print(f"Error triggering pit alert: {e}")
+        return jsonify({
+            'status': 'error', 
+            'message': f'Failed to trigger pit alert: {str(e)}'
+        }), 500
+

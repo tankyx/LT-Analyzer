@@ -519,7 +519,8 @@ export const ApiService = {
       console.error('Error fetching session laps:', error);
       throw error;
     }
-  },
+  }
+
   // Trigger pit alert for a specific team
   triggerPitAlert: async (data: { track_id: number; team_name: string; alert_message?: string }) => {
     try {
@@ -543,7 +544,6 @@ export const ApiService = {
       throw error;
     }
   },
-
 };
 
 export default ApiService;
