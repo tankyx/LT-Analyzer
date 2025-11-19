@@ -326,6 +326,70 @@ const StarIcon = ({ filled, onClick }: { filled: boolean; onClick?: () => void }
   </button>
 );
 
+// Pit Alert Button Component
+const PitAlertButton = ({ kartNum, teamName, trackId, onTriggerAlert }: { 
+  kartNum: string; 
+  teamName: string;
+  trackId: number;
+  onTriggerAlert?: (kartNum: string, teamName: string, trackId: number) => Promise<void>;
+}) => {
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const handleClick = async () => {
+    setIsLoading(true);
+    try {
+      if (onTriggerAlert) {
+        await onTriggerAlert(kartNum, teamName, trackId);
+      }
+    } catch (error) {
+      console.error('Failed to trigger pit alert:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  return (
+    <button
+      onClick={handleClick}
+      disabled={isLoading}
+      className="ml-2 px-2 py-1 text-xs font-bold rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-red-600 hover:bg-red-700 text-white"
+      title="Trigger PIT ALERT on Android Overlay"
+    >
+      {isLoading ? '🔄' : '🚨 PIT'}
+    </button>
+  );
+};
+
+
+  const triggerPitAlert = useCallback(async (kartNum: string, teamName: string) => {
+    try {
+      const response = await ApiService.triggerPitAlert({
+        track_id: selectedTrackId,
+        team_name: teamName,
+        alert_message: `PIT NOW! - ${teamName}`
+      });
+      
+      if (response.status === 'success') {
+        setAlerts(prev => [...prev, {
+          id: Date.now(),
+          message: `🚨 PIT ALERT sent to ${teamName}`,
+          type: 'success',
+          teamKart: kartNum
+        }]);
+      } else {
+        throw new Error(response.message || 'Failed to send pit alert');
+      }
+    } catch (error) {
+      console.error('Error triggering pit alert:', error);
+      setAlerts(prev => [...prev, {
+        id: Date.now(),
+        message: `❌ Failed to send pit alert to ${teamName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        type: 'error',
+        teamKart: kartNum
+      }]);
+    }
+  }, [selectedTrackId]);
+
 const RaceDashboard = () => {
   const { user, logout } = useAuth();
   const router = useRouter();
@@ -862,6 +926,14 @@ const RaceDashboard = () => {
                       filled={monitoredTeams.includes(team.Kart)} 
                       onClick={() => toggleTeamMonitoring(team.Kart)}
                     />
+                    {monitoredTeams.includes(team.Kart) && team.Status !== 'Pit-in' && (
+                      <PitAlertButton 
+                        kartNum={team.Kart}
+                        teamName={team.Team}
+                        trackId={selectedTrackId}
+                        onTriggerAlert={triggerPitAlert}
+                      />
+                    )}
                   </td>
                 </tr>
               ))
