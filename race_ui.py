@@ -23,8 +23,8 @@ from multi_track_manager import MultiTrackManager
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)  # For session management
-CORS(app, 
-     origins=["http://localhost:3000", "https://krranalyser.fr", "http://krranalyser.fr", "https://tpresearch.fr", "http://tpresearch.fr", "https://www.tpresearch.fr", "http://www.tpresearch.fr"],
+CORS(app,
+     origins=["http://localhost:3000", "https://krranalyser.fr", "http://krranalyser.fr", "https://tpresearch.fr", "http://tpresearch.fr", "https://www.tpresearch.fr", "http://www.tpresearch.fr", "https://kart.krranalyser.fr", "http://kart.krranalyser.fr"],
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
@@ -189,7 +189,7 @@ def handle_join_team_room(data):
 
     try:
         # Validate track exists
-        track_info = track_db.get_track(track_id)
+        track_info = track_db.get_track_by_id(track_id)
         if not track_info:
             emit('team_room_error', {
                 'error': f'Track {track_id} not found',
@@ -197,30 +197,8 @@ def handle_join_team_room(data):
             })
             return
 
-        # Validate team exists on this track by checking current standings
-        db_path = f'race_data_track_{track_id}.db'
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            # Check if team exists in lap_times table (most recent data)
-            cursor.execute('''
-                SELECT DISTINCT team_name
-                FROM lap_times
-                WHERE team_name = ?
-                ORDER BY timestamp DESC
-                LIMIT 1
-            ''', (team_name,))
-            result = cursor.fetchone()
-
-            if not result:
-                emit('team_room_error', {
-                    'error': f'Team "{team_name}" not found on track {track_id}',
-                    'track_id': track_id,
-                    'track_name': track_info['track_name'],
-                    'timestamp': datetime.now().isoformat()
-                })
-                return
-
-        # Join the team-specific room
+        # Join the team-specific room (no team validation - allow subscribing
+        # before data arrives so clients receive updates as soon as racing starts)
         room = f'team_track_{track_id}_{team_name}'
         join_room(room)
         print(f"Client {request.sid} joined team room: {room}")
@@ -1488,7 +1466,7 @@ def start_update_thread():
 # Authentication helper functions
 def get_db_connection():
     """Get database connection"""
-    conn = sqlite3.connect('race_data.db')
+    conn = sqlite3.connect('auth.db')
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -3864,64 +3842,6 @@ def trigger_pit_alert():
         }), 500
 
 # Socket.IO Admin Endpoints - for monitoring room joins
-@socketio.on('join_team_room')
-def handle_join_team_room_monitor(data):
-    """Enhanced version that logs all room joins for monitoring"""
-    """Handle client joining a team-specific room for a track"""
-    track_id = data.get('track_id')
-    team_name = data.get('team_name')
-    
-    if not track_id or not team_name:
-        emit('team_room_error', {
-            'error': 'track_id and team_name are required',
-            'timestamp': datetime.now().isoformat()
-        })
-        return
-    
-    try:
-        # Join the team-specific room
-        room = f'team_track_{track_id}_{team_name}'
-        join_room(room)
-        
-        # Log for monitoring
-        print(f"[ROOM MONITOR] Client {request.sid} JOINED team room: {room}")
-        print(f"[ROOM MONITOR] Active clients in {room}: {len(socketio.server.rooms.get(room, set()))}")
-        
-        # Send confirmation with team and track info
-        emit('team_room_joined', {
-            'track_id': track_id,
-            'team_name': team_name,
-            'room': room,
-            'sid': request.sid
-        })
-        
-    except Exception as e:
-        print(f"Error handling join_team_room: {e}")
-        emit('team_room_error', {
-            'error': f'Failed to join team room: {str(e)}',
-            'timestamp': datetime.now().isoformat()
-        })
-
-@socketio.on('leave_team_room')
-def handle_leave_team_room_monitor(data):
-    """Enhanced version that logs all room leaves for monitoring"""
-    """Handle client leaving a team-specific room"""
-    track_id = data.get('track_id')
-    team_name = data.get('team_name')
-    
-    if not track_id or not team_name:
-        return
-    
-    try:
-        room = f'team_track_{track_id}_{team_name}'
-        leave_room(room)
-        
-        # Log for monitoring
-        print(f"[ROOM MONITOR] Client {request.sid} LEFT team room: {room}")
-        print(f"[ROOM MONITOR] Remaining clients in {room}: {len(socketio.server.rooms.get(room, set()))}")
-        
-    except Exception as e:
-        print(f"Error handling leave_team_room: {e}")
 
 @app.route('/api/admin/socketio/rooms', methods=['POST'])
 @admin_required
