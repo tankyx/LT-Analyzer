@@ -35,7 +35,12 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<'users' | 'tracks'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Split loading per-resource. A single shared flag caused flicker when
+  // fetchUsers and fetchTracks finished at different times (either could flip
+  // it off while the other was still in flight).
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingTracks, setLoadingTracks] = useState(false);
+  const loading = loadingUsers || loadingTracks;
   const [showUserModal, setShowUserModal] = useState(false);
   const [showTrackModal, setShowTrackModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -70,7 +75,7 @@ export default function AdminDashboard() {
   }, [user, authLoading, router]);
 
   const fetchUsers = async () => {
-    setLoading(true);
+    setLoadingUsers(true);
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
         credentials: 'include',
@@ -82,12 +87,12 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error('Failed to fetch users:', error);
     } finally {
-      setLoading(false);
+      setLoadingUsers(false);
     }
   };
 
   const fetchTracks = async () => {
-    setLoading(true);
+    setLoadingTracks(true);
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/tracks`, {
         credentials: 'include',
@@ -99,7 +104,7 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error('Failed to fetch tracks:', error);
     } finally {
-      setLoading(false);
+      setLoadingTracks(false);
     }
   };
 

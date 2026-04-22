@@ -1,13 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { API_BASE_URL } from '../../utils/config';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const router = useRouter();
+  const { login } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -15,25 +18,11 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ username, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        // Store user info in localStorage
-        localStorage.setItem('user', JSON.stringify(data.user));
-        
-        // Force redirect to dashboard
-        window.location.href = '/dashboard';
+      const ok = await login(username, password);
+      if (ok) {
+        router.push('/dashboard');
       } else {
-        setError(data.error || 'Login failed');
+        setError('Login failed');
       }
     } catch {
       setError('Network error. Please try again.');

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import ApiService from '../../services/ApiService';
 import { useAuth } from '../../contexts/AuthContext';
@@ -47,6 +47,9 @@ export default function TeamProfilePage() {
   const [expandedSession, setExpandedSession] = useState<{trackId: number, sessionId: number} | null>(null);
   const [sessionLaps, setSessionLaps] = useState<SessionLap[]>([]);
   const [loadingLaps, setLoadingLaps] = useState(false);
+  // Monotonic request id for getSessionLaps so out-of-order responses can't
+  // overwrite the currently-displayed state.
+  const sessionLapsReqId = useRef(0);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -129,24 +132,28 @@ export default function TeamProfilePage() {
   };
 
   const toggleSessionLaps = async (trackId: number, sessionId: number) => {
-    // If clicking the same session, collapse it
+    // If clicking the same session, collapse it. Bump the request id so any
+    // still-in-flight fetch is ignored on arrival.
     if (expandedSession?.trackId === trackId && expandedSession?.sessionId === sessionId) {
+      sessionLapsReqId.current += 1;
       setExpandedSession(null);
       setSessionLaps([]);
       return;
     }
 
-    // Expand new session and fetch laps
+    const reqId = ++sessionLapsReqId.current;
     setExpandedSession({ trackId, sessionId });
     setLoadingLaps(true);
     try {
       const result = await ApiService.getSessionLaps(teamName, trackId, sessionId);
+      if (reqId !== sessionLapsReqId.current) return; // stale response
       setSessionLaps(result.laps || []);
     } catch (err) {
+      if (reqId !== sessionLapsReqId.current) return;
       console.error('Error fetching session laps:', err);
       setSessionLaps([]);
     } finally {
-      setLoadingLaps(false);
+      if (reqId === sessionLapsReqId.current) setLoadingLaps(false);
     }
   };
 

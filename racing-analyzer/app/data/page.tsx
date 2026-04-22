@@ -200,6 +200,7 @@ export default function DataPage() {
 
   // Load top teams when track, limit, or session filter changes
   useEffect(() => {
+    let cancelled = false;
     const loadTopTeams = async () => {
       setLoadingTopTeams(true);
       try {
@@ -208,38 +209,47 @@ export default function DataPage() {
           topTeamsLimit,
           globalSessionFilter || undefined
         );
+        if (cancelled) return;
         setTopTeams(result.teams || []);
       } catch (error) {
+        if (cancelled) return;
         console.error('Error loading top teams:', error);
         setTopTeams([]);
       } finally {
-        setLoadingTopTeams(false);
+        if (!cancelled) setLoadingTopTeams(false);
       }
     };
 
     loadTopTeams();
+    return () => { cancelled = true; };
   }, [selectedTrackId, topTeamsLimit, globalSessionFilter]);
 
   // Search teams with debounce
   useEffect(() => {
+    let cancelled = false;
     const timer = setTimeout(async () => {
       if (searchQuery.trim().length >= 2) {
         setSearching(true);
         try {
           const result = await ApiService.searchTeams(searchQuery, selectedTrackId);
+          if (cancelled) return;
           setSearchResults(result.teams || []);
         } catch (error) {
+          if (cancelled) return;
           console.error('Error searching teams:', error);
           setSearchResults([]);
         } finally {
-          setSearching(false);
+          if (!cancelled) setSearching(false);
         }
       } else {
         setSearchResults([]);
       }
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [searchQuery, selectedTrackId]);
 
   // Fetch common sessions when teams change
@@ -294,36 +304,46 @@ export default function DataPage() {
 
   // Refetch stats when session changes
   useEffect(() => {
+    let cancelled = false;
     const refetchStats = async () => {
       if (selectedTeams.length === 0) return;
 
       setLoadingStats(true);
       try {
-        // Refetch individual team stats
+        // Use allSettled so one team's failure doesn't wipe out the whole panel.
         const statsPromises = selectedTeams.map(team =>
           ApiService.getTeamStats(team, selectedSession || undefined, selectedTrackId)
         );
-        const statsResults = await Promise.all(statsPromises);
+        const statsResults = await Promise.allSettled(statsPromises);
+        if (cancelled) return;
 
         const newTeamStats: { [key: string]: TeamStats } = {};
         selectedTeams.forEach((team, idx) => {
-          newTeamStats[team] = statsResults[idx];
+          const r = statsResults[idx];
+          if (r.status === 'fulfilled') {
+            newTeamStats[team] = r.value;
+          } else {
+            console.error(`Stats fetch failed for ${team}:`, r.reason);
+          }
         });
         setTeamStats(newTeamStats);
 
-        // Refetch comparison data if applicable
         if (selectedTeams.length >= 2) {
           const comparison = await ApiService.compareTeams(selectedTeams, selectedSession || undefined, selectedTrackId);
+          if (cancelled) return;
           setComparisonData(comparison.comparison || []);
         }
       } catch (error) {
+        if (cancelled) return;
         console.error('Error refetching stats:', error);
       } finally {
-        setLoadingStats(false);
+        if (!cancelled) setLoadingStats(false);
       }
     };
 
     refetchStats();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSession]);
 
   const addTeamToComparison = async (teamName: string) => {
@@ -645,9 +665,9 @@ export default function DataPage() {
           {/* Search Results */}
           {searchResults.length > 0 && (
             <div className="mt-4 bg-gray-700 rounded-lg max-h-60 overflow-y-auto">
-              {searchResults.map((team) => (
+              {searchResults.map((team, idx) => (
                 <div
-                  key={team.name}
+                  key={`${team.name}-${idx}`}
                   onClick={() => addTeamToComparison(team.name)}
                   className="px-4 py-2 hover:bg-gray-600 cursor-pointer flex justify-between items-center border-b border-gray-600 last:border-b-0"
                 >
@@ -699,7 +719,7 @@ export default function DataPage() {
                     const isSelected = selectedTeams.includes(team.name);
                     return (
                       <tr
-                        key={team.name}
+                        key={`${index}-${team.name}`}
                         className={`border-b border-gray-700 transition-colors ${
                           isSelected
                             ? 'bg-blue-900 bg-opacity-30'

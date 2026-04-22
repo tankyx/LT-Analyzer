@@ -49,18 +49,28 @@ export const saveToStorage = <T>(key: string, value: T): void => {
 };
 
 /**
- * Generic function to load data from localStorage
+ * Generic function to load data from localStorage.
+ *
+ * If the stored value fails to parse (corrupt JSON from a previous version or
+ * a browser extension), remove it so we don't keep hitting the same error on
+ * every mount and the caller falls back to defaultValue cleanly.
  */
 export const loadFromStorage = <T>(key: string, defaultValue: T): T => {
+  if (typeof window === 'undefined') {
+    return defaultValue;
+  }
   try {
-    if (typeof window !== 'undefined') {
-      const item = localStorage.getItem(key);
-      if (item) {
-        return JSON.parse(item) as T;
-      }
+    const item = localStorage.getItem(key);
+    if (item) {
+      return JSON.parse(item) as T;
     }
   } catch (error) {
-    console.error(`Error loading from localStorage (${key}):`, error);
+    console.error(`Error loading from localStorage (${key}), clearing corrupt entry:`, error);
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Ignore — quota/security errors shouldn't block the caller.
+    }
   }
   return defaultValue;
 };
