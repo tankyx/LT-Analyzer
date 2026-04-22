@@ -12,6 +12,11 @@ from bs4 import BeautifulSoup
 import re
 
 
+# Pre-compile hot-path regexes so they aren't built inside the WebSocket
+# message loop (which fires many times per second per track).
+_LAPTIME_RE = re.compile(r'^\d{1,2}:\d{2}\.\d{3}$')
+
+
 class ApexTimingWebSocketParser:
     """WebSocket-based parser for Apex Timing live data"""
     
@@ -502,9 +507,7 @@ class ApexTimingWebSocketParser:
 
                 # Validate team name - warn if it looks like a lap time
                 if team_name and ':' in team_name and '.' in team_name:
-                    # Check if it matches lap time format (M:SS.mmm or MM:SS.mmm)
-                    import re
-                    if re.match(r'^\d{1,2}:\d{2}\.\d{3}$', team_name):
+                    if _LAPTIME_RE.match(team_name):
                         self.logger.warning(f"Team name looks like lap time for kart {row_data.get('Kart', '')}: '{team_name}' - possible column mapping issue")
 
                 team_data = {
@@ -546,7 +549,7 @@ class ApexTimingWebSocketParser:
                     WHERE session_id = ? 
                     ORDER BY timestamp DESC
                 ''', conn, params=(session_id,))
-        except:
+        except Exception:
             previous_state = pd.DataFrame()
         
         for _, row in df.iterrows():
@@ -667,9 +670,17 @@ class ApexTimingWebSocketParser:
                         close_timeout=10
                     )
             except Exception as e:
-                self.logger.warning(f"Default connection failed: {e}, trying with SSL context...")
-                # Try with custom SSL context if it's WSS
-                if ws_url.startswith('wss://'):
+                # Only fall back to a custom SSL context for wss:// AND only disable
+                # verification if the operator opted in explicitly via APEX_TLS_VERIFY=0.
+                # Blindly disabling verification on every failure masks real network
+                # errors and exposes the upstream to MITM.
+                import os as _os
+                allow_insecure = _os.environ.get('APEX_TLS_VERIFY', '1') == '0'
+                if ws_url.startswith('wss://') and allow_insecure:
+                    self.logger.warning(
+                        f"Default connection failed: {e}. Retrying with TLS "
+                        "verification DISABLED (APEX_TLS_VERIFY=0)."
+                    )
                     import ssl
                     ssl_context = ssl.create_default_context()
                     ssl_context.check_hostname = False

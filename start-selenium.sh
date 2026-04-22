@@ -5,6 +5,13 @@ set -e  # Exit on any error
 cd /home/ubuntu/LT-Analyzer
 source racing-venv/bin/activate
 
+# Load environment variables from .env (FLASK_SECRET_KEY, CORS_ORIGINS, etc.)
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 # Set environment variables
 export PYTHONUNBUFFERED=1
 

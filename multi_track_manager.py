@@ -256,7 +256,10 @@ class MultiTrackManager:
                         status['teams_count'] = 0
                 else:
                     status['teams_count'] = 0
-            except Exception:
+            except Exception as e:
+                self.logger.warning(
+                    f"Track {track_id}: failed to read current standings for status: {e}"
+                )
                 status['teams_count'] = 0
 
             tracks_status.append(status)
@@ -307,6 +310,8 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
         # In-memory cache for previous state (performance optimization)
         # Structure: {session_id: {kart_number: {'RunTime': int, 'last_lap': str, 'best_lap': str, 'pit_stops': int}}}
         self.previous_state_cache = {}
+        # Counter for write commits, used to drive periodic cache cleanup.
+        self._commit_count = 0
 
         # Now call parent init which will call setup_database()
         super().__init__()
@@ -725,8 +730,11 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                     conn.commit()
                     self.logger.debug(f"Track {self.track_id}: Stored {len(current_records)} records, {len(lap_history_records)} lap history records")
 
-                # Periodically clean up old session caches (every 10 commits)
-                if len(current_records) > 0 and session_id % 10 == 0:
+                # Periodically clean up old session caches (every 10 commits).
+                # Previously used `session_id % 10 == 0` which triggered at most
+                # once per 10 new sessions — effectively never during a single race.
+                self._commit_count += 1
+                if self._commit_count % 10 == 0:
                     self.cleanup_old_cache_sessions(keep_last_n=2)
 
                 # Broadcast update to Socket.IO room for this track

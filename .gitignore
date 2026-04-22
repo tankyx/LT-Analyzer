@@ -1,4 +1,6 @@
 /racing-analyzer/.next
+.env
+.env.local
 __pycache__/
 repopack-output.txt
 lt-venv/
@@ -27,3 +29,6 @@ htmlcov/
 
 # Database files
 race_data.db
+
+# TypeScript build info
+**/tsconfig.tsbuildinfo

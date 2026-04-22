@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import threading
 import time
 import traceback
@@ -8,10 +9,12 @@ from collections import deque
 import random
 import math
 import hashlib
+import hmac
 import secrets
 import sqlite3
 from functools import wraps
 
+import bcrypt
 from flask import Flask, jsonify, request, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
@@ -20,25 +23,76 @@ from apex_timing_websocket import ApexTimingWebSocketParser
 from database_manager import TrackDatabase
 from multi_track_manager import MultiTrackManager
 
+
+def _parse_cors_origins():
+    raw = os.environ.get('CORS_ORIGINS', '')
+    origins = [o.strip() for o in raw.split(',') if o.strip()]
+    if not origins:
+        # Fallback for local dev only; production MUST set CORS_ORIGINS.
+        origins = ['http://localhost:3000']
+    return origins
+
+
+CORS_ORIGINS = _parse_cors_origins()
+
+# Flask secret key: must be stable across restarts so sessions survive deploys.
+# Fail loudly if not configured in production to avoid silently regenerating on every restart.
+_secret = os.environ.get('FLASK_SECRET_KEY')
+if not _secret:
+    if os.environ.get('FLASK_ENV') == 'production':
+        raise RuntimeError('FLASK_SECRET_KEY environment variable is required in production')
+    _secret = secrets.token_hex(32)
+    print('WARNING: FLASK_SECRET_KEY not set — generated an ephemeral key. Sessions will not survive restart.')
+
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)  # For session management
+app.secret_key = _secret
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV') == 'production',
+)
 CORS(app,
-     origins=["http://localhost:3000", "https://krranalyser.fr", "http://krranalyser.fr", "https://tpresearch.fr", "http://tpresearch.fr", "https://www.tpresearch.fr", "http://www.tpresearch.fr", "https://kart.krranalyser.fr", "http://kart.krranalyser.fr"],
+     origins=CORS_ORIGINS,
      supports_credentials=True,
      allow_headers=["Content-Type", "Authorization"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
-# Initialize SocketIO with CORS support and proxy handling
+# Initialize SocketIO — mirror the HTTP CORS whitelist (no wildcards).
 socketio = SocketIO(
-    app, 
-    cors_allowed_origins="*", 
+    app,
+    cors_allowed_origins=CORS_ORIGINS,
     async_mode='threading',
     logger=False,
     engineio_logger=False,
     ping_interval=25,  # Send ping every 25 seconds
     ping_timeout=60    # Wait 60 seconds for pong response
 )
+
+
+# -- Password hashing helpers ------------------------------------------------
+# bcrypt is the canonical store. Legacy SHA256 hashes (64 hex chars) are
+# transparently accepted at login and upgraded to bcrypt on successful auth.
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def _looks_like_bcrypt(stored: str) -> bool:
+    return isinstance(stored, str) and stored.startswith(('$2a$', '$2b$', '$2y$'))
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    if not password or not stored_hash:
+        return False
+    if _looks_like_bcrypt(stored_hash):
+        try:
+            return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8'))
+        except (ValueError, TypeError):
+            return False
+    # Legacy SHA256 (64 hex chars). Constant-time compare.
+    legacy = hashlib.sha256(password.encode('utf-8')).hexdigest()
+    return hmac.compare_digest(legacy, stored_hash)
 
 # Initialize track database
 track_db = TrackDatabase()
@@ -91,14 +145,34 @@ multi_track_thread = None
 
 # WebSocket tracking
 connected_clients = set()
+connected_clients_lock = threading.Lock()
 last_race_data_hash = None
+
+
+def _internal_error(exc: Exception, context: str = 'request'):
+    """Log full error server-side, return a generic JSON error to the client.
+
+    Avoids leaking SQL errors, stack frames, or file paths to API consumers.
+    UnknownTrackError is surfaced as a proper 404 instead of a masked 500.
+    """
+    # Surface domain errors that already carry a user-facing message.
+    # Defined at module scope below; referenced by name to sidestep import order.
+    if isinstance(exc, UnknownTrackError):
+        return jsonify({'error': str(exc)}), 404
+
+    app.logger.error('%s failed: %s', context, exc, exc_info=True)
+    # Also print for pm2 capture even if app.logger isn't configured.
+    print(f'[ERROR] {context}: {exc}')
+    traceback.print_exc()
+    return jsonify({'error': 'An internal error occurred'}), 500
 
 # WebSocket connection handlers
 @socketio.on('connect')
 def handle_connect(auth=None):
     """Handle client connection"""
     print(f"Client connected: {request.sid}")
-    connected_clients.add(request.sid)
+    with connected_clients_lock:
+        connected_clients.add(request.sid)
     join_room('race_updates')
     
     # Convert gap_history deques to lists for JSON serialization
@@ -130,7 +204,8 @@ def handle_connect(auth=None):
 def handle_disconnect():
     """Handle client disconnection"""
     print(f"Client disconnected: {request.sid}")
-    connected_clients.discard(request.sid)
+    with connected_clients_lock:
+        connected_clients.discard(request.sid)
     leave_room('race_updates')
     leave_room('standings_stream')
 
@@ -213,9 +288,10 @@ def handle_join_team_room(data):
         })
 
     except Exception as e:
+        app.logger.exception('Error handling join_team_room')
         print(f"Error handling join_team_room: {e}")
         emit('team_room_error', {
-            'error': f'Failed to join team room: {str(e)}',
+            'error': 'Failed to join team room',
             'timestamp': datetime.now().isoformat()
         })
 
@@ -281,8 +357,9 @@ def handle_team_delta_request(data):
 
 def emit_race_update(update_type='full', data=None):
     """Emit race data updates to all connected clients"""
-    if len(connected_clients) == 0:
-        return
+    with connected_clients_lock:
+        if not connected_clients:
+            return
     
     # Only emit if we have actual data to send
     if not race_data.get('teams') and update_type != 'custom':
@@ -386,10 +463,10 @@ class Team:
         }
         
     def format_time(self, seconds):
-        """Format seconds to MM:SS.sss"""
+        """Format seconds to M:SS.sss (e.g. 1:23.456)."""
         minutes = int(seconds // 60)
         seconds_remainder = seconds % 60
-        return f"{minutes}:{seconds_remainder:06.3f}".replace(".", ":")
+        return f"{minutes}:{seconds_remainder:06.3f}"
         
     def format_runtime(self, seconds):
         """Format seconds to MM:SS"""
@@ -495,36 +572,29 @@ def get_average_lap_time(session_id=None, kart_numbers=None, default=None):
         default = DEFAULT_LAP_TIME
     
     try:
-        conn = sqlite3.connect('race_data.db')
-        cursor = conn.cursor()
-        
-        # Build query based on parameters
-        query = """
-            SELECT lap_time 
-            FROM lap_history 
-            WHERE lap_time IS NOT NULL 
-            AND lap_time != ''
-            AND lap_time NOT LIKE '%Tour%'
-        """
-        params = []
-        
-        if session_id:
-            query += " AND session_id = ?"
-            params.append(session_id)
-        
-        if kart_numbers:
-            placeholders = ','.join(['?' for _ in kart_numbers])
-            query += f" AND kart_number IN ({placeholders})"
-            params.extend(kart_numbers)
-        
-        # Get last 50 valid lap times
-        query += " ORDER BY id DESC LIMIT 50"
-        
-        cursor.execute(query, params)
-        lap_times = cursor.fetchall()
-        
+        with sqlite3.connect('race_data.db') as conn:
+            query = """
+                SELECT lap_time
+                FROM lap_history
+                WHERE lap_time IS NOT NULL
+                AND lap_time != ''
+                AND lap_time NOT LIKE '%Tour%'
+            """
+            params = []
+
+            if session_id:
+                query += " AND session_id = ?"
+                params.append(session_id)
+
+            if kart_numbers:
+                placeholders = ','.join(['?' for _ in kart_numbers])
+                query += f" AND kart_number IN ({placeholders})"
+                params.extend(kart_numbers)
+
+            query += " ORDER BY id DESC LIMIT 50"
+            lap_times = conn.execute(query, params).fetchall()
+
         if not lap_times:
-            conn.close()
             return default
         
         # Convert lap times to seconds
@@ -549,17 +619,14 @@ def get_average_lap_time(session_id=None, kart_numbers=None, default=None):
                     if 50 < lap_seconds < 150:
                         total_seconds += lap_seconds
                         valid_count += 1
-            except:
+            except Exception:
                 continue
-        
-        conn.close()
-        
+
         if valid_count > 0:
             avg_lap_time = total_seconds / valid_count
             return round(avg_lap_time, 1)
-        else:
-            return default
-            
+        return default
+
     except Exception as e:
         print(f"Error calculating average lap time: {e}")
         return default
@@ -567,43 +634,62 @@ def get_average_lap_time(session_id=None, kart_numbers=None, default=None):
 # Store previous delta values for change detection
 previous_deltas = {}
 
+
+def parse_time_to_seconds(time_str):
+    """Convert a time string (MM:SS.sss or SS.sss) to seconds.
+
+    Returns float('inf') for empty/None input; raises ValueError on malformed.
+    Commas are tolerated as decimal separators (some Apex feeds emit them).
+    """
+    if not time_str:
+        return float('inf')
+    s = time_str.replace(',', '.')
+    if ':' in s:
+        parts = s.split(':')
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + float(parts[1])
+    return float(s)
+
+
+def _safe_parse_time(time_str, default=float('inf')):
+    try:
+        return parse_time_to_seconds(time_str)
+    except (ValueError, TypeError):
+        return default
+
+
 def get_standings_with_deltas():
     """Get current standings with P-1 and P+1 deltas for all teams"""
     teams = race_data.get('teams', [])
     if not teams:
         return []
-    
+
     # Check if this is a qualification or session (not a race)
     session_info = race_data.get('session_info', {})
     session_type = session_info.get('title2', '') or session_info.get('title1', '') or session_info.get('title', '')
     is_qualification = any(keyword in session_type.lower() for keyword in ['qualification', 'session', 'practice', 'qualify'])
-    
+
     # Sort teams by position
     sorted_teams = sorted(teams, key=lambda t: int(t.get('Position', '999') or '999'))
+
+    # Resolve the average lap time ONCE per call. Previously this was queried
+    # per lapped team inside the loop, opening race_data.db O(n) times.
+    avg_lap_cache = None
+
+    def _avg_lap():
+        nonlocal avg_lap_cache
+        if avg_lap_cache is None:
+            avg_lap_cache = get_average_lap_time()
+        return avg_lap_cache
 
     standings = []
     for i, team in enumerate(sorted_teams):
         position = int(team.get('Position', '0') or '0')
         kart_num = team.get('Kart', '')
-        
+
         # Get current team's gap/best lap
         if is_qualification:
-            # In qualification, use best lap times
-            best_lap = team.get('Best Lap', '')
-            if best_lap:
-                try:
-                    # Parse time to seconds
-                    if ':' in best_lap:
-                        parts = best_lap.split(':')
-                        minutes = int(parts[0])
-                        seconds = float(parts[1].replace(',', '.'))
-                        current_gap = minutes * 60 + seconds
-                    else:
-                        current_gap = float(best_lap.replace(',', '.'))
-                except:
-                    current_gap = float('inf')  # No valid lap
-            else:
-                current_gap = float('inf')  # No lap set
+            current_gap = _safe_parse_time(team.get('Best Lap', ''))
         else:
             # Normal race mode - use gap
             if position == 1:
@@ -613,40 +699,16 @@ def get_standings_with_deltas():
                 if 'Tour' in gap_str:
                     # Lapped - use average lap time
                     laps_behind = int(gap_str.split()[0])
-                    current_gap = laps_behind * get_average_lap_time()
+                    current_gap = laps_behind * _avg_lap()
                 else:
-                    try:
-                        # Parse time to seconds
-                        if ':' in gap_str:
-                            parts = gap_str.split(':')
-                            minutes = int(parts[0])
-                            seconds = float(parts[1].replace(',', '.'))
-                            current_gap = minutes * 60 + seconds
-                        else:
-                            current_gap = float(gap_str.replace(',', '.'))
-                    except:
-                        current_gap = 0.0
-        
+                    current_gap = _safe_parse_time(gap_str, default=0.0)
+
         # Calculate delta to P-1 (team ahead)
         delta_p_minus_1 = None
         if i > 0:  # Not the leader
             prev_team = sorted_teams[i-1]
             if is_qualification:
-                # In qualification, use best lap times
-                prev_best_lap = prev_team.get('Best Lap', '')
-                if prev_best_lap:
-                    try:
-                        if ':' in prev_best_lap:
-                            parts = prev_best_lap.split(':')
-                            minutes = int(parts[0])
-                            seconds = float(parts[1].replace(',', '.'))
-                            prev_gap = minutes * 60 + seconds
-                        else:
-                            prev_gap = float(prev_best_lap.replace(',', '.'))
-                    except:
-                        prev_gap = float('inf')
-                else:
-                    prev_gap = float('inf')
+                prev_gap = _safe_parse_time(prev_team.get('Best Lap', ''))
             else:
                 # Normal race mode - use gap
                 prev_gap = 0.0
@@ -655,67 +717,30 @@ def get_standings_with_deltas():
                     prev_gap_str = prev_team.get('Gap', '0')
                     if 'Tour' in prev_gap_str:
                         prev_laps = int(prev_gap_str.split()[0])
-                        prev_gap = prev_laps * get_average_lap_time()
+                        prev_gap = prev_laps * _avg_lap()
                     else:
-                        try:
-                            if ':' in prev_gap_str:
-                                parts = prev_gap_str.split(':')
-                                minutes = int(parts[0])
-                                seconds = float(parts[1].replace(',', '.'))
-                                prev_gap = minutes * 60 + seconds
-                            else:
-                                prev_gap = float(prev_gap_str.replace(',', '.'))
-                        except:
-                            prev_gap = 0.0
-            
+                        prev_gap = _safe_parse_time(prev_gap_str, default=0.0)
+
             if current_gap != float('inf') and prev_gap != float('inf'):
                 delta_p_minus_1 = round(current_gap - prev_gap, 3)
-            else:
-                delta_p_minus_1 = None
-        
+
         # Calculate delta to P+1 (team behind)
         delta_p_plus_1 = None
         if i < len(sorted_teams) - 1:  # Not the last place
             next_team = sorted_teams[i+1]
             if is_qualification:
-                # In qualification, use best lap times
-                next_best_lap = next_team.get('Best Lap', '')
-                if next_best_lap:
-                    try:
-                        if ':' in next_best_lap:
-                            parts = next_best_lap.split(':')
-                            minutes = int(parts[0])
-                            seconds = float(parts[1].replace(',', '.'))
-                            next_gap = minutes * 60 + seconds
-                        else:
-                            next_gap = float(next_best_lap.replace(',', '.'))
-                    except:
-                        next_gap = float('inf')
-                else:
-                    next_gap = float('inf')
+                next_gap = _safe_parse_time(next_team.get('Best Lap', ''))
             else:
-                # Normal race mode - use gap
                 next_gap_str = next_team.get('Gap', '0')
                 next_gap = 0.0
                 if 'Tour' in next_gap_str:
                     next_laps = int(next_gap_str.split()[0])
-                    next_gap = next_laps * get_average_lap_time()
+                    next_gap = next_laps * _avg_lap()
                 else:
-                    try:
-                        if ':' in next_gap_str:
-                            parts = next_gap_str.split(':')
-                            minutes = int(parts[0])
-                            seconds = float(parts[1].replace(',', '.'))
-                            next_gap = minutes * 60 + seconds
-                        else:
-                            next_gap = float(next_gap_str.replace(',', '.'))
-                    except:
-                        next_gap = 0.0
-            
+                    next_gap = _safe_parse_time(next_gap_str, default=0.0)
+
             if current_gap != float('inf') and next_gap != float('inf'):
                 delta_p_plus_1 = round(next_gap - current_gap, 3)
-            else:
-                delta_p_plus_1 = None
         
         standings.append({
             'position': position,
@@ -827,20 +852,22 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
     try:
         my_pit_stops = int(my_team.get('Pit Stops', '0') or '0')
         my_remaining_stops = max(0, REQUIRED_PIT_STOPS - my_pit_stops)
-        
-        # Helper function to parse time string to seconds
-        def parse_time_to_seconds(time_str):
-            """Convert time string (MM:SS.sss or SS.sss) to seconds"""
-            if ':' in time_str:
-                parts = time_str.split(':')
-                if len(parts) == 2:
-                    # MM:SS.sss format
-                    minutes = int(parts[0])
-                    seconds = float(parts[1].replace(',', '.'))
-                    return minutes * 60 + seconds
-            # Just seconds
-            return float(time_str.replace(',', '.'))
-        
+
+        # parse_time_to_seconds is defined at module scope (see above).
+
+        # Cache of get_average_lap_time() results for this call. Lazy so we only
+        # pay the DB hit if a branch actually needs it.
+        _avg_lap_cache = {}
+
+        def _cached_avg(kart_numbers_tuple=None):
+            if kart_numbers_tuple in _avg_lap_cache:
+                return _avg_lap_cache[kart_numbers_tuple]
+            value = get_average_lap_time(
+                kart_numbers=list(kart_numbers_tuple) if kart_numbers_tuple else None
+            )
+            _avg_lap_cache[kart_numbers_tuple] = value
+            return value
+
         # In qualification/practice, use best lap times instead of gaps
         if is_qualification:
             # Get my team's best lap time
@@ -848,7 +875,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
             if my_best_lap:
                 try:
                     my_base_gap = parse_time_to_seconds(my_best_lap)
-                except:
+                except Exception:
                     my_base_gap = float('inf')  # No valid lap time
             else:
                 my_base_gap = float('inf')  # No lap set
@@ -871,7 +898,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                     # Handle normal gap (could be MM:SS.sss or SS.sss)
                     try:
                         my_base_gap = parse_time_to_seconds(gap_str)
-                    except:
+                    except Exception:
                         my_base_gap = 0.0
         
         # Initialize gap history for new karts
@@ -895,20 +922,9 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                     # Calculate gap between monitored team and my team
                     mon_pit_stops = int(monitored_team.get('Pit Stops', '0') or '0')
                     mon_remaining_stops = max(0, REQUIRED_PIT_STOPS - mon_pit_stops)
-                    
-                    # Helper function to parse time string to seconds
-                    def parse_time_to_seconds(time_str):
-                        """Convert time string (MM:SS.sss or SS.sss) to seconds"""
-                        if ':' in time_str:
-                            parts = time_str.split(':')
-                            if len(parts) == 2:
-                                # MM:SS.sss format
-                                minutes = int(parts[0])
-                                seconds = float(parts[1].replace(',', '.'))
-                                return minutes * 60 + seconds
-                        # Just seconds
-                        return float(time_str.replace(',', '.'))
-                    
+
+                    # parse_time_to_seconds is module-level; no redefinition here.
+
                     # Count laps difference between my team and monitored team
                     def count_lap_difference(my_pos, mon_pos):
                         """Count how many lapped teams are between positions"""
@@ -940,7 +956,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                         if mon_best_lap:
                             try:
                                 mon_base_gap = parse_time_to_seconds(mon_best_lap)
-                            except:
+                            except Exception:
                                 mon_base_gap = float('inf')  # No valid lap time
                         else:
                             mon_base_gap = float('inf')  # No lap set
@@ -979,16 +995,13 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                                         # Find the time gap to the closest non-lapped team
                                         mon_base_gap = my_base_gap  # Start with same base
                                     else:
-                                        # Calculate gap based on lap difference
-                                        # Get average lap time from recent data for better accuracy
-                                        avg_lap_time = get_average_lap_time()
-                                        
-                                        # Also consider the specific teams' recent lap times if available
-                                        team_karts = [int(my_team.get('Kart', '0') or '0'), int(monitored_team.get('Kart', '0') or '0')]
-                                        team_avg = get_average_lap_time(kart_numbers=team_karts)
-                                        if team_avg != 90.0:  # If we got valid team-specific data
+                                        # Calculate gap based on lap difference, prefer team-specific avg.
+                                        avg_lap_time = _cached_avg()
+                                        team_karts = (int(my_team.get('Kart', '0') or '0'), int(monitored_team.get('Kart', '0') or '0'))
+                                        team_avg = _cached_avg(team_karts)
+                                        if team_avg != 90.0:
                                             avg_lap_time = team_avg
-                                        
+
                                         mon_base_gap = my_base_gap + (actual_lap_diff * avg_lap_time)
                             else:
                                 # Gap is in seconds (time format)
@@ -1000,13 +1013,10 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                                     
                                     # If there are lapped teams between us, account for lap difference
                                     if laps_between > 0:
-                                        # Get average lap time from recent data
-                                        avg_lap_time = get_average_lap_time()
-                                        
-                                        # Also consider the specific teams' recent lap times if available
-                                        team_karts = [int(my_team.get('Kart', '0') or '0'), int(monitored_team.get('Kart', '0') or '0')]
-                                        team_avg = get_average_lap_time(kart_numbers=team_karts)
-                                        if team_avg != 90.0:  # If we got valid team-specific data
+                                        avg_lap_time = _cached_avg()
+                                        team_karts = (int(my_team.get('Kart', '0') or '0'), int(monitored_team.get('Kart', '0') or '0'))
+                                        team_avg = _cached_avg(team_karts)
+                                        if team_avg != 90.0:
                                             avg_lap_time = team_avg
                                         
                                         if my_position < mon_position:
@@ -1016,7 +1026,7 @@ def calculate_delta_times(teams, my_team_kart, monitored_karts):
                                             # Monitored team is ahead of us with lapped teams in between
                                             mon_base_gap -= laps_between * avg_lap_time
                                     # If no lapped teams between us, we're on same lap - use gap as is
-                                except:
+                                except Exception:
                                     mon_base_gap = 0.0
                     
                     # Calculate gap based on session type
@@ -1470,38 +1480,50 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+def _ensure_auth_schema():
+    """Normalize auth.db across versions (legacy 'timestamp' column -> 'attempted_at')."""
+    try:
+        with sqlite3.connect('auth.db') as conn:
+            cols = [row[1] for row in conn.execute('PRAGMA table_info(login_attempts)').fetchall()]
+            if cols and 'attempted_at' not in cols and 'timestamp' in cols:
+                conn.execute('ALTER TABLE login_attempts RENAME COLUMN timestamp TO attempted_at')
+                print('Migrated login_attempts.timestamp -> attempted_at')
+    except sqlite3.Error as e:
+        print(f'Warning: auth schema normalization skipped: {e}')
+
+
+_ensure_auth_schema()
+
 def create_session(user_id):
     """Create a new session for user"""
     session_id = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(hours=24)
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO sessions (session_token, user_id, expires_at)
-        VALUES (?, ?, ?)
-    ''', (session_id, user_id, expires_at.isoformat()))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        conn.execute(
+            '''INSERT INTO sessions (session_token, user_id, expires_at)
+               VALUES (?, ?, ?)''',
+            (session_id, user_id, expires_at.isoformat()),
+        )
 
     return session_id
+
 
 def verify_session(session_id):
     """Verify if session is valid and return user info"""
     if not session_id:
         return None
 
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT u.id, u.username, u.role, u.email
-        FROM sessions s
-        JOIN users u ON s.user_id = u.id
-        WHERE s.session_token = ? AND s.expires_at > ?
-    ''', (session_id, datetime.now().isoformat()))
-
-    user = cursor.fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            '''SELECT u.id, u.username, u.role, u.email
+               FROM sessions s
+               JOIN users u ON s.user_id = u.id
+               WHERE s.session_token = ? AND s.expires_at > ?''',
+            (session_id, datetime.now().isoformat()),
+        )
+        user = cursor.fetchone()
 
     return dict(user) if user else None
 
@@ -1530,87 +1552,109 @@ def admin_required(f):
     return decorated_function
 
 # Authentication routes
+LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', '5'))
+LOGIN_WINDOW_MINUTES = int(os.environ.get('LOGIN_WINDOW_MINUTES', '15'))
+
+
+def _is_rate_limited(username: str, ip_address: str) -> bool:
+    """Return True if (username, ip) has too many recent failed logins."""
+    if LOGIN_MAX_ATTEMPTS <= 0:
+        return False
+    # SQLite's CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" (space separator,
+    # no microseconds). Match that format exactly for string comparison.
+    cutoff = (datetime.now() - timedelta(minutes=LOGIN_WINDOW_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
+    with sqlite3.connect('auth.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            '''SELECT COUNT(*) FROM login_attempts
+               WHERE username = ? AND ip_address = ? AND success = 0
+                 AND attempted_at > ?''',
+            (username, ip_address, cutoff),
+        )
+        failures = cursor.fetchone()[0]
+    return failures >= LOGIN_MAX_ATTEMPTS
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     """User login endpoint"""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({'error': 'No data provided'}), 400
-            
-        username = data.get('username')
-        password = data.get('password')
-        
+
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+
         if not username or not password:
             return jsonify({'error': 'Username and password required'}), 400
-        
-        # Hash the password
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        try:
-            # Log login attempt
-            cursor.execute('''
-                INSERT INTO login_attempts (username, ip_address, success)
-                VALUES (?, ?, ?)
-            ''', (username, request.remote_addr, False))
-            
-            # Check credentials
-            cursor.execute('''
-                SELECT id, username, role, email, is_active
-                FROM users
-                WHERE username = ? AND password_hash = ?
-            ''', (username, password_hash))
-            
+
+        ip_address = request.remote_addr or '-'
+
+        if _is_rate_limited(username, ip_address):
+            return jsonify({
+                'error': f'Too many failed attempts. Try again in {LOGIN_WINDOW_MINUTES} minutes.'
+            }), 429
+
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+
+            # Record attempt up front (will flip success=1 on match)
+            cursor.execute(
+                '''INSERT INTO login_attempts (username, ip_address, success)
+                   VALUES (?, ?, 0)''',
+                (username, ip_address),
+            )
+            attempt_id = cursor.lastrowid
+
+            cursor.execute(
+                '''SELECT id, username, role, email, is_active, password_hash
+                   FROM users WHERE username = ?''',
+                (username,),
+            )
             user = cursor.fetchone()
-            
-            if user and user['is_active']:
-                # Update last login
-                cursor.execute('''
-                    UPDATE users SET last_login = ? WHERE id = ?
-                ''', (datetime.now().isoformat(), user['id']))
-                
-                # Update login attempt as successful
-                cursor.execute('''
-                    UPDATE login_attempts 
-                    SET success = 1 
-                    WHERE id = (SELECT MAX(id) FROM login_attempts WHERE username = ?)
-                ''', (username,))
-                
+
+            if not user or not user['is_active'] or not verify_password(password, user['password_hash']):
                 conn.commit()
-                
-                # Create session
-                session_id = create_session(user['id'])
-                session['session_id'] = session_id
-                
-                conn.close()
-                
-                return jsonify({
-                    'success': True,
-                    'user': {
-                        'id': user['id'],
-                        'username': user['username'],
-                        'role': user['role'],
-                        'email': user['email']
-                    }
-                })
-            
+                return jsonify({'error': 'Invalid credentials'}), 401
+
+            # Upgrade legacy SHA256 hash to bcrypt opportunistically.
+            if not _looks_like_bcrypt(user['password_hash']):
+                cursor.execute(
+                    'UPDATE users SET password_hash = ? WHERE id = ?',
+                    (hash_password(password), user['id']),
+                )
+
+            cursor.execute(
+                'UPDATE users SET last_login = ? WHERE id = ?',
+                (datetime.now().isoformat(), user['id']),
+            )
+            cursor.execute(
+                'UPDATE login_attempts SET success = 1 WHERE id = ?',
+                (attempt_id,),
+            )
             conn.commit()
-            conn.close()
-            
-            return jsonify({'error': 'Invalid credentials'}), 401
-            
-        except sqlite3.Error as e:
-            conn.rollback()
-            conn.close()
-            print(f"Database error in login: {e}")
-            return jsonify({'error': 'Database error occurred'}), 500
-            
+
+            session_id = create_session(user['id'])
+            session['session_id'] = session_id
+
+            return jsonify({
+                'success': True,
+                'user': {
+                    'id': user['id'],
+                    'username': user['username'],
+                    'role': user['role'],
+                    'email': user['email'],
+                },
+            })
+
+    except sqlite3.Error as e:
+        print(f'Database error in login: {e}')
+        traceback.print_exc()
+        return jsonify({'error': 'Database error occurred'}), 500
     except Exception as e:
-        print(f"Login error: {e}")
-        print(traceback.format_exc())
+        print(f'Login error: {e}')
+        traceback.print_exc()
         return jsonify({'error': 'An error occurred during login'}), 500
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -1619,13 +1663,13 @@ def logout():
     """User logout endpoint"""
     session_id = session.get('session_id')
     if session_id:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM sessions WHERE id = ?', (session_id,))
-        conn.commit()
-        conn.close()
+        with get_db_connection() as conn:
+            # The token lives in session_token, not id (which is an autoincrement PK).
+            # The pre-fix version of this handler matched on id and therefore never
+            # actually deleted any session row.
+            conn.execute('DELETE FROM sessions WHERE session_token = ?', (session_id,))
         session.clear()
-    
+
     return jsonify({'success': True})
 
 @app.route('/api/auth/check', methods=['GET'])
@@ -1647,17 +1691,12 @@ def check_auth():
 @admin_required
 def get_users():
     """Get all users (admin only)"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT id, username, email, role, created_at, last_login, is_active
-        FROM users
-        ORDER BY created_at DESC
-    ''')
-    users = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    
-    return jsonify(users)
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            '''SELECT id, username, email, role, created_at, last_login, is_active
+               FROM users ORDER BY created_at DESC'''
+        ).fetchall()
+    return jsonify([dict(row) for row in rows])
 
 @app.route('/api/admin/users', methods=['POST'])
 @admin_required
@@ -1671,89 +1710,86 @@ def create_user():
     
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
-    
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
+
+    if role not in ('user', 'admin'):
+        return jsonify({'error': 'Invalid role'}), 400
+
+    password_hash = hash_password(password)
+
     try:
-        cursor.execute('''
-            INSERT INTO users (username, password_hash, email, role)
-            VALUES (?, ?, ?, ?)
-        ''', (username, password_hash, email, role))
-        conn.commit()
-        user_id = cursor.lastrowid
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'user': {
-                'id': user_id,
-                'username': username,
-                'email': email,
-                'role': role
-            }
-        })
+        with get_db_connection() as conn:
+            cursor = conn.execute(
+                '''INSERT INTO users (username, password_hash, email, role)
+                   VALUES (?, ?, ?, ?)''',
+                (username, password_hash, email, role),
+            )
+            user_id = cursor.lastrowid
     except sqlite3.IntegrityError:
-        conn.close()
         return jsonify({'error': 'Username already exists'}), 400
+
+    return jsonify({
+        'success': True,
+        'user': {
+            'id': user_id,
+            'username': username,
+            'email': email,
+            'role': role,
+        },
+    })
+
+_USER_UPDATABLE_COLUMNS = {'email', 'role', 'is_active', 'password_hash'}
+
 
 @app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
 @admin_required
 def update_user(user_id):
     """Update user (admin only)"""
-    data = request.get_json()
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Build update query dynamically
+    data = request.get_json(silent=True) or {}
+
+    # Build a whitelisted (column, value) list. Column names never come from user input.
     updates = []
     params = []
-    
+
     if 'email' in data:
-        updates.append('email = ?')
-        params.append(data['email'])
-    
+        updates.append(('email', data['email']))
     if 'role' in data:
-        updates.append('role = ?')
-        params.append(data['role'])
-    
+        if data['role'] not in ('user', 'admin'):
+            return jsonify({'error': 'Invalid role'}), 400
+        updates.append(('role', data['role']))
     if 'is_active' in data:
-        updates.append('is_active = ?')
-        params.append(data['is_active'])
-    
-    if 'password' in data:
-        updates.append('password_hash = ?')
-        params.append(hashlib.sha256(data['password'].encode()).hexdigest())
-    
+        updates.append(('is_active', 1 if data['is_active'] else 0))
+    if 'password' in data and data['password']:
+        updates.append(('password_hash', hash_password(data['password'])))
+
     if not updates:
         return jsonify({'error': 'No fields to update'}), 400
-    
-    params.append(user_id)
-    query = f"UPDATE users SET {', '.join(updates)} WHERE id = ?"
-    
-    cursor.execute(query, params)
-    conn.commit()
-    conn.close()
-    
+
+    for col, _ in updates:
+        assert col in _USER_UPDATABLE_COLUMNS, f'Column {col!r} not in whitelist'
+
+    set_clause = ', '.join(f'{col} = ?' for col, _ in updates)
+    params = [value for _, value in updates] + [user_id]
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f'UPDATE users SET {set_clause} WHERE id = ?', params)
+        # Invalidate existing sessions on password change so stolen cookies are cut off.
+        if any(col == 'password_hash' for col, _ in updates):
+            cursor.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+        conn.commit()
+
     return jsonify({'success': True})
 
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
 @admin_required
 def delete_user(user_id):
     """Delete user (admin only)"""
-    # Prevent deleting admin user
+    # Prevent deleting the bootstrap admin
     if user_id == 1:
         return jsonify({'error': 'Cannot delete admin user'}), 400
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
-    conn.commit()
-    conn.close()
-    
+    with get_db_connection() as conn:
+        conn.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+        conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
     return jsonify({'success': True})
 
 # REST API routes
@@ -1763,12 +1799,13 @@ def get_race_data():
     return jsonify(get_serializable_race_data())
 
 @app.route('/api/update-monitoring', methods=['POST'])
+@login_required
 def update_monitoring():
     """Update the monitored teams"""
     global race_data
     
     data = request.json
-    print("Received monitoring update:", data)
+    app.logger.debug('Received monitoring update: %s', data)
     
     race_data['my_team'] = data.get('myTeam')
     race_data['monitored_teams'] = data.get('monitoredTeams', [])
@@ -1793,6 +1830,7 @@ def update_monitoring():
     return jsonify({'status': 'success'})
 
 @app.route('/api/start-simulation', methods=['POST'])
+@admin_required
 def start_simulation():
     """Start the data collection thread"""
     global update_thread, stop_event, race_data
@@ -1858,9 +1896,10 @@ def start_simulation():
     except Exception as e:
         print(f"Error in start_simulation: {e}")
         print(traceback.format_exc())
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/stop-simulation', methods=['POST'])
+@admin_required
 def stop_simulation():
     """Stop the data collection thread"""
     global update_thread, stop_event, race_data
@@ -1889,12 +1928,13 @@ def parser_status():
     })
 
 @app.route('/api/update-pit-config', methods=['POST'])
+@login_required
 def update_pit_config():
     """Update pit stop configuration"""
     global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS, DEFAULT_LAP_TIME
     
     data = request.json
-    print("Received pit config update:", data)
+    app.logger.debug('Received pit config update: %s', data)
     
     if data:
         # Update global variables
@@ -1923,6 +1963,7 @@ def update_pit_config():
     return jsonify({'status': 'error', 'message': 'Invalid configuration data'})
 
 @app.route('/api/set-parser-mode', methods=['POST'])
+@admin_required
 def set_parser_mode():
     """Set parser mode (hybrid or playwright-only)"""
     global race_data
@@ -1964,6 +2005,7 @@ def get_parser_status():
 
 # For debugging: simulate data
 @app.route('/api/simulate-data', methods=['POST'])
+@admin_required
 def simulate_data():
     """Generate fake race data for testing"""
     global race_data
@@ -2130,6 +2172,7 @@ def admin_delete_track(track_id):
 
 # Test endpoints for simulating track sessions
 @app.route('/api/test/simulate-session/<int:track_id>', methods=['POST'])
+@admin_required
 def simulate_track_session(track_id):
     """Simulate an active session on a track for testing purposes"""
     global multi_track_manager
@@ -2169,6 +2212,7 @@ def simulate_track_session(track_id):
     })
 
 @app.route('/api/test/stop-session/<int:track_id>', methods=['POST'])
+@admin_required
 def stop_simulated_session(track_id):
     """Stop simulated session on a track"""
     global multi_track_manager
@@ -2209,6 +2253,7 @@ def stop_simulated_session(track_id):
 
 # Keep original track routes for backwards compatibility
 @app.route('/api/tracks', methods=['POST'])
+@admin_required
 def add_track():
     """Add a new track to the database"""
     data = request.json
@@ -2227,6 +2272,7 @@ def add_track():
     return jsonify(result), 201
 
 @app.route('/api/tracks/<int:track_id>', methods=['PUT'])
+@admin_required
 def update_track(track_id):
     """Update a track in the database"""
     data = request.json
@@ -2246,6 +2292,7 @@ def update_track(track_id):
     return jsonify(result)
 
 @app.route('/api/tracks/<int:track_id>', methods=['DELETE'])
+@admin_required
 def delete_track(track_id):
     """Delete a track from the database"""
     result = track_db.delete_track(track_id)
@@ -2255,6 +2302,7 @@ def delete_track(track_id):
     return jsonify(result)
 
 @app.route('/api/reset-race-data', methods=['POST'])
+@admin_required
 def reset_race_data():
     """Reset all race data when switching tracks"""
     global race_data
@@ -2355,7 +2403,7 @@ def get_common_sessions():
     except Exception as e:
         print(f"Error getting common sessions: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/sessions', methods=['GET'])
 def get_all_sessions():
@@ -2395,7 +2443,7 @@ def get_all_sessions():
     except Exception as e:
         print(f"Error getting sessions: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/search', methods=['GET'])
 def search_teams():
@@ -2442,7 +2490,7 @@ def search_teams():
         return jsonify({'teams': teams})
     except Exception as e:
         print(f"Error searching teams: {e}")
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/top-teams', methods=['GET'])
 def get_top_teams():
@@ -2633,7 +2681,7 @@ def get_top_teams():
     except Exception as e:
         print(f"Error getting top teams: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/stats', methods=['GET'])
 def get_team_stats():
@@ -2839,7 +2887,7 @@ def get_team_stats():
     except Exception as e:
         print(f"Error getting team stats: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/lap-details', methods=['POST'])
 def get_lap_details():
@@ -2874,7 +2922,7 @@ def get_lap_details():
             """
             cursor.execute(debug_count_query, (team_name_lower, int(session_id)))
             total_records = cursor.fetchone()[0]
-            print(f"DEBUG: Team {team_name} has {total_records} total records in session {session_id}")
+            app.logger.debug('Team %s has %s records in session %s', team_name, total_records, session_id)
 
             # Get all laps from lap_times by detecting when last_lap changes
             lap_query = """
@@ -2922,7 +2970,7 @@ def get_lap_details():
 
             cursor.execute(lap_query, (team_name_lower, int(session_id)))
             laps_raw = cursor.fetchall()
-            print(f"DEBUG: Team {team_name} - Query returned {len(laps_raw)} laps")
+            app.logger.debug('Team %s - lap_details query returned %s laps', team_name, len(laps_raw))
 
             laps = []
             for (lap_number, lap_seconds, pit_this_lap) in laps_raw:
@@ -2979,7 +3027,7 @@ def get_lap_details():
     except Exception as e:
         print(f"Error getting lap details: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/compare', methods=['POST'])
 def compare_teams():
@@ -3165,7 +3213,7 @@ def compare_teams():
                             lap_seconds = minutes * 60 + seconds
                             if 50 < lap_seconds < 150:  # Filter unrealistic times
                                 lap_times.append(lap_seconds)
-                except:
+                except Exception:
                     continue
 
             # Format best_lap_seconds to MM:SS.mmm
@@ -3194,7 +3242,7 @@ def compare_teams():
     except Exception as e:
         print(f"Error comparing teams: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/delete-best-lap', methods=['POST'])
 @admin_required
@@ -3209,18 +3257,16 @@ def delete_best_lap():
         if not team_name or not best_lap_time:
             return jsonify({'error': 'team_name and best_lap_time are required'}), 400
 
-        # Parse best_lap_time to seconds for comparison
-        # Format is "M:SS.mmm" or "MM:SS.mmm"
+        # Parse best_lap_time to seconds for comparison.
+        # Format is "M:SS.mmm" or raw seconds. Enforce a realistic karting range
+        # to prevent accidental mass-deletion via nonsense inputs (the match uses
+        # a 0.01s tolerance, so very small values would otherwise match many rows).
         try:
-            if ':' in best_lap_time:
-                parts = best_lap_time.split(':')
-                minutes = int(parts[0])
-                seconds = float(parts[1])
-                best_lap_seconds = minutes * 60 + seconds
-            else:
-                best_lap_seconds = float(best_lap_time)
-        except ValueError:
+            best_lap_seconds = parse_time_to_seconds(best_lap_time)
+        except (ValueError, TypeError):
             return jsonify({'error': 'Invalid best_lap_time format'}), 400
+        if not (30.0 <= best_lap_seconds <= 600.0):
+            return jsonify({'error': 'best_lap_time out of realistic range (30-600s)'}), 400
 
         # Retry logic to handle database locks
         max_retries = 3
@@ -3283,7 +3329,7 @@ def delete_best_lap():
                 try:
                     if 'conn' in locals():
                         conn.close()
-                except:
+                except Exception:
                     pass
 
         # If we get here, all retries failed
@@ -3292,7 +3338,7 @@ def delete_best_lap():
     except Exception as e:
         print(f"Error deleting best lap: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/mass-delete-laps', methods=['POST'])
 @admin_required
@@ -3305,13 +3351,28 @@ def mass_delete_laps():
     2. best_laps: Nullify best_lap field in lap_times if below threshold
     """
     try:
-        data = request.json
+        data = request.json or {}
         track_id = data.get('track_id', 1)
         threshold_seconds = data.get('threshold_seconds')
         delete_type = data.get('delete_type', 'lap_history')
 
         if threshold_seconds is None:
             return jsonify({'error': 'threshold_seconds is required'}), 400
+
+        # Coerce and sanity-check threshold. Unvalidated non-numeric input
+        # previously cast to 0 via SQL CAST, which would silently match nothing
+        # or worse; we require a positive float in a realistic karting range.
+        try:
+            threshold_seconds = float(threshold_seconds)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'threshold_seconds must be numeric'}), 400
+        if not (0 < threshold_seconds <= 3600):
+            return jsonify({'error': 'threshold_seconds out of range (0, 3600]'}), 400
+
+        try:
+            track_id = int(track_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'track_id must be an integer'}), 400
 
         # Validate delete_type
         if delete_type not in ['lap_history', 'best_laps']:
@@ -3386,7 +3447,7 @@ def mass_delete_laps():
                 try:
                     if 'conn' in locals():
                         conn.close()
-                except:
+                except Exception:
                     pass
 
         # If we get here, all retries failed
@@ -3395,7 +3456,7 @@ def mass_delete_laps():
     except Exception as e:
         print(f"Error in mass delete: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/all-laps', methods=['GET'])
 def get_all_laps():
@@ -3498,7 +3559,7 @@ def get_all_laps():
     except Exception as e:
         print(f"Error getting all laps: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/cross-track-sessions', methods=['GET'])
 def get_cross_track_sessions():
@@ -3651,7 +3712,7 @@ def get_cross_track_sessions():
     except Exception as e:
         print(f"Error getting cross-track sessions: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 @app.route('/api/team-data/session-laps', methods=['GET'])
 def get_session_laps():
@@ -3727,7 +3788,7 @@ def get_session_laps():
     except Exception as e:
         print(f"Error getting session laps: {e}")
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return _internal_error(e)
 
 def start_multi_track_monitoring():
     """Start monitoring all configured tracks automatically"""
@@ -3760,28 +3821,40 @@ def get_database_path(track_id: int) -> str:
     """Get the database file path for a specific track"""
     return f'race_data_track_{track_id}.db'
 
-def get_track_db_connection(track_id: int, timeout: float = 5.0):
-    """
-    Get database connection for a specific track with timeout
+class UnknownTrackError(Exception):
+    """Raised when an API caller supplies a track_id that is not in tracks.db."""
 
-    Args:
-        track_id: The track ID
-        timeout: Timeout in seconds for database operations (default: 5.0)
 
-    Returns:
-        sqlite3.Connection object
+def get_track_db_connection(track_id, timeout: float = 5.0):
     """
+    Get database connection for a specific track with timeout.
+
+    Validates that track_id is a positive int AND that it corresponds to a real
+    row in tracks.db. This prevents sqlite3.connect() from creating stray
+    race_data_track_N.db files on disk for attacker-supplied ids.
+    """
+    try:
+        track_id = int(track_id)
+    except (TypeError, ValueError):
+        raise UnknownTrackError(f'Invalid track_id: {track_id!r}')
+    if track_id <= 0 or not track_db.get_track_by_id(track_id):
+        raise UnknownTrackError(f'Unknown track_id: {track_id}')
+
     db_path = get_database_path(track_id)
     conn = sqlite3.connect(db_path, timeout=timeout)
-    # Enable WAL mode for better concurrent access (if not already enabled)
     conn.execute("PRAGMA journal_mode=WAL")
-    # Set busy timeout to 5 seconds (5000ms)
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
+@app.errorhandler(UnknownTrackError)
+def _handle_unknown_track(exc):
+    return jsonify({'error': str(exc)}), 404
+
+
 # Pit Alert System - Send alerts from web client to Android overlay
 @app.route('/api/trigger-pit-alert', methods=['POST'])
+@login_required
 def trigger_pit_alert():
     """Trigger a pit alert for a specific team on a track"""
     data = request.json
@@ -3835,11 +3908,7 @@ def trigger_pit_alert():
         })
         
     except Exception as e:
-        print(f"Error triggering pit alert: {e}")
-        return jsonify({
-            'status': 'error', 
-            'message': f'Failed to trigger pit alert: {str(e)}'
-        }), 500
+        return _internal_error(e, context='trigger_pit_alert')
 
 # Socket.IO Admin Endpoints - for monitoring room joins
 
@@ -3863,7 +3932,7 @@ def admin_get_socketio_rooms():
         
         return jsonify(unique_rooms)
     except Exception as e:
-        return jsonify({'error': f'Failed to get rooms: {str(e)}'}), 500
+        return _internal_error(e, context='get_rooms')
 
 @app.route('/api/admin/socketio/room-info', methods=['POST'])
 @admin_required
@@ -3889,7 +3958,7 @@ def admin_get_room_info():
             'timestamp': datetime.now().isoformat()
         })
     except Exception as e:
-        return jsonify({'error': f'Failed to get room info: {str(e)}'}), 500
+        return _internal_error(e, context='get_room_info')
 
 if __name__ == '__main__':
     try:

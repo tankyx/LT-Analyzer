@@ -1,10 +1,34 @@
 #!/usr/bin/env python3
 """
-Initialize auth.db and tracks.db with required tables
+Initialize auth.db and tracks.db with required tables.
+
+Admin bootstrap:
+  The first admin user is created if (and only if) no user exists yet. Credentials
+  come from the ADMIN_USERNAME / ADMIN_PASSWORD environment variables (typically
+  loaded from .env). There is no hardcoded default password.
 """
 
+import os
 import sqlite3
+import sys
+
 import bcrypt
+
+
+def _require_admin_credentials():
+    username = os.environ.get('ADMIN_USERNAME', '').strip()
+    password = os.environ.get('ADMIN_PASSWORD', '')
+    if not username or not password:
+        sys.stderr.write(
+            'ERROR: ADMIN_USERNAME and ADMIN_PASSWORD must be set in the environment '
+            '(or in .env) to bootstrap the initial admin user.\n'
+        )
+        sys.exit(1)
+    if len(password) < 12:
+        sys.stderr.write('ERROR: ADMIN_PASSWORD must be at least 12 characters.\n')
+        sys.exit(1)
+    return username, password
+
 
 def initialize_auth_db():
     """Initialize auth database with users table"""
@@ -12,7 +36,6 @@ def initialize_auth_db():
     conn = sqlite3.connect('auth.db')
     cursor = conn.cursor()
 
-    # Create users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +49,6 @@ def initialize_auth_db():
         )
     ''')
 
-    # Create sessions table for Flask-Login
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,20 +60,33 @@ def initialize_auth_db():
         )
     ''')
 
-    # Check if admin user exists
-    cursor.execute("SELECT COUNT(*) FROM users WHERE username = 'admin'")
-    if cursor.fetchone()[0] == 0:
-        # Create default admin user (password: admin)
-        password_hash = bcrypt.hashpw('admin'.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS login_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            ip_address TEXT,
+            success BOOLEAN,
+            attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('SELECT COUNT(*) FROM users')
+    user_count = cursor.fetchone()[0]
+    if user_count == 0:
+        username, password = _require_admin_credentials()
+        password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         cursor.execute(
             "INSERT INTO users (username, password_hash, email, role) VALUES (?, ?, ?, ?)",
-            ('admin', password_hash, 'admin@localhost', 'admin')
+            (username, password_hash, f'{username}@localhost', 'admin'),
         )
-        print("Created default admin user (username: admin, password: admin)")
+        print(f"Created initial admin user '{username}'. Remember to clear ADMIN_PASSWORD from .env after first boot.")
+    else:
+        print(f"auth.db already has {user_count} user(s); skipping admin bootstrap.")
 
     conn.commit()
     conn.close()
     print("auth.db initialized successfully")
+
 
 def initialize_tracks_db():
     """Initialize tracks database with tracks table"""
@@ -59,7 +94,6 @@ def initialize_tracks_db():
     conn = sqlite3.connect('tracks.db')
     cursor = conn.cursor()
 
-    # Create tracks table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tracks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,10 +110,8 @@ def initialize_tracks_db():
         )
     ''')
 
-    # Check if Mariembourg track exists
     cursor.execute("SELECT COUNT(*) FROM tracks WHERE track_name = 'Karting Mariembourg'")
     if cursor.fetchone()[0] == 0:
-        # Create default Mariembourg track
         cursor.execute('''
             INSERT INTO tracks (track_name, location, length_meters, description, timing_url, websocket_url, is_active)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -90,7 +122,7 @@ def initialize_tracks_db():
             'Karting track in Mariembourg',
             'https://www.apex-timing.com/live-timing/karting-mariembourg/index.html',
             'ws://www.apex-timing.com:8585/',
-            1
+            1,
         ))
         print("Created default Mariembourg track")
 
@@ -98,9 +130,8 @@ def initialize_tracks_db():
     conn.close()
     print("tracks.db initialized successfully")
 
+
 if __name__ == '__main__':
     initialize_auth_db()
     initialize_tracks_db()
     print("\nDatabase initialization complete!")
-    print("Default credentials - Username: admin, Password: admin")
-    print("Please change the admin password after first login.")

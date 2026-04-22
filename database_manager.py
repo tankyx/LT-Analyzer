@@ -133,11 +133,14 @@ class TrackDatabase:
                 tracks = []
                 for row in cursor.fetchall():
                     mappings = {}
-                    try:
-                        if row['column_mappings']:
-                            mappings = json.loads(row['column_mappings'])
-                    except:
-                        pass
+                    raw_mappings = row['column_mappings']
+                    if raw_mappings:
+                        try:
+                            mappings = json.loads(raw_mappings)
+                        except (json.JSONDecodeError, TypeError) as e:
+                            self.logger.warning(
+                                f"Track {row['id']}: invalid column_mappings JSON, falling back to data-type detection: {e}"
+                            )
 
                     tracks.append({
                         'id': row['id'],
@@ -177,11 +180,14 @@ class TrackDatabase:
                 row = cursor.fetchone()
                 if row:
                     mappings = {}
-                    try:
-                        if row['column_mappings']:
-                            mappings = json.loads(row['column_mappings'])
-                    except:
-                        pass
+                    raw_mappings = row['column_mappings']
+                    if raw_mappings:
+                        try:
+                            mappings = json.loads(raw_mappings)
+                        except (json.JSONDecodeError, TypeError) as e:
+                            self.logger.warning(
+                                f"Track {row['id']}: invalid column_mappings JSON, falling back to data-type detection: {e}"
+                            )
 
                     return {
                         'id': row['id'],
