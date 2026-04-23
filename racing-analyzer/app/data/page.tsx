@@ -4,7 +4,10 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/ApiService';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  ScatterChart, Scatter, ZAxis, ReferenceArea, ReferenceLine, Cell,
+} from 'recharts';
 
 interface Team {
   name: string;
@@ -113,6 +116,7 @@ export default function DataPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
+  const [activeTab, setActiveTab] = useState<'search' | 'leaderboard' | 'fairness'>('search');
   const [tracks, setTracks] = useState<Track[]>([]);
   const [selectedTrackId, setSelectedTrackId] = useState<number>(1);
   const [allSessions, setAllSessions] = useState<AllSession[]>([]);
@@ -606,7 +610,89 @@ export default function DataPage() {
   return (
     <div className="min-h-screen bg-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-white mb-6">Team Data Analysis</h1>
+        <h1 className="text-3xl font-bold text-white mb-6">Driver Stats</h1>
+
+        <div className="border-b border-gray-700 mb-4 flex gap-2">
+          <button
+            onClick={() => setActiveTab('search')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'search' ? 'text-white border-blue-400' : 'text-gray-400 border-transparent hover:text-gray-200'
+            }`}
+          >
+            Driver Search
+          </button>
+          <button
+            onClick={() => setActiveTab('fairness')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'fairness' ? 'text-white border-blue-400' : 'text-gray-400 border-transparent hover:text-gray-200'
+            }`}
+          >
+            Drivers by Kart Luck
+          </button>
+          <button
+            onClick={() => setActiveTab('leaderboard')}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'leaderboard' ? 'text-white border-blue-400' : 'text-gray-400 border-transparent hover:text-gray-200'
+            }`}
+          >
+            Leaderboard & Compare
+          </button>
+        </div>
+
+        {activeTab === 'fairness' && (
+          <TrackFairnessPanel tracks={tracks} />
+        )}
+
+        {activeTab === 'search' && (
+          <div className="bg-gray-800 rounded-lg p-6 mb-6">
+            <h2 className="text-xl font-semibold text-white mb-2">Find a driver</h2>
+            <p className="text-sm text-gray-400 mb-4">
+              Search by driver/team name. Click a result to open the full profile with cross-track history, consistency stats,
+              and kart-fairness analysis.
+            </p>
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Start typing a name..."
+                className="w-full px-4 py-3 bg-gray-700 text-white text-lg rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                autoFocus
+              />
+              {searching && <div className="absolute right-3 top-3 text-gray-400">Searching...</div>}
+            </div>
+
+            {searchQuery && searchResults.length > 0 && (
+              <div className="mt-4 bg-gray-700 rounded-lg max-h-96 overflow-y-auto">
+                {searchResults.map((team, idx) => (
+                  <div
+                    key={`${team.name}-${idx}`}
+                    onClick={() => router.push(`/team/${encodeURIComponent(team.name)}`)}
+                    className="px-4 py-3 hover:bg-gray-600 cursor-pointer flex justify-between items-center border-b border-gray-600 last:border-b-0"
+                  >
+                    <span className="text-white">{team.name}</span>
+                    <span className="text-sm text-gray-400">Classes: {team.classes || '—'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {searchQuery && !searching && searchResults.length === 0 && (
+              <div className="mt-4 text-gray-400 text-sm">No drivers found matching {`"${searchQuery}"`}.</div>
+            )}
+
+            {!searchQuery && (
+              <div className="mt-6 text-sm text-gray-500">
+                Tip: the search is case-insensitive and matches partial names (e.g. {`"delvenne"`} finds both
+                {' '}{`"DELVENNE Simon"`} and {`"SIMON DELVENNE"`}). Cross-track sessions and stats are gathered automatically from every
+                configured track.
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'leaderboard' && (
+        <>
 
         {/* Track Selector */}
         <div className="bg-gray-800 rounded-lg p-6 mb-6">
@@ -1401,7 +1487,470 @@ export default function DataPage() {
             </div>
           </div>
         )}
+        </>
+        )}
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Track Fairness Leaderboard panel
+// ============================================================================
+
+interface TrackFairnessDriver {
+  name: string;
+  sessions: number;
+  pb: string;
+  pb_seconds: number;
+  mean_session_best_seconds: number;
+  stddev_session_best_seconds: number;
+  mean_gap_to_pb_pct: number;
+  max_gap_to_pb_pct: number;
+  pct_within_1pct_pb: number;
+  pct_within_0_5pct_pb: number;
+  mean_relative_pace: number | null;
+  stddev_relative_pace: number | null;
+  best_relative_pace: number | null;
+  worst_relative_pace: number | null;
+}
+
+type FairnessSortKey = 'mean_gap_to_pb_pct' | 'stddev_session_best_seconds' | 'pct_within_1pct_pb' | 'sessions' | 'pb_seconds' | 'stddev_relative_pace' | 'mean_relative_pace';
+
+interface SessionConfigsResponse {
+  track_id: number;
+  track_name: string;
+  session_count: number;
+  field_best_min: number | null;
+  field_best_max: number | null;
+  histogram: { field_best_bin: number; count: number }[];
+  suggested_splits: { gap: number; below: number; above: number }[];
+}
+
+function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
+  const router = useRouter();
+  const [trackId, setTrackId] = useState<number | null>(null);
+  const [minSessions, setMinSessions] = useState<number>(5);
+  const [minFieldBest, setMinFieldBest] = useState<string>('');
+  const [maxFieldBest, setMaxFieldBest] = useState<string>('');
+  const [data, setData] = useState<TrackFairnessDriver[] | null>(null);
+  const [configs, setConfigs] = useState<SessionConfigsResponse | null>(null);
+  const [trackName, setTrackName] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<FairnessSortKey>('stddev_relative_pace');
+  const [sortDesc, setSortDesc] = useState(false);
+
+  // Default to first track once tracks load
+  useEffect(() => {
+    if (trackId === null && tracks.length > 0) setTrackId(tracks[0].id);
+  }, [tracks, trackId]);
+
+  // Load session-config histogram to help pick layout thresholds
+  useEffect(() => {
+    if (trackId === null) return;
+    let cancelled = false;
+    ApiService.getTrackSessionConfigs(trackId)
+      .then(res => { if (!cancelled) setConfigs(res); })
+      .catch(() => { if (!cancelled) setConfigs(null); });
+    return () => { cancelled = true; };
+  }, [trackId]);
+
+  useEffect(() => {
+    if (trackId === null) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setData(null);
+    const minFB = minFieldBest.trim() === '' ? undefined : parseFloat(minFieldBest);
+    const maxFB = maxFieldBest.trim() === '' ? undefined : parseFloat(maxFieldBest);
+    ApiService.getTrackKartFairness(trackId, minSessions, minFB, maxFB)
+      .then(res => {
+        if (cancelled) return;
+        setData(res.drivers || []);
+        setTrackName(res.track_name || '');
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Failed to load kart fairness');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [trackId, minSessions, minFieldBest, maxFieldBest]);
+
+  const sortedDrivers = (() => {
+    if (!data) return [];
+    const copy = [...data];
+    copy.sort((a, b) => {
+      const dir = sortDesc ? -1 : 1;
+      switch (sortKey) {
+        case 'mean_gap_to_pb_pct':
+          return dir * (a.mean_gap_to_pb_pct - b.mean_gap_to_pb_pct);
+        case 'stddev_session_best_seconds':
+          return dir * (a.stddev_session_best_seconds - b.stddev_session_best_seconds);
+        case 'pct_within_1pct_pb':
+          return dir * (b.pct_within_1pct_pb - a.pct_within_1pct_pb);
+        case 'sessions':
+          return dir * (a.sessions - b.sessions);
+        case 'pb_seconds':
+          return dir * (a.pb_seconds - b.pb_seconds);
+        case 'stddev_relative_pace': {
+          const av = a.stddev_relative_pace ?? 1e9;
+          const bv = b.stddev_relative_pace ?? 1e9;
+          return dir * (av - bv);
+        }
+        case 'mean_relative_pace': {
+          const av = a.mean_relative_pace ?? 1e9;
+          const bv = b.mean_relative_pace ?? 1e9;
+          return dir * (av - bv);
+        }
+      }
+    });
+    return copy;
+  })();
+
+  const toggleSort = (k: FairnessSortKey) => {
+    if (sortKey === k) {
+      setSortDesc(!sortDesc);
+    } else {
+      setSortKey(k);
+      setSortDesc(false);
+    }
+  };
+
+  const headerCell = (k: FairnessSortKey, label: string) => (
+    <th
+      onClick={() => toggleSort(k)}
+      className="px-3 py-2 text-gray-300 cursor-pointer hover:text-white select-none"
+    >
+      {label} {sortKey === k && (sortDesc ? '↓' : '↑')}
+    </th>
+  );
+
+  // Scatter data: each point is one driver. X = σRel, Y = MeanRel.
+  // Flag driver in the lucky-quadrant (low σRel + low MeanRel)
+  const scatterData = (data || [])
+    .filter(r => r.stddev_relative_pace !== null && r.mean_relative_pace !== null)
+    .map(r => ({
+      name: r.name,
+      x: r.stddev_relative_pace as number,
+      y: r.mean_relative_pace as number,
+      sessions: r.sessions,
+      pb: r.pb,
+      worst: r.worst_relative_pace,
+    }));
+
+  const LUCKY_SIGMA = 0.003;   // below this σRel is "tight enough to suspect"
+  const LUCKY_MEAN = 1.0;      // below 1.0 means consistently faster than field median
+  const flaggedDrivers = scatterData.filter(p => p.x < LUCKY_SIGMA && p.y < LUCKY_MEAN);
+
+  const fmtRel = (v: number) => v.toFixed(4);
+
+  return (
+    <div className="bg-gray-800 rounded-lg p-6 mb-6">
+      <h2 className="text-xl font-semibold text-white mb-2">Drivers by Kart Luck — {trackName || 'select a track'}</h2>
+      <p className="text-sm text-gray-400 mb-4">
+        Each driver&apos;s session best is compared to the <b>field median best for that session</b>, which cancels
+        weather/track conditions. <b>σRel</b> is how consistent their pace is relative to the field (low = always at
+        the same spot). <b>MeanRel</b> is where they typically sit (&lt; 1.0 = faster than field median). The
+        lower-left quadrant below — consistently faster than field + low variance — is the kart-luck signature that
+        skill alone can&apos;t explain.
+      </p>
+
+      <div className="flex items-end gap-4 mb-4 flex-wrap">
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Track</label>
+          <select
+            value={trackId ?? ''}
+            onChange={e => setTrackId(parseInt(e.target.value))}
+            className="px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {tracks.map(t => (
+              <option key={t.id} value={t.id}>{t.track_name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Min sessions</label>
+          <input
+            type="number"
+            min={2}
+            max={50}
+            value={minSessions}
+            onChange={e => {
+              const v = parseInt(e.target.value);
+              if (!isNaN(v)) setMinSessions(Math.max(2, Math.min(50, v)));
+            }}
+            className="w-20 px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Min field best (s)</label>
+          <input
+            type="number"
+            step={0.5}
+            value={minFieldBest}
+            onChange={e => setMinFieldBest(e.target.value)}
+            placeholder="any"
+            className="w-24 px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Max field best (s)</label>
+          <input
+            type="number"
+            step={0.5}
+            value={maxFieldBest}
+            onChange={e => setMaxFieldBest(e.target.value)}
+            placeholder="any"
+            className="w-24 px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <div className="flex flex-col text-xs text-gray-400">
+          <span>Layout filter restricts sessions to those whose field-wide</span>
+          <span>fastest lap falls in the range — use to isolate a single</span>
+          <span>track configuration or dry vs. wet.</span>
+        </div>
+      </div>
+
+      {configs && configs.session_count > 0 && (
+        <div className="bg-gray-900 rounded-lg p-3 mb-4">
+          <div className="text-xs text-gray-400 mb-2">
+            Session field-best distribution ({configs.session_count} sessions, {configs.field_best_min}s–{configs.field_best_max}s).
+            Peaks = layouts. Suggested splits at largest gaps:{' '}
+            {configs.suggested_splits.slice(0, 3).map((s, i) => (
+              <span key={i} className="text-yellow-300 mr-2">
+                {s.below}s ⇢ {s.above}s ({s.gap.toFixed(1)}s gap)
+              </span>
+            ))}
+          </div>
+          <div style={{ height: 100 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={configs.histogram} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                <XAxis
+                  dataKey="field_best_bin"
+                  stroke="#6b7280"
+                  tick={{ fill: '#9ca3af', fontSize: 10 }}
+                  tickFormatter={v => `${v}s`}
+                />
+                <YAxis stroke="#6b7280" tick={{ fill: '#9ca3af', fontSize: 10 }} />
+                <Tooltip
+                  contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 12 }}
+                  labelFormatter={v => `${v}s field best`}
+                />
+                <Bar dataKey="count" fill="#6366f1" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {data && !loading && (
+        <div className="text-sm text-gray-400 mb-3">
+          {data.length} driver{data.length === 1 ? '' : 's'} at {trackName}
+          {flaggedDrivers.length > 0 && (
+            <span className="ml-3 text-red-300">
+              🚩 {flaggedDrivers.length} in the lucky quadrant (σRel &lt; {LUCKY_SIGMA}, MeanRel &lt; {LUCKY_MEAN})
+            </span>
+          )}
+        </div>
+      )}
+
+      {loading && <div className="text-gray-300 py-4">Loading fairness data — this can take a few seconds for large tracks…</div>}
+      {error && <div className="text-red-300 py-4">{error}</div>}
+
+      {data && !loading && scatterData.length > 0 && (
+        <div className="bg-gray-900 rounded-lg p-3 mb-4">
+          <div className="text-xs text-gray-300 mb-2">
+            <b>σRel × MeanRel scatter</b> — each dot is a driver. Lower-left (red shaded area) = consistently
+            fast relative to field with low variance = lucky-kart signature.
+          </div>
+          <div style={{ height: 360 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ScatterChart margin={{ top: 10, right: 20, bottom: 40, left: 50 }}>
+                <CartesianGrid stroke="#374151" />
+                <XAxis
+                  type="number"
+                  dataKey="x"
+                  stroke="#9ca3af"
+                  tick={{ fill: '#9ca3af', fontSize: 10 }}
+                  tickFormatter={v => v.toFixed(3)}
+                  label={{
+                    value: 'σRel (relative-pace variance, lower = tighter)',
+                    position: 'bottom',
+                    fill: '#9ca3af',
+                    offset: 15,
+                    fontSize: 11,
+                  }}
+                  domain={[0, 'auto']}
+                />
+                <YAxis
+                  type="number"
+                  dataKey="y"
+                  stroke="#9ca3af"
+                  tick={{ fill: '#9ca3af', fontSize: 10 }}
+                  tickFormatter={v => v.toFixed(3)}
+                  label={{
+                    value: 'MeanRel (pace vs field median, < 1 = faster)',
+                    angle: -90,
+                    position: 'insideLeft',
+                    fill: '#9ca3af',
+                    offset: -5,
+                    fontSize: 11,
+                  }}
+                  domain={['auto', 'auto']}
+                />
+                <ZAxis type="number" dataKey="sessions" range={[40, 320]} />
+                <Tooltip
+                  contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 12 }}
+                  formatter={(value: number | string, name: string) => {
+                    if (name === 'x' || name === 'σRel') return [Number(value).toFixed(4), 'σRel'];
+                    if (name === 'y' || name === 'MeanRel') return [Number(value).toFixed(4), 'MeanRel'];
+                    return [value, name];
+                  }}
+                  labelFormatter={() => ''}
+                  content={({ active, payload }) => {
+                    if (!active || !payload || payload.length === 0) return null;
+                    const p = payload[0].payload as typeof scatterData[0];
+                    return (
+                      <div className="bg-gray-800 border border-gray-600 rounded px-3 py-2 text-xs">
+                        <div className="text-white font-semibold">{p.name}</div>
+                        <div className="text-gray-300">Sessions: {p.sessions} · PB: {p.pb}</div>
+                        <div className="text-gray-300">σRel: {fmtRel(p.x)}</div>
+                        <div className="text-gray-300">MeanRel: {fmtRel(p.y)}</div>
+                        <div className="text-gray-400">Worst rel: {p.worst ? fmtRel(p.worst) : '—'}</div>
+                      </div>
+                    );
+                  }}
+                />
+                <ReferenceArea
+                  x1={0}
+                  x2={LUCKY_SIGMA}
+                  y1={0.95}
+                  y2={LUCKY_MEAN}
+                  stroke="#dc2626"
+                  strokeOpacity={0.3}
+                  fill="#dc2626"
+                  fillOpacity={0.12}
+                  ifOverflow="extendDomain"
+                />
+                {/* Prominent baseline at the field median. Above the line =
+                    slower than median, below = faster. */}
+                <ReferenceLine
+                  y={1.0}
+                  stroke="#e5e7eb"
+                  strokeWidth={2}
+                  strokeDasharray="6 3"
+                  label={{ value: 'field median (y = 1.000)', position: 'insideTopRight', fill: '#e5e7eb', fontSize: 11 }}
+                />
+                <Scatter data={scatterData} onClick={(p: { name?: string }) => { if (p?.name) router.push(`/team/${encodeURIComponent(p.name)}`); }} cursor="pointer">
+                  {scatterData.map((p, i) => {
+                    const isFlagged = p.x < LUCKY_SIGMA && p.y < LUCKY_MEAN;
+                    return (
+                      <Cell
+                        key={i}
+                        fill={isFlagged ? '#ef4444' : '#60a5fa'}
+                        stroke={isFlagged ? '#fca5a5' : '#1f2937'}
+                      />
+                    );
+                  })}
+                </Scatter>
+              </ScatterChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="text-xs text-gray-500 mt-2">
+            Dot size scales with session count (bigger = more data = more reliable). Click a dot to open that driver&apos;s profile.
+          </div>
+        </div>
+      )}
+
+      {data && !loading && (
+        data.length === 0 ? (
+          <div className="text-gray-400">No drivers reached the minimum sample threshold for this track.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-700">
+                <tr className="text-left">
+                  <th className="px-3 py-2 text-gray-300">#</th>
+                  <th className="px-3 py-2 text-gray-300">Driver</th>
+                  {headerCell('sessions', 'Sess')}
+                  {headerCell('pb_seconds', 'PB')}
+                  {headerCell('stddev_relative_pace', 'σRel')}
+                  {headerCell('mean_relative_pace', 'MeanRel')}
+                  {headerCell('mean_gap_to_pb_pct', 'PB gap')}
+                  {headerCell('stddev_session_best_seconds', 'σ best (s)')}
+                  {headerCell('pct_within_1pct_pb', '<1% PB')}
+                  <th className="px-3 py-2 text-gray-300">Worst rel</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedDrivers.map((dr, i) => {
+                  // σRel thresholds: < 0.002 = extreme, < 0.003 = flag, < 0.005
+                  // = tight, > 0.010 = wide/normal-ish. MeanRel: < 1.00 means
+                  // consistently faster than field median. Combined lucky = both.
+                  const sig = dr.stddev_relative_pace;
+                  const mean = dr.mean_relative_pace;
+                  const sigClass =
+                    sig === null ? 'text-gray-500' :
+                    sig < 0.002 ? 'text-red-300 font-semibold' :
+                    sig < 0.003 ? 'text-yellow-300' :
+                    sig > 0.010 ? 'text-blue-300' : 'text-gray-200';
+                  const meanClass =
+                    mean === null ? 'text-gray-500' :
+                    mean < 0.99 ? 'text-green-300 font-semibold' :
+                    mean < 1.00 ? 'text-green-300' :
+                    mean > 1.02 ? 'text-blue-300' : 'text-gray-200';
+                  const luckyRow = sig !== null && mean !== null && sig < 0.003 && mean < 1.0;
+                  const pbgapClass =
+                    dr.mean_gap_to_pb_pct < 0.5 ? 'text-red-300' :
+                    dr.mean_gap_to_pb_pct > 2.0 ? 'text-blue-300' : 'text-gray-200';
+                  return (
+                    <tr
+                      key={`${dr.name}-${i}`}
+                      className={`border-b border-gray-700 cursor-pointer ${luckyRow ? 'bg-red-900 bg-opacity-20 hover:bg-opacity-30' : 'hover:bg-gray-700'}`}
+                      onClick={() => router.push(`/team/${encodeURIComponent(dr.name)}`)}
+                    >
+                      <td className="px-3 py-2 text-gray-500">{i + 1}{luckyRow ? ' 🚩' : ''}</td>
+                      <td className="px-3 py-2 text-white">{dr.name}</td>
+                      <td className="px-3 py-2 text-gray-300">{dr.sessions}</td>
+                      <td className="px-3 py-2 text-green-300">{dr.pb}</td>
+                      <td className={`px-3 py-2 font-mono ${sigClass}`}>
+                        {sig !== null ? sig.toFixed(4) : '—'}
+                      </td>
+                      <td className={`px-3 py-2 font-mono ${meanClass}`}>
+                        {mean !== null ? mean.toFixed(4) : '—'}
+                      </td>
+                      <td className={`px-3 py-2 ${pbgapClass}`}>{dr.mean_gap_to_pb_pct.toFixed(2)}%</td>
+                      <td className="px-3 py-2 text-gray-400">{dr.stddev_session_best_seconds.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-gray-300">{(dr.pct_within_1pct_pb * 100).toFixed(0)}%</td>
+                      <td className="px-3 py-2 font-mono text-gray-400">
+                        {dr.worst_relative_pace !== null ? dr.worst_relative_pace.toFixed(4) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="text-xs text-gray-500 mt-3">
+              <b>σRel</b> is the key column (sorts ascending by default): standard deviation of the driver&apos;s
+              relative pace (session best ÷ field median). Conditions are cancelled because the field median moves with
+              the day. <span className="text-red-300 font-semibold">σRel &lt; 0.002</span> = extreme,{' '}
+              <span className="text-yellow-300">&lt; 0.003</span> = tight flag zone,{' '}
+              <span className="text-blue-300">&gt; 0.010</span> = wide (normal kart variance).{' '}
+              <b>MeanRel</b>: <span className="text-green-300 font-semibold">&lt; 0.99</span> = consistently &gt;1%
+              faster than field, <span className="text-blue-300">&gt; 1.02</span> = consistently off pace.{' '}
+              <b>Lucky flag (row highlight + 🚩)</b> triggers when both σRel &lt; 0.003 AND MeanRel &lt; 1.0 — that&apos;s the
+              &quot;always same position near the front&quot; signature. <b>PB gap</b> and <b>σ best</b> are the old
+              condition-confounded metrics kept for reference.
+            </p>
+          </div>
+        )
+      )}
     </div>
   );
 }

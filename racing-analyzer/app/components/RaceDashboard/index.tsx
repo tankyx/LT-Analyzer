@@ -1189,6 +1189,12 @@ const RaceDashboard = () => {
           </h1>
           
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => router.push('/data')}
+              className={`px-3 py-1 text-sm rounded font-medium transition-colors ${isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
+            >
+              📊 Driver Stats
+            </button>
             {user && (
               <div className="flex items-center gap-4">
                 <span className="text-sm text-gray-500">
@@ -1264,12 +1270,6 @@ const RaceDashboard = () => {
                     </span>
                   </div>
                 )}
-                <button
-                  onClick={() => router.push('/data')}
-                  className={`mt-3 w-full py-2 px-4 rounded-lg font-medium transition-colors ${isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
-                >
-                  📊 Team Data Analysis
-                </button>
               </div>
             )}
 

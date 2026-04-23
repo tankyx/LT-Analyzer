@@ -521,6 +521,170 @@ export const ApiService = {
     }
   },
 
+  getDriverConsistency: async (name: string) => {
+    try {
+      const params = new URLSearchParams({ name });
+      const response = await fetch(`${API_BASE_URL}/api/driver/consistency?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch driver consistency');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching driver consistency:', error);
+      throw error;
+    }
+  },
+
+  searchTeamsAllTracks: async (query: string, limit: number = 20) => {
+    try {
+      const params = new URLSearchParams({ q: query, limit: String(limit) });
+      const response = await fetch(`${API_BASE_URL}/api/team-data/search-all?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to search teams');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error searching teams across tracks:', error);
+      throw error;
+    }
+  },
+
+  getTrackSessionConfigs: async (trackId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/session-configs`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch session configs');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching session configs:', error);
+      throw error;
+    }
+  },
+
+  getTrackKartFairness: async (
+    trackId: number,
+    minSessions: number = 3,
+    minFieldBest?: number,
+    maxFieldBest?: number,
+  ) => {
+    try {
+      const params = new URLSearchParams({ min_sessions: String(minSessions) });
+      if (minFieldBest !== undefined && minFieldBest !== null && !isNaN(minFieldBest)) {
+        params.set('min_field_best', String(minFieldBest));
+      }
+      if (maxFieldBest !== undefined && maxFieldBest !== null && !isNaN(maxFieldBest)) {
+        params.set('max_field_best', String(maxFieldBest));
+      }
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/kart-fairness?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch track kart fairness');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching track kart fairness:', error);
+      throw error;
+    }
+  },
+
+  getDriverAliases: async (name: string) => {
+    try {
+      const params = new URLSearchParams({ name });
+      const response = await fetch(`${API_BASE_URL}/api/driver/aliases?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch aliases');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching driver aliases:', error);
+      throw error;
+    }
+  },
+
+  addDriverAlias: async (canonical_name: string, alias_name: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/admin/aliases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ canonical_name, alias_name }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to add alias');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error adding alias:', error);
+      throw error;
+    }
+  },
+
+  deleteDriverAlias: async (id: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/admin/aliases/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete alias');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error deleting alias:', error);
+      throw error;
+    }
+  },
+
+  getDriverFairness: async (name: string, trackId: number) => {
+    try {
+      const params = new URLSearchParams({
+        name,
+        track_id: trackId.toString(),
+      });
+      const response = await fetch(`${API_BASE_URL}/api/driver/fairness?${params.toString()}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch driver fairness');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching driver fairness:', error);
+      throw error;
+    }
+  },
+
   // Trigger pit alert for a specific team
   triggerPitAlert: async (data: { track_id: number; team_name: string; alert_message?: string }) => {
     try {

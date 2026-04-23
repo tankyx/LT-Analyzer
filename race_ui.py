@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import threading
 import time
 import traceback
@@ -1482,13 +1483,27 @@ def get_db_connection():
 
 
 def _ensure_auth_schema():
-    """Normalize auth.db across versions (legacy 'timestamp' column -> 'attempted_at')."""
+    """Normalize auth.db across versions (legacy 'timestamp' column -> 'attempted_at')
+    and create the driver_aliases table if missing."""
     try:
         with sqlite3.connect('auth.db') as conn:
             cols = [row[1] for row in conn.execute('PRAGMA table_info(login_attempts)').fetchall()]
             if cols and 'attempted_at' not in cols and 'timestamp' in cols:
                 conn.execute('ALTER TABLE login_attempts RENAME COLUMN timestamp TO attempted_at')
                 print('Migrated login_attempts.timestamp -> attempted_at')
+
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS driver_aliases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    canonical_name TEXT NOT NULL,
+                    alias_name TEXT NOT NULL,
+                    added_by TEXT,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(canonical_name COLLATE NOCASE, alias_name COLLATE NOCASE)
+                )
+            ''')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_driver_aliases_canon ON driver_aliases(canonical_name COLLATE NOCASE)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_driver_aliases_alias ON driver_aliases(alias_name COLLATE NOCASE)')
     except sqlite3.Error as e:
         print(f'Warning: auth schema normalization skipped: {e}')
 
@@ -2170,6 +2185,129 @@ def admin_delete_track(track_id):
 
     return jsonify({'success': True})
 
+
+# ---------------------------------------------------------------------------
+# Driver aliases (admin-managed)
+# ---------------------------------------------------------------------------
+
+@app.route('/api/driver/aliases', methods=['GET'])
+def get_driver_aliases():
+    """Return the alias group for a driver name (canonical + all aliases).
+
+    Query param: name (required). Case-insensitive.
+    """
+    raw = request.args.get('name', '').strip()
+    if not raw:
+        return jsonify({'error': 'name parameter is required'}), 400
+    try:
+        with get_db_connection() as conn:
+            # Find canonicals reachable from the input name
+            rows = conn.execute(
+                '''SELECT id, canonical_name, alias_name, added_by, added_at FROM driver_aliases
+                   WHERE canonical_name = ? COLLATE NOCASE
+                      OR alias_name     = ? COLLATE NOCASE''',
+                (raw, raw),
+            ).fetchall()
+            canonicals = {r['canonical_name'] for r in rows}
+            if not canonicals:
+                canonicals.add(raw)
+            # Pull every row in those canonicals' groups for display
+            all_rows = []
+            seen_ids = set()
+            for c in canonicals:
+                for r in conn.execute(
+                    '''SELECT id, canonical_name, alias_name, added_by, added_at FROM driver_aliases
+                       WHERE canonical_name = ? COLLATE NOCASE''',
+                    (c,),
+                ).fetchall():
+                    if r['id'] in seen_ids:
+                        continue
+                    seen_ids.add(r['id'])
+                    all_rows.append(dict(r))
+        return jsonify({
+            'canonical_names': sorted(canonicals, key=str.lower),
+            'aliases': all_rows,
+        })
+    except Exception as e:
+        app.logger.exception('get_driver_aliases failed')
+        return _internal_error(e)
+
+
+@app.route('/api/admin/aliases', methods=['GET'])
+@admin_required
+def admin_list_aliases():
+    """List every alias row, grouped by canonical name."""
+    try:
+        with get_db_connection() as conn:
+            rows = conn.execute(
+                '''SELECT id, canonical_name, alias_name, added_by, added_at
+                   FROM driver_aliases ORDER BY canonical_name COLLATE NOCASE, alias_name COLLATE NOCASE'''
+            ).fetchall()
+        groups = {}
+        for r in rows:
+            groups.setdefault(r['canonical_name'], []).append({
+                'id': r['id'],
+                'alias_name': r['alias_name'],
+                'added_by': r['added_by'],
+                'added_at': r['added_at'],
+            })
+        return jsonify({
+            'groups': [
+                {'canonical_name': k, 'aliases': v}
+                for k, v in sorted(groups.items(), key=lambda kv: kv[0].lower())
+            ],
+        })
+    except Exception as e:
+        app.logger.exception('admin_list_aliases failed')
+        return _internal_error(e)
+
+
+@app.route('/api/admin/aliases', methods=['POST'])
+@admin_required
+def admin_add_alias():
+    """Add an alias mapping.
+
+    Body JSON: { canonical_name, alias_name }
+    """
+    data = request.json or {}
+    canonical = (data.get('canonical_name') or '').strip()
+    alias = (data.get('alias_name') or '').strip()
+    if not canonical or not alias:
+        return jsonify({'error': 'canonical_name and alias_name are required'}), 400
+    if canonical.lower() == alias.lower():
+        return jsonify({'error': 'canonical and alias cannot be identical'}), 400
+    try:
+        added_by = getattr(request, 'current_user', {}).get('username') or 'admin'
+        with get_db_connection() as conn:
+            cur = conn.execute(
+                '''INSERT INTO driver_aliases (canonical_name, alias_name, added_by)
+                   VALUES (?, ?, ?)''',
+                (canonical, alias, added_by),
+            )
+            new_id = cur.lastrowid
+        return jsonify({'success': True, 'id': new_id})
+    except sqlite3.IntegrityError:
+        return jsonify({'error': 'This alias already exists for that canonical name'}), 409
+    except Exception as e:
+        app.logger.exception('admin_add_alias failed')
+        return _internal_error(e)
+
+
+@app.route('/api/admin/aliases/<int:alias_id>', methods=['DELETE'])
+@admin_required
+def admin_delete_alias(alias_id):
+    """Remove a single alias mapping by id."""
+    try:
+        with get_db_connection() as conn:
+            cur = conn.execute('DELETE FROM driver_aliases WHERE id = ?', (alias_id,))
+            if cur.rowcount == 0:
+                return jsonify({'error': 'alias not found'}), 404
+        return jsonify({'success': True})
+    except Exception as e:
+        app.logger.exception('admin_delete_alias failed')
+        return _internal_error(e)
+
+
 # Test endpoints for simulating track sessions
 @app.route('/api/test/simulate-session/<int:track_id>', methods=['POST'])
 @admin_required
@@ -2483,14 +2621,149 @@ def search_teams():
         """
 
         cursor.execute(query, (f'%{search_query.lower()}%',))
-        teams = [{'name': row[0], 'classes': row[1] if row[1] else ''} for row in cursor.fetchall()]
+        direct = [{'name': row[0], 'classes': row[1] if row[1] else ''} for row in cursor.fetchall()]
 
         conn.close()
+
+        # Also surface canonical drivers whose alias (or canonical name) matches
+        # the query but whose exact team_name isn't in this track's lap_times.
+        direct_names_lower = {t['name'].lower() for t in direct}
+        alias_canonicals = set()
+        try:
+            q_lower = search_query.lower()
+            with sqlite3.connect('auth.db') as aconn:
+                for row in aconn.execute(
+                    '''SELECT DISTINCT canonical_name FROM driver_aliases
+                       WHERE LOWER(canonical_name) LIKE ? OR LOWER(alias_name) LIKE ?''',
+                    (f'%{q_lower}%', f'%{q_lower}%'),
+                ).fetchall():
+                    alias_canonicals.add(row[0])
+        except sqlite3.Error as e:
+            app.logger.warning(f"alias search lookup failed: {e}")
+
+        teams = list(direct)
+        for canonical in alias_canonicals:
+            if canonical.lower() not in direct_names_lower:
+                teams.append({'name': canonical, 'classes': '', 'via_alias': True})
 
         return jsonify({'teams': teams})
     except Exception as e:
         print(f"Error searching teams: {e}")
         return _internal_error(e)
+
+
+@app.route('/api/team-data/search-all', methods=['GET'])
+def search_teams_all_tracks():
+    """Search driver/team names across EVERY track's database.
+
+    Used by the alias admin UI so you can pick an existing name from any track
+    (not just the one currently selected). Returns distinct names with the list
+    of tracks they appear on.
+
+    Query params:
+      q (required) - substring, case-insensitive
+      limit (optional) - max distinct names to return (default 20, max 100)
+    """
+    try:
+        q = request.args.get('q', '').strip()
+        if not q:
+            return jsonify({'teams': []})
+        try:
+            limit = max(1, min(100, int(request.args.get('limit', 20))))
+        except (TypeError, ValueError):
+            limit = 20
+        q_lower = q.lower()
+
+        # Enumerate active tracks once
+        with sqlite3.connect('tracks.db') as tconn:
+            tracks = tconn.execute(
+                'SELECT id, track_name FROM tracks WHERE is_active = 1'
+            ).fetchall()
+
+        # Aggregate distinct cleaned team names across all track DBs
+        agg = {}  # name_clean_lower -> {display, classes, track_ids}
+        for track_id, track_name in tracks:
+            try:
+                conn = get_track_db_connection(track_id)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT DISTINCT
+                        CASE
+                            WHEN team_name LIKE '% - %' THEN TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))
+                            ELSE TRIM(team_name)
+                        END AS team_name_clean,
+                        CASE
+                            WHEN team_name LIKE '% - %' THEN SUBSTR(team_name, 1, 1)
+                            ELSE NULL
+                        END AS class_prefix
+                    FROM lap_times
+                    WHERE (
+                        CASE
+                            WHEN team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                            ELSE LOWER(TRIM(team_name))
+                        END
+                    ) LIKE ?
+                    """,
+                    (f'%{q_lower}%',),
+                )
+                for row in cursor.fetchall():
+                    name = (row[0] or '').strip()
+                    if not name:
+                        continue
+                    key = name.lower()
+                    entry = agg.setdefault(key, {
+                        'name': name,
+                        'classes': set(),
+                        'track_ids': set(),
+                        'track_names': set(),
+                    })
+                    if row[1]:
+                        entry['classes'].add(row[1])
+                    entry['track_ids'].add(track_id)
+                    entry['track_names'].add(track_name)
+                conn.close()
+            except Exception as track_error:
+                app.logger.warning(f"search-all: track {track_id} query failed: {track_error}")
+                continue
+
+        # Also surface aliases whose alias_name or canonical_name matches q
+        try:
+            with sqlite3.connect('auth.db') as aconn:
+                for row in aconn.execute(
+                    '''SELECT DISTINCT canonical_name FROM driver_aliases
+                       WHERE LOWER(canonical_name) LIKE ? OR LOWER(alias_name) LIKE ?''',
+                    (f'%{q_lower}%', f'%{q_lower}%'),
+                ).fetchall():
+                    name = row[0]
+                    key = name.lower()
+                    agg.setdefault(key, {
+                        'name': name,
+                        'classes': set(),
+                        'track_ids': set(),
+                        'track_names': set(),
+                        'via_alias': True,
+                    })
+        except sqlite3.Error as e:
+            app.logger.warning(f"search-all alias lookup failed: {e}")
+
+        results = sorted(agg.values(), key=lambda r: r['name'].lower())[:limit]
+        return jsonify({
+            'teams': [
+                {
+                    'name': r['name'],
+                    'classes': ''.join(sorted(r['classes'])),
+                    'track_names': sorted(r['track_names']),
+                    'track_count': len(r['track_ids']),
+                    'via_alias': r.get('via_alias', False),
+                }
+                for r in results
+            ],
+        })
+    except Exception as e:
+        app.logger.exception('search-all endpoint failed')
+        return _internal_error(e)
+
 
 @app.route('/api/team-data/top-teams', methods=['GET'])
 def get_top_teams():
@@ -3570,13 +3843,15 @@ def get_cross_track_sessions():
     - team (required): team name (supports flexible matching - finds all name variations)
     """
     try:
-        team_name = request.args.get('team', '').strip().lower()
+        team_name = request.args.get('team', '').strip()
 
         if not team_name:
             return jsonify({'error': 'team parameter is required'}), 400
 
-        # Tokenize the team name for flexible matching (handles "DELVENNE Simon" vs "SIMON DELVENNE")
-        name_tokens = [token.strip() for token in team_name.split() if token.strip()]
+        # Expand through alias group so one search finds all name variants
+        alias_names = _expand_alias_group(team_name)
+        if not alias_names:
+            alias_names = [team_name]
 
         # Get all tracks from tracks.db
         tracks_conn = sqlite3.connect('tracks.db')
@@ -3588,8 +3863,7 @@ def get_cross_track_sessions():
         sessions = []
         total_laps = 0
         tracks_raced = 0
-        best_lap_overall = None
-        best_lap_overall_seconds = float('inf')
+        bests_by_track_map = {}  # track_id -> best lap info for that track
 
         # Query each track's database
         for track_id, track_name in tracks:
@@ -3597,89 +3871,36 @@ def get_cross_track_sessions():
                 conn = get_track_db_connection(track_id)
                 cursor = conn.cursor()
 
-                # Build flexible matching conditions for lap_history
-                lh_conditions = []
-                lh_params = []
-                for token in name_tokens:
-                    lh_conditions.append("LOWER(lh.team_name) LIKE ?")
-                    lh_params.append(f'%{token}%')
+                history_names, times_names = _find_matching_team_names(cursor, alias_names)
+                if not history_names and not times_names:
+                    conn.close()
+                    continue
 
-                lh_where_clause = " AND ".join(lh_conditions) if lh_conditions else "1=1"
+                session_rows = _fetch_driver_session_ids(cursor, history_names, times_names)
+                track_had_sessions = False
+                for session_id, session_name, session_date in session_rows:
+                    laps_with_flag = _fetch_laps_for_session(cursor, session_id, history_names, times_names)
+                    if not laps_with_flag:
+                        continue
+                    track_had_sessions = True
+                    laps = [s for s, _ in laps_with_flag]
+                    on_track = [s for s, pit in laps_with_flag if not pit] or laps
+                    best_lap_secs = min(on_track)
+                    avg_lap_secs = sum(on_track) / len(on_track)
 
-                # Build flexible matching conditions for lap_times
-                lt_conditions = []
-                lt_params = []
-                for token in name_tokens:
-                    lt_conditions.append("LOWER(lt.team_name) LIKE ?")
-                    lt_params.append(f'%{token}%')
+                    best_lap_formatted = _format_seconds(best_lap_secs)
+                    avg_lap_formatted = _format_seconds(avg_lap_secs)
 
-                lt_where_clause = " AND ".join(lt_conditions) if lt_conditions else "1=1"
-
-                # Get sessions for this team on this track (using flexible name matching)
-                # Note: We only use lap_history to avoid cartesian product with lap_times
-                query = f"""
-                    SELECT
-                        rs.session_id,
-                        rs.name as session_name,
-                        rs.start_time as session_date,
-                        COUNT(lh.lap_number) as total_laps,
-                        MIN(
-                            CASE
-                                WHEN lh.lap_time LIKE '%:%' THEN
-                                    CAST(SUBSTR(lh.lap_time, 1, INSTR(lh.lap_time, ':') - 1) AS REAL) * 60 +
-                                    CAST(SUBSTR(lh.lap_time, INSTR(lh.lap_time, ':') + 1) AS REAL)
-                                WHEN lh.lap_time IS NOT NULL AND lh.lap_time != '' THEN
-                                    CAST(lh.lap_time AS REAL)
-                                ELSE NULL
-                            END
-                        ) as best_lap_seconds,
-                        AVG(
-                            CASE
-                                WHEN lh.lap_time LIKE '%:%' THEN
-                                    CAST(SUBSTR(lh.lap_time, 1, INSTR(lh.lap_time, ':') - 1) AS REAL) * 60 +
-                                    CAST(SUBSTR(lh.lap_time, INSTR(lh.lap_time, ':') + 1) AS REAL)
-                                WHEN lh.lap_time IS NOT NULL AND lh.lap_time != '' THEN
-                                    CAST(lh.lap_time AS REAL)
-                                ELSE NULL
-                            END
-                        ) as avg_lap_seconds
-                    FROM race_sessions rs
-                    INNER JOIN lap_history lh ON rs.session_id = lh.session_id
-                        AND ({lh_where_clause})
-                    GROUP BY rs.session_id, rs.name, rs.start_time
-                    ORDER BY rs.start_time DESC
-                """
-
-                cursor.execute(query, lh_params)
-                track_sessions = cursor.fetchall()
-                conn.close()
-
-                if track_sessions:
-                    tracks_raced += 1
-
-                for row in track_sessions:
-                    session_id, session_name, session_date, laps_count, best_lap_secs, avg_lap_secs = row
-
-                    # Format best lap
-                    if best_lap_secs:
-                        mins = int(best_lap_secs // 60)
-                        secs = best_lap_secs % 60
-                        best_lap_formatted = f"{mins}:{secs:06.3f}"
-
-                        # Track overall best lap
-                        if best_lap_secs < best_lap_overall_seconds:
-                            best_lap_overall_seconds = best_lap_secs
-                            best_lap_overall = best_lap_formatted
-                    else:
-                        best_lap_formatted = None
-
-                    # Format avg lap
-                    if avg_lap_secs:
-                        mins = int(avg_lap_secs // 60)
-                        secs = avg_lap_secs % 60
-                        avg_lap_formatted = f"{mins}:{secs:06.3f}"
-                    else:
-                        avg_lap_formatted = None
+                    cur_best = bests_by_track_map.get(track_id)
+                    if cur_best is None or best_lap_secs < cur_best['best_lap_seconds']:
+                        bests_by_track_map[track_id] = {
+                            'track_id': track_id,
+                            'track_name': track_name,
+                            'best_lap': best_lap_formatted,
+                            'best_lap_seconds': round(best_lap_secs, 3),
+                            'session_id': session_id,
+                            'session_date': session_date,
+                        }
 
                     sessions.append({
                         'session_id': session_id,
@@ -3687,12 +3908,15 @@ def get_cross_track_sessions():
                         'track_name': track_name,
                         'session_name': session_name if session_name else 'Unknown Session',
                         'session_date': session_date,
-                        'total_laps': laps_count if laps_count else 0,
+                        'total_laps': len(laps),
                         'best_lap': best_lap_formatted,
-                        'avg_lap': avg_lap_formatted
+                        'avg_lap': avg_lap_formatted,
                     })
+                    total_laps += len(laps)
 
-                    total_laps += laps_count if laps_count else 0
+                if track_had_sessions:
+                    tracks_raced += 1
+                conn.close()
 
             except Exception as track_error:
                 print(f"Error querying track {track_id}: {track_error}")
@@ -3705,7 +3929,7 @@ def get_cross_track_sessions():
                 'total_sessions': len(sessions),
                 'total_laps': total_laps,
                 'tracks_raced': tracks_raced,
-                'best_lap_overall': best_lap_overall
+                'bests_by_track': sorted(bests_by_track_map.values(), key=lambda e: e['track_name']),
             }
         })
 
@@ -3789,6 +4013,1224 @@ def get_session_laps():
         print(f"Error getting session laps: {e}")
         traceback.print_exc()
         return _internal_error(e)
+
+
+# ---------------------------------------------------------------------------
+# Driver Stats: consistency and kart-fairness
+# ---------------------------------------------------------------------------
+
+def _name_tokens(raw):
+    """Split a user-supplied name into lowercase tokens for flexible matching."""
+    return [t for t in (raw or '').strip().lower().split() if t]
+
+
+def _name_like_clause(alias_col, tokens):
+    """Build 'LOWER(col) LIKE ? AND ...' clause + params for flexible name match."""
+    if not tokens:
+        return "1=1", []
+    clauses = [f"LOWER({alias_col}) LIKE ?"] * len(tokens)
+    params = [f"%{t}%" for t in tokens]
+    return " AND ".join(clauses), params
+
+
+_DRIVER_CLASS_PREFIX_RE = re.compile(r'^(HC|JR|G)\s*-\s*', re.IGNORECASE)
+
+# Recognisable test / staff placeholder names to drop from per-driver analytics.
+# Matches whole-string against known patterns (APEXTEST, 'test 2', 'equipe test',
+# 'pilote test', 'test <N>', 'tet <N>' typo, plain 'test'/'essai'). Anchored with
+# ^...$ so real names containing "test" as a substring (e.g. MOTTET) are safe.
+_TEST_NAME_RE = re.compile(
+    r'^(?:apex\s*test\d*|equipe\s*test[e]?|pilote\s*test|tes?t\s*\d+|test|essai\d*)$',
+    re.IGNORECASE,
+)
+
+
+def _is_test_placeholder(name):
+    """True for team_name values that are clearly test/staff placeholders."""
+    if not name:
+        return False
+    return bool(_TEST_NAME_RE.match(name.strip()))
+
+
+def _strip_driver_class_prefix(name):
+    """Strip per-driver class tags (Heavy Cup / Junior / Ghost) from a team_name.
+
+    The organizer tags some drivers by category, so "HC - TORLET Corentin" and
+    "TORLET Corentin" are the same person racing in different classes. Stripping
+    these collapses them onto a single driver for per-driver aggregations. We do
+    NOT strip numeric ("1 - ", "2 - ") or Funyo ("F80 - ", "F95 - ") prefixes
+    because those identify endurance TEAMS, not individual drivers.
+    """
+    if not name:
+        return name
+    return _DRIVER_CLASS_PREFIX_RE.sub('', name).strip()
+
+
+def _expand_alias_group(name):
+    """Return the full list of names that belong to the same alias group as `name`.
+
+    Admin-managed driver_aliases table maps a canonical name to any number of
+    alias names. Given an input name, this returns every name in its group
+    (canonical plus all aliases), plus the input name itself. Case-insensitive.
+    """
+    n = (name or '').strip()
+    if not n:
+        return []
+    names = {n}
+    try:
+        with sqlite3.connect('auth.db') as conn:
+            # Canonicals reachable from the input (either input is the canonical
+            # directly, or input is an alias of some canonical).
+            canons = {
+                row[0] for row in conn.execute(
+                    '''SELECT canonical_name FROM driver_aliases
+                       WHERE canonical_name = ? COLLATE NOCASE
+                          OR alias_name     = ? COLLATE NOCASE''',
+                    (n, n),
+                ).fetchall()
+            }
+            canons.add(n)
+            # All aliases of every canonical in the group
+            for c in list(canons):
+                for row in conn.execute(
+                    'SELECT alias_name FROM driver_aliases WHERE canonical_name = ? COLLATE NOCASE',
+                    (c,),
+                ).fetchall():
+                    names.add(row[0])
+                names.add(c)
+    except sqlite3.Error as e:
+        app.logger.warning(f"alias expansion failed for {n!r}: {e}")
+    return list(names)
+
+
+def _multi_name_clause(alias_col, names):
+    """Build a SQL clause that matches if ANY of `names` matches (token-AND within
+    each name, OR across names). Returns (clause, params).
+
+    e.g. names=['Tanguy Pedrazzoli', 'Tankyx'] ->
+         ((LOWER(col) LIKE '%tanguy%' AND LOWER(col) LIKE '%pedrazzoli%')
+          OR (LOWER(col) LIKE '%tankyx%'))
+    """
+    if not names:
+        return "1=0", []
+    groups = []
+    all_params = []
+    for n in names:
+        tokens = _name_tokens(n)
+        if not tokens:
+            continue
+        clause, params = _name_like_clause(alias_col, tokens)
+        groups.append(f"({clause})")
+        all_params.extend(params)
+    if not groups:
+        return "1=0", []
+    return "(" + " OR ".join(groups) + ")", all_params
+
+
+def _name_matches_any(team_name, alias_names):
+    """Python-side check: does team_name match any alias (token-AND)?"""
+    tl = (team_name or '').lower()
+    for n in alias_names:
+        toks = _name_tokens(n)
+        if toks and all(t in tl for t in toks):
+            return True
+    return False
+
+
+def _find_matching_team_names(cur, alias_names):
+    """Fast name resolution: use the (team_name, session_id) covering index to
+    scan DISTINCT team_name values — small result, typically <2000 rows per
+    track — then filter in Python. Avoids full-table scans that substring
+    LIKE on lap_times would trigger.
+
+    Returns (names_from_lap_history, names_from_lap_times).
+    """
+    history_names = []
+    cur.execute('SELECT DISTINCT team_name FROM lap_history')
+    for (name,) in cur.fetchall():
+        if name and _name_matches_any(name, alias_names):
+            history_names.append(name)
+
+    times_names = []
+    cur.execute('SELECT DISTINCT team_name FROM lap_times')
+    for (name,) in cur.fetchall():
+        if name and _name_matches_any(name, alias_names):
+            times_names.append(name)
+
+    return history_names, times_names
+
+
+def _fetch_driver_session_ids(cur, history_names, times_names):
+    """Return every session (session_id, name, start_time) where any of the given
+    exact team_name values appears in EITHER lap_history or lap_times. Ordered
+    newest first. Using both tables catches sessions where the parser wrote to
+    lap_times but not lap_history.
+    """
+    if not history_names and not times_names:
+        return []
+    placeholders_h = ','.join('?' * len(history_names)) if history_names else ''
+    placeholders_t = ','.join('?' * len(times_names)) if times_names else ''
+
+    conditions = []
+    params = []
+    if history_names:
+        conditions.append(
+            f'rs.session_id IN (SELECT DISTINCT session_id FROM lap_history WHERE team_name IN ({placeholders_h}))'
+        )
+        params.extend(history_names)
+    if times_names:
+        conditions.append(
+            f'rs.session_id IN (SELECT DISTINCT session_id FROM lap_times WHERE team_name IN ({placeholders_t}))'
+        )
+        params.extend(times_names)
+
+    cur.execute(
+        f"""
+        SELECT rs.session_id, rs.name, rs.start_time FROM race_sessions rs
+         WHERE {' OR '.join(conditions)}
+         ORDER BY rs.start_time DESC
+        """,
+        params,
+    )
+    return cur.fetchall()
+
+
+LAP_MIN_SECONDS = 20.0  # shorter than any real karting lap; anything below is a sector/artefact
+LAP_MAX_SECONDS = 600.0  # pit-in laps top out well below this; mostly catches garbage
+MAD_Z_THRESHOLD = 3.5    # modified-Z cutoff for outlier detection (Iglewicz & Hoaglin 1993)
+MAD_MIN_SAMPLES = 5      # skip MAD filter for very small session samples
+
+
+def _filter_outliers_mad(laps_with_flag, z_threshold=MAD_Z_THRESHOLD):
+    """Statistical outlier filter using the modified Z-score (median + MAD).
+
+    Lap times are right-skewed (most laps near race pace, a few slow pit or
+    flag laps), so median/MAD is more robust than mean/σ — outliers don't
+    inflate the reference values. Only applied to on-track laps; pit-in laps
+    are preserved as-is (they're identified separately by the pit counter).
+
+    For a reasonable symmetric approximation to the normal distribution the
+    scaling constant is 0.6745; |modified_z| > 3.5 is a common outlier cutoff.
+    """
+    if len(laps_with_flag) < MAD_MIN_SAMPLES:
+        return laps_with_flag
+
+    on_track_secs = [s for s, pit in laps_with_flag if not pit]
+    if len(on_track_secs) < MAD_MIN_SAMPLES:
+        return laps_with_flag
+
+    sorted_secs = sorted(on_track_secs)
+    median = sorted_secs[len(sorted_secs) // 2]
+    deviations = sorted(abs(s - median) for s in on_track_secs)
+    mad = deviations[len(deviations) // 2]
+    if mad == 0:
+        return laps_with_flag  # all samples identical — nothing meaningful to filter
+
+    out = []
+    for s, is_pit in laps_with_flag:
+        if is_pit:
+            out.append((s, is_pit))
+            continue
+        z = 0.6745 * abs(s - median) / mad
+        if z <= z_threshold:
+            out.append((s, is_pit))
+    return out
+
+
+def _dedupe_laps(rows):
+    """From ordered (raw_lap_time, cumulative_pit_count) tuples, dedupe stale
+    repeated lap-time strings and convert to (seconds, is_pit_lap) list.
+
+    A pit-in lap is detected by an increase in the cumulative pit counter from
+    one kept row to the next. Values outside [LAP_MIN_SECONDS, LAP_MAX_SECONDS]
+    are dropped — this catches sector-time artefacts that occasionally appear
+    in the live-timing last_lap field (e.g. 4.32s "laps").
+    """
+    out = []
+    prev_raw = None
+    prev_pit = 0
+    for raw, pit in rows:
+        if raw == prev_raw:
+            continue
+        prev_raw = raw
+        secs = _safe_parse_time(raw)
+        if secs == float('inf') or secs < LAP_MIN_SECONDS or secs > LAP_MAX_SECONDS:
+            continue
+        pit_count = int(pit) if pit is not None else prev_pit
+        is_pit = pit_count > prev_pit
+        prev_pit = pit_count
+        out.append((secs, is_pit))
+    return out
+
+
+def _fetch_laps_from_history(cur, session_id, team_names):
+    """team_names: exact team_name values (use _find_matching_team_names)."""
+    if not team_names:
+        return []
+    placeholders = ','.join('?' * len(team_names))
+    cur.execute(
+        f"""
+        SELECT lap_time, pit_this_lap FROM lap_history
+         WHERE session_id = ? AND team_name IN ({placeholders})
+           AND lap_time IS NOT NULL AND lap_time != ''
+         ORDER BY timestamp ASC
+        """,
+        [session_id] + team_names,
+    )
+    return _dedupe_laps(cur.fetchall())
+
+
+def _fetch_laps_from_lap_times(cur, session_id, team_names):
+    """Reconstruct the driver's completed laps from lap_times snapshots.
+
+    lap_times is written on every polling tick (~1Hz), so `last_lap` repeats
+    many times until a new lap is completed. A SQL window function dedupes at
+    the DB layer to avoid pulling tens of thousands of rows into Python.
+    """
+    if not team_names:
+        return []
+    placeholders = ','.join('?' * len(team_names))
+    cur.execute(
+        f"""
+        WITH ordered AS (
+            SELECT timestamp, last_lap, pit_stops,
+                   LAG(last_lap) OVER (ORDER BY timestamp) AS prev_lap
+              FROM lap_times
+             WHERE session_id = ? AND team_name IN ({placeholders})
+               AND last_lap IS NOT NULL AND last_lap != ''
+        )
+        SELECT last_lap, pit_stops FROM ordered
+         WHERE prev_lap IS NULL OR last_lap != prev_lap
+         ORDER BY timestamp ASC
+        """,
+        [session_id] + team_names,
+    )
+    return _dedupe_laps(cur.fetchall())
+
+
+def _fetch_laps_for_session(cur, session_id, history_names, times_names):
+    """Prefer lap_history; fall back to lap_times if the former is empty.
+    Applies MAD-based outlier filter per session so garbage values outside
+    the sanity window but still within a plausible seconds range are dropped.
+    """
+    laps = _fetch_laps_from_history(cur, session_id, history_names)
+    if not laps:
+        laps = _fetch_laps_from_lap_times(cur, session_id, times_names)
+    return _filter_outliers_mad(laps)
+
+
+def _format_seconds(sec):
+    """Format seconds as M:SS.mmm (or None)."""
+    if sec is None or sec == float('inf'):
+        return None
+    mins = int(sec // 60)
+    rem = sec - mins * 60
+    return f"{mins}:{rem:06.3f}"
+
+
+def _classify_session_mode(cur, session_id, history_names, times_names):
+    """Determine if the driver ran sprint or endurance in a given session.
+
+    Tries `lap_history` first (richer per-lap data). Falls back to `lap_times`
+    snapshots for sessions where the parser never wrote lap_history rows (which
+    happens on some tracks — see _fetch_driver_session_ids).
+
+    Returns one of: 'sprint', 'endurance', 'unknown'. Heuristic: >1 kart = sprint;
+    single kart with ≥2 cumulative pits and ≥10 lap samples = endurance;
+    single kart, zero pits, <30 samples = single short heat (treated as sprint).
+    """
+    def _classify(karts, max_pits, laps):
+        if laps == 0:
+            return None
+        if karts > 1:
+            return 'sprint'
+        if karts == 1 and max_pits >= 2 and laps >= 10:
+            return 'endurance'
+        if karts == 1 and max_pits == 0 and laps < 30:
+            return 'sprint'
+        return 'unknown'
+
+    if history_names:
+        placeholders = ','.join('?' * len(history_names))
+        cur.execute(
+            f"""
+            SELECT COUNT(DISTINCT kart_number), MAX(pit_this_lap), COUNT(*)
+              FROM lap_history
+             WHERE session_id=? AND team_name IN ({placeholders})
+            """,
+            [session_id] + history_names,
+        )
+        row = cur.fetchone() or (0, 0, 0)
+        mode = _classify(row[0] or 0, row[1] or 0, row[2] or 0)
+        if mode is not None:
+            return mode
+
+    if times_names:
+        placeholders = ','.join('?' * len(times_names))
+        cur.execute(
+            f"""
+            SELECT COUNT(DISTINCT kart_number), MAX(pit_stops), COUNT(DISTINCT last_lap)
+              FROM lap_times
+             WHERE session_id=? AND team_name IN ({placeholders})
+               AND last_lap IS NOT NULL AND last_lap != ''
+            """,
+            [session_id] + times_names,
+        )
+        row = cur.fetchone() or (0, 0, 0)
+        mode = _classify(row[0] or 0, row[1] or 0, row[2] or 0)
+        if mode is not None:
+            return mode
+
+    return 'unknown'
+
+
+def _stddev(values):
+    n = len(values)
+    if n < 2:
+        return 0.0
+    mean = sum(values) / n
+    var = sum((v - mean) ** 2 for v in values) / (n - 1)
+    return var ** 0.5
+
+
+def _percentile_rank(value, population):
+    """Return percentile rank (0-100) of value within population (lower value -> lower rank)."""
+    if not population:
+        return None
+    below = sum(1 for v in population if v < value)
+    return round(100.0 * below / len(population), 1)
+
+
+@app.route('/api/driver/consistency', methods=['GET'])
+def get_driver_consistency():
+    """Cross-track lap-time consistency stats for a driver/team.
+
+    Query params:
+      name (required) - driver/team name (flexible tokenized matching).
+    """
+    try:
+        raw_name = request.args.get('name', '').strip()
+        if not raw_name:
+            return jsonify({'error': 'name parameter is required'}), 400
+        alias_names = _expand_alias_group(raw_name)
+        if not alias_names:
+            return jsonify({'error': 'name parameter is required'}), 400
+
+        tracks_conn = sqlite3.connect('tracks.db')
+        tracks_cursor = tracks_conn.cursor()
+        tracks_cursor.execute('SELECT id, track_name FROM tracks WHERE is_active = 1')
+        tracks = tracks_cursor.fetchall()
+        tracks_conn.close()
+
+        sessions_out = []
+        all_laps = []  # aggregate across all sessions for overall stats
+        tracks_raced = set()
+
+        for track_id, track_name in tracks:
+            try:
+                conn = get_track_db_connection(track_id)
+                cur = conn.cursor()
+
+                history_names, times_names = _find_matching_team_names(cur, alias_names)
+                if not history_names and not times_names:
+                    conn.close()
+                    continue
+
+                session_rows = _fetch_driver_session_ids(cur, history_names, times_names)
+                per_session = {}
+                for session_id, session_name, session_date in session_rows:
+                    laps_with_flag = _fetch_laps_for_session(cur, session_id, history_names, times_names)
+                    if not laps_with_flag:
+                        continue
+                    per_session[session_id] = {
+                        'session_id': session_id,
+                        'session_name': session_name,
+                        'session_date': session_date,
+                        'track_id': track_id,
+                        'track_name': track_name,
+                        'laps': laps_with_flag,
+                        'pit_laps': sum(1 for _, pit in laps_with_flag if pit),
+                    }
+
+                conn.close()
+
+                if per_session:
+                    tracks_raced.add(track_id)
+
+                for ent in per_session.values():
+                    laps_with_flag = ent['laps']
+                    if not laps_with_flag:
+                        continue
+                    # Outlier rejection already applied in _fetch_laps_for_session
+                    # via MAD filter. Remaining 'clean' set = non-pit-in laps.
+                    on_track = [s for s, pit in laps_with_flag if not pit]
+                    if not on_track:
+                        on_track = [s for s, _ in laps_with_flag]
+                    clean = sorted(on_track)
+                    laps = [s for s, _ in laps_with_flag]
+                    best = min(clean)
+                    mean = sum(clean) / len(clean)
+                    median = clean[len(clean) // 2]
+                    sd = _stddev(clean)
+                    cov = (sd / mean) if mean > 0 else 0
+                    within_05 = sum(1 for v in clean if v <= best + 0.5) / len(clean)
+                    within_1 = sum(1 for v in clean if v <= best + 1.0) / len(clean)
+                    within_2 = sum(1 for v in clean if v <= best + 2.0) / len(clean)
+                    all_laps.extend(clean)
+                    sessions_out.append({
+                        'session_id': ent['session_id'],
+                        'session_name': ent['session_name'],
+                        'session_date': ent['session_date'],
+                        'track_id': ent['track_id'],
+                        'track_name': ent['track_name'],
+                        'total_laps': len(laps),
+                        'clean_laps': len(clean),
+                        'pit_laps': ent['pit_laps'],
+                        'best_lap': _format_seconds(best),
+                        'best_lap_seconds': round(best, 3),
+                        'mean_lap_seconds': round(mean, 3),
+                        'median_lap_seconds': round(median, 3),
+                        'stddev_seconds': round(sd, 3),
+                        'cov': round(cov, 5),
+                        'pct_within_0_5s': round(within_05, 4),
+                        'pct_within_1s': round(within_1, 4),
+                        'pct_within_2s': round(within_2, 4),
+                    })
+
+            except Exception as track_error:
+                app.logger.warning(f"consistency: track {track_id} query failed: {track_error}")
+                continue
+
+        sessions_out.sort(key=lambda s: s['session_date'] or '', reverse=True)
+
+        # Best lap per track — lap times on different tracks aren't comparable,
+        # so a single "Best Lap Overall" is misleading. Expose per-track bests.
+        bests_by_track = {}
+        for s in sessions_out:
+            t_id = s['track_id']
+            entry = bests_by_track.get(t_id)
+            if entry is None or s['best_lap_seconds'] < entry['best_lap_seconds']:
+                bests_by_track[t_id] = {
+                    'track_id': t_id,
+                    'track_name': s['track_name'],
+                    'best_lap': s['best_lap'],
+                    'best_lap_seconds': s['best_lap_seconds'],
+                    'session_id': s['session_id'],
+                    'session_date': s['session_date'],
+                }
+
+        overall = {
+            'total_sessions': len(sessions_out),
+            'total_laps': sum(s['total_laps'] for s in sessions_out),
+            'tracks_raced': len(tracks_raced),
+            'bests_by_track': sorted(bests_by_track.values(), key=lambda e: e['track_name']),
+        }
+        if all_laps:
+            mean_all = sum(all_laps) / len(all_laps)
+            sd_all = _stddev(all_laps)
+            overall['career_mean_seconds'] = round(mean_all, 3)
+            overall['career_stddev_seconds'] = round(sd_all, 3)
+            overall['career_cov'] = round((sd_all / mean_all) if mean_all > 0 else 0, 5)
+        else:
+            overall['career_mean_seconds'] = None
+            overall['career_stddev_seconds'] = None
+            overall['career_cov'] = None
+
+        # Trend: chronological series (oldest -> newest) of session best/stddev
+        trend = [
+            {
+                'date': s['session_date'],
+                'track_name': s['track_name'],
+                'best': s['best_lap_seconds'],
+                'mean': s['mean_lap_seconds'],
+                'stddev': s['stddev_seconds'],
+            }
+            for s in sorted(sessions_out, key=lambda x: x['session_date'] or '')
+        ]
+
+        return jsonify({
+            'driver_name': raw_name,
+            'overall': overall,
+            'sessions': sessions_out,
+            'trend': trend,
+        })
+
+    except Exception as e:
+        app.logger.exception("consistency endpoint failed")
+        return _internal_error(e)
+
+
+def _kart_bests_from_lap_history(cur, session_id):
+    cur.execute(
+        """
+        SELECT kart_number, lap_time FROM lap_history
+         WHERE session_id=? AND lap_time IS NOT NULL AND lap_time != ''
+           AND kart_number IS NOT NULL
+        """,
+        (session_id,),
+    )
+    out = {}
+    for kart, lt in cur.fetchall():
+        secs = _safe_parse_time(lt)
+        if secs == float('inf') or secs < LAP_MIN_SECONDS or secs > LAP_MAX_SECONDS:
+            continue
+        if kart not in out or secs < out[kart]:
+            out[kart] = secs
+    return out
+
+
+def _kart_bests_from_lap_times(cur, session_id):
+    """For sessions that only exist in lap_times, read the per-kart `best_lap`
+    column. best_lap is a running-best snapshot per row; we take the min over
+    all snapshots for each kart, then drop karts whose 'best' is so far below
+    the session median that it must be a display/sector-time artefact (no real
+    kart runs more than ~20% faster than the median of the field on the same
+    track).
+    """
+    cur.execute(
+        """
+        SELECT DISTINCT kart_number, best_lap FROM lap_times
+         WHERE session_id=? AND best_lap IS NOT NULL AND best_lap != ''
+           AND kart_number IS NOT NULL
+        """,
+        (session_id,),
+    )
+    out = {}
+    for kart, bl in cur.fetchall():
+        secs = _safe_parse_time(bl)
+        if secs == float('inf') or secs < LAP_MIN_SECONDS or secs > LAP_MAX_SECONDS:
+            continue
+        if kart not in out or secs < out[kart]:
+            out[kart] = secs
+
+    if len(out) < 5:
+        return out
+
+    values = sorted(out.values())
+    median = values[len(values) // 2]
+    # Fastest realistic kart on a given track isn't more than ~25% faster than the
+    # median pace of the field — anything below that floor is parser noise.
+    floor = median * 0.75
+    return {k: v for k, v in out.items() if v >= floor}
+
+
+def _driver_karts_in_session(cur, session_id, history_names, times_names):
+    """Exact team_name IN (...) against both tables; union of returned karts."""
+    karts = set()
+    if history_names:
+        placeholders = ','.join('?' * len(history_names))
+        cur.execute(
+            f"""
+            SELECT DISTINCT kart_number FROM lap_history
+             WHERE session_id=? AND team_name IN ({placeholders})
+               AND kart_number IS NOT NULL
+            """,
+            [session_id] + history_names,
+        )
+        karts.update(r[0] for r in cur.fetchall())
+    if times_names:
+        placeholders = ','.join('?' * len(times_names))
+        cur.execute(
+            f"""
+            SELECT DISTINCT kart_number FROM lap_times
+             WHERE session_id=? AND team_name IN ({placeholders})
+               AND kart_number IS NOT NULL
+            """,
+            [session_id] + times_names,
+        )
+        karts.update(r[0] for r in cur.fetchall())
+    return karts
+
+
+def _analyze_sprint_session(cur, session_id, session_date, history_names, times_names):
+    """Return list of kart-factor samples for this driver in this session.
+
+    Each sample = one (driver, kart_number) pair within the session. Uses
+    lap_history for per-kart bests when available; falls back to lap_times
+    best_lap snapshots otherwise.
+    """
+    kart_best = _kart_bests_from_lap_history(cur, session_id)
+    if len(kart_best) < 3:
+        kart_best = _kart_bests_from_lap_times(cur, session_id)
+    if len(kart_best) < 3:
+        return []
+
+    sorted_best = sorted(kart_best.values())
+    median = sorted_best[len(sorted_best) // 2]
+    if median <= 0:
+        return []
+
+    driver_karts = [k for k in _driver_karts_in_session(cur, session_id, history_names, times_names) if k in kart_best]
+
+    ranked = sorted(kart_best.items(), key=lambda kv: kv[1])
+    rank_of = {k: i + 1 for i, (k, _) in enumerate(ranked)}
+
+    samples = []
+    for kart in driver_karts:
+        kb = kart_best[kart]
+        samples.append({
+            'session_id': session_id,
+            'session_date': session_date,
+            'kart_number': kart,
+            'kart_best_seconds': round(kb, 3),
+            'session_median_seconds': round(median, 3),
+            'kart_factor': round(kb / median, 5),
+            'kart_rank': rank_of[kart],
+            'karts_in_session': len(kart_best),
+        })
+    return samples
+
+
+def _segment_stints(laps):
+    """Group chronologically-sorted lap rows into stints.
+
+    Input: list of tuples (timestamp, lap_time_seconds, cumulative_pit_count).
+    A new stint begins when the cumulative pit count increases. For each stint,
+    the first lap (the pit-in lap itself) is excluded from pace stats since it's
+    much slower than regular laps.
+    Returns: list of dicts with best/mean/start/end/lap_count over *clean* laps.
+    """
+    if not laps:
+        return []
+    stints = []
+    current = []
+    prev_pit = laps[0][2] if laps[0][2] is not None else 0
+    for ts, secs, pit in laps:
+        pit_count = pit if pit is not None else prev_pit
+        if pit_count > prev_pit and current:
+            stints.append(current)
+            current = []
+        current.append((ts, secs))
+        prev_pit = pit_count
+    if current:
+        stints.append(current)
+
+    out = []
+    for st in stints:
+        # Drop the first lap of the stint (the pit-in lap for all stints after
+        # the opening one) when we have enough samples to spare.
+        clean = st[1:] if len(st) > 2 else st
+        # Hard ceiling to eliminate remaining pit laps that slipped through
+        values = [s for _, s in clean]
+        if len(values) >= 3:
+            sorted_v = sorted(values)
+            median_v = sorted_v[len(sorted_v) // 2]
+            ceiling = max(180.0, median_v * 2.0)
+            values = [v for v in values if v <= ceiling] or values
+        if not values:
+            continue
+        out.append({
+            'start_ts': st[0][0],
+            'end_ts': st[-1][0],
+            'lap_count': len(values),
+            'best': min(values),
+            'mean': sum(values) / len(values),
+        })
+    return out
+
+
+def _analyze_endurance_session(cur, session_id, session_date, driver_names):
+    """Compute stint-pace stability for the driver's team in an endurance session.
+
+    Returns a dict with the team's stats plus percentile vs. field (other teams
+    in the same session), or None if not enough data. `driver_names` is the
+    alias group.
+    """
+    # Fetch ALL lap_history for the session (used for field analysis)
+    cur.execute(
+        """
+        SELECT team_name, timestamp, lap_time, pit_this_lap
+          FROM lap_history
+         WHERE session_id = ? AND lap_time IS NOT NULL AND lap_time != ''
+         ORDER BY team_name, timestamp ASC
+        """,
+        (session_id,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return None
+
+    per_team = {}
+    prev_raw = {}  # team -> last-seen lap_time string, to dedupe stale snapshots
+    for team, ts, lt, pit in rows:
+        if lt == prev_raw.get(team):
+            continue
+        prev_raw[team] = lt
+        secs = _safe_parse_time(lt)
+        if secs == float('inf') or secs <= 0 or secs > 600:
+            continue
+        # pit is the cumulative pit count at this row; pass it through as-is
+        # so _segment_stints can detect increases.
+        per_team.setdefault(team, []).append((ts, secs, int(pit) if pit is not None else 0))
+
+    # Match driver's team name among teams in this session. A team_name matches
+    # if any alias name's tokens are all present in it (case-insensitive).
+    def _matches_any(team_name):
+        tl = (team_name or '').lower()
+        for n in driver_names:
+            toks = _name_tokens(n)
+            if toks and all(t in tl for t in toks):
+                return True
+        return False
+
+    driver_teams = [t for t in per_team.keys() if _matches_any(t)]
+    if not driver_teams:
+        return None
+
+    # Build stints per team
+    team_stints = {t: _segment_stints(per_team[t]) for t in per_team}
+
+    # Session reference per stint: for each stint of driver's team, compute
+    # min best-lap across all OTHER teams whose laps overlap the stint time window.
+    results_for_field = {}  # team -> list of stint gaps
+    for team, stints in team_stints.items():
+        gaps = []
+        for st in stints:
+            s0, s1 = st['start_ts'], st['end_ts']
+            # Fastest lap among all OTHER teams during [s0, s1]
+            fastest_other = float('inf')
+            for other, other_laps in per_team.items():
+                if other == team:
+                    continue
+                for ts, secs, _pit in other_laps:
+                    if ts >= s0 and ts <= s1 and secs < fastest_other:
+                        fastest_other = secs
+            if fastest_other == float('inf'):
+                continue
+            gaps.append(st['best'] - fastest_other)
+        if gaps:
+            results_for_field[team] = gaps
+
+    if not results_for_field:
+        return None
+
+    # Per-team aggregates
+    field_mean = {}
+    field_sd = {}
+    for team, gaps in results_for_field.items():
+        field_mean[team] = sum(gaps) / len(gaps)
+        field_sd[team] = _stddev(gaps)
+
+    # Driver stats (pick first matching team; usually just one)
+    driver_team = next((t for t in driver_teams if t in results_for_field), None)
+    if not driver_team:
+        return None
+
+    mean_pop = list(field_mean.values())
+    sd_pop = list(field_sd.values())
+    mean_pct = _percentile_rank(field_mean[driver_team], mean_pop)
+    sd_pct = _percentile_rank(field_sd[driver_team], sd_pop)
+    flagged = (
+        mean_pct is not None and sd_pct is not None
+        and mean_pct <= 20 and sd_pct <= 20
+        and len(results_for_field) >= 5
+    )
+
+    return {
+        'session_id': session_id,
+        'session_date': session_date,
+        'driver_team_name': driver_team,
+        'field_team_count': len(results_for_field),
+        'stint_count': len(results_for_field[driver_team]),
+        'stint_gaps': [round(g, 3) for g in results_for_field[driver_team]],
+        'mean_gap': round(field_mean[driver_team], 3),
+        'stddev_gap': round(field_sd[driver_team], 3),
+        'mean_percentile': mean_pct,
+        'stddev_percentile': sd_pct,
+        'flagged': flagged,
+    }
+
+
+@app.route('/api/driver/fairness', methods=['GET'])
+def get_driver_fairness():
+    """Per-track kart fairness analysis for a driver.
+
+    Returns sprint kart-factor samples and endurance stint-pace stability,
+    each with a minimum-sessions threshold before aggregate conclusions are shown.
+
+    Query params:
+      name (required) - driver/team name
+      track_id (required) - track to analyze
+    """
+    try:
+        raw_name = request.args.get('name', '').strip()
+        if not raw_name:
+            return jsonify({'error': 'name parameter is required'}), 400
+        alias_names = _expand_alias_group(raw_name)
+        if not alias_names:
+            return jsonify({'error': 'name parameter is required'}), 400
+
+        track_id = request.args.get('track_id', type=int)
+        if not track_id:
+            return jsonify({'error': 'track_id parameter is required'}), 400
+
+        track_row = track_db.get_track_by_id(track_id)
+        if not track_row:
+            return jsonify({'error': f'Unknown track_id {track_id}'}), 404
+
+        conn = get_track_db_connection(track_id)
+        cur = conn.cursor()
+
+        # Find all sessions where any alias appears — in EITHER lap_history or
+        # lap_times, so we don't miss tracks where the parser only wrote to
+        # lap_times (see _fetch_driver_session_ids).
+        history_names, times_names = _find_matching_team_names(cur, alias_names)
+        session_rows = [
+            (sid, start) for sid, _name, start in
+            _fetch_driver_session_ids(cur, history_names, times_names)
+        ]
+
+        sprint_samples = []
+        endurance_sessions = []
+
+        for session_id, session_date in session_rows:
+            mode = _classify_session_mode(cur, session_id, history_names, times_names)
+            if mode == 'sprint':
+                sprint_samples.extend(_analyze_sprint_session(
+                    cur, session_id, session_date, history_names, times_names
+                ))
+            elif mode == 'endurance':
+                r = _analyze_endurance_session(cur, session_id, session_date, alias_names)
+                if r:
+                    endurance_sessions.append(r)
+
+        conn.close()
+
+        # Sprint aggregate
+        MIN_SESSIONS = 5
+        sprint_session_count = len({s['session_id'] for s in sprint_samples})
+        sprint_block = {
+            'enabled': sprint_session_count >= MIN_SESSIONS,
+            'session_count': sprint_session_count,
+            'sample_count': len(sprint_samples),
+            'samples': sprint_samples,
+        }
+        if sprint_samples:
+            factors = [s['kart_factor'] for s in sprint_samples]
+            mean_factor = sum(factors) / len(factors)
+            sprint_block['mean_factor'] = round(mean_factor, 5)
+            sprint_block['stddev_factor'] = round(_stddev(factors), 5)
+            # Top-quartile karts in sessions where the driver appeared
+            top_q = [s for s in sprint_samples if s['kart_rank'] <= max(1, s['karts_in_session'] // 4)]
+            sprint_block['top_quartile_count'] = len(top_q)
+            sprint_block['top_quartile_expected'] = round(len(sprint_samples) * 0.25, 2)
+        else:
+            sprint_block['mean_factor'] = None
+            sprint_block['stddev_factor'] = None
+            sprint_block['top_quartile_count'] = 0
+            sprint_block['top_quartile_expected'] = 0.0
+
+        endurance_block = {
+            'enabled': len(endurance_sessions) >= MIN_SESSIONS,
+            'session_count': len(endurance_sessions),
+            'sessions': endurance_sessions,
+            'flagged_count': sum(1 for s in endurance_sessions if s.get('flagged')),
+        }
+
+        return jsonify({
+            'driver_name': raw_name,
+            'track_id': track_id,
+            'track_name': track_row.get('track_name') if isinstance(track_row, dict) else track_row[1],
+            'min_sessions_threshold': MIN_SESSIONS,
+            'sprint': sprint_block,
+            'endurance': endurance_block,
+        })
+
+    except Exception as e:
+        app.logger.exception("fairness endpoint failed")
+        return _internal_error(e)
+
+
+@app.route('/api/track/<int:track_id>/kart-fairness', methods=['GET'])
+def get_track_kart_fairness(track_id):
+    """Track-wide kart-fairness leaderboard, driver-normalized.
+
+    Rather than comparing drivers' absolute pace (which mixes skill with kart
+    quality), this compares each driver to THEIR OWN personal best at the
+    track. The intuition: a fast driver will post a time close to their PB when
+    they draw a good kart and a much slower time with a bad one; low variance
+    in their session-best times + consistently hitting near PB = consistently
+    getting good-enough karts. Skill cancels because each driver's reference is
+    their own PB.
+
+    Per-driver metrics:
+      pb_seconds              - driver's personal best at this track
+      mean_session_best       - avg of each session's best lap
+      stddev_session_best     - σ of the session bests (KEY: low = consistent karts)
+      mean_gap_to_pb_pct      - avg (session_best - pb) / pb, in percent
+      pct_within_1pct_pb      - fraction of sessions within 1% of PB
+      pct_within_0_5pct_pb    - fraction within 0.5% of PB
+
+    Query params:
+      min_sessions (optional, default 3) - minimum sessions to include a driver.
+    """
+    try:
+        try:
+            min_sessions = int(request.args.get('min_sessions', 3))
+        except (TypeError, ValueError):
+            min_sessions = 3
+        min_sessions = max(2, min(50, min_sessions))
+
+        # Optional field-best filters to restrict analysis to a specific track
+        # configuration (many karting tracks run multiple layouts — lap times
+        # differ 10%+ between short/long configs, distorting per-driver PBs).
+        def _opt_float(name):
+            v = request.args.get(name)
+            if v is None or v == '':
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+        min_field_best = _opt_float('min_field_best')
+        max_field_best = _opt_float('max_field_best')
+
+        track_row = track_db.get_track_by_id(track_id)
+        if not track_row:
+            return jsonify({'error': f'Unknown track_id {track_id}'}), 404
+
+        conn = get_track_db_connection(track_id)
+        cur = conn.cursor()
+
+        # One bulk scan: every (session, team) pair with distinct best_lap
+        # snapshots. Python-side min (vs. SQL MIN on raw strings) because the
+        # values mix MM:SS.mmm and SS.mmm formats.
+        cur.execute(
+            """
+            SELECT session_id, team_name, best_lap FROM lap_times
+             WHERE best_lap IS NOT NULL AND best_lap != ''
+               AND team_name IS NOT NULL AND team_name != ''
+             GROUP BY session_id, team_name, best_lap
+            """
+        )
+        raw_rows = cur.fetchall()
+        conn.close()
+
+        # (session, team) -> best seconds (keep the min across snapshots).
+        # Test/staff placeholders are dropped here so they don't inflate session
+        # medians or noise floors.
+        session_team_best = {}
+        for sid, team, bl in raw_rows:
+            if _is_test_placeholder(_strip_driver_class_prefix(team)):
+                continue
+            secs = _safe_parse_time(bl)
+            if secs == float('inf') or secs < LAP_MIN_SECONDS or secs > LAP_MAX_SECONDS:
+                continue
+            key = (sid, team)
+            if key not in session_team_best or secs < session_team_best[key]:
+                session_team_best[key] = secs
+
+        # Per-session field-best for config detection + noise filter
+        per_session_bests = {}  # session -> list of all team bests
+        for (sid, _team), secs in session_team_best.items():
+            per_session_bests.setdefault(sid, []).append(secs)
+        session_field_best = {sid: min(v) for sid, v in per_session_bests.items() if v}
+
+        # Apply config filter: drop sessions whose field-best falls outside the
+        # requested layout band. If no filter, keep everything.
+        if min_field_best is not None or max_field_best is not None:
+            allowed = set()
+            for sid, fb in session_field_best.items():
+                if min_field_best is not None and fb < min_field_best:
+                    continue
+                if max_field_best is not None and fb > max_field_best:
+                    continue
+                allowed.add(sid)
+            session_team_best = {k: v for k, v in session_team_best.items() if k[0] in allowed}
+            per_session_bests = {k: v for k, v in per_session_bests.items() if k in allowed}
+
+        # Per-session noise floor (75% of the session median) + store the
+        # median itself so we can normalise each driver's session best against
+        # the field's daily pace — this cancels day-to-day condition effects
+        # (weather, track temp, wind) that would otherwise distort the
+        # PB-based gap metric.
+        session_floor = {}
+        session_median_best = {}
+        for sid, vals in per_session_bests.items():
+            if len(vals) < 3:
+                session_floor[sid] = 0.0
+                session_median_best[sid] = None
+                continue
+            svals = sorted(vals)
+            median = svals[len(svals) // 2]
+            session_floor[sid] = median * 0.75
+            session_median_best[sid] = median
+
+        # Build alias lookup: for every team_name appearing in lap_times, find
+        # the canonical name to merge records under. Anything without an alias
+        # entry maps to itself.
+        alias_canon = {}
+        try:
+            with sqlite3.connect('auth.db') as aconn:
+                rows = aconn.execute(
+                    'SELECT canonical_name, alias_name FROM driver_aliases'
+                ).fetchall()
+                for canon, alias in rows:
+                    alias_canon[alias.lower()] = canon
+                    alias_canon[canon.lower()] = canon  # canonical resolves to itself
+        except sqlite3.Error as e:
+            app.logger.warning(f"alias lookup failed in track kart fairness: {e}")
+
+        def _canonical_of(name):
+            # Step 1: remove per-driver class prefix so HC-/JR-/G- entries merge
+            stripped = _strip_driver_class_prefix(name)
+            # Step 2: apply alias mapping to the stripped form
+            return alias_canon.get(stripped.lower(), stripped)
+
+        # Group clean session bests per driver (collapsed under canonical names).
+        # A driver can appear under multiple aliases WITHIN a single session
+        # (endurance driver change or simple relabeling) — keep the better of
+        # the two as the session's best for that canonical driver. Test/staff
+        # placeholder names (APEXTEST, EQUIPE TEST, 'test 2', etc.) are dropped
+        # entirely because they pollute per-session medians as well.
+        canon_session_best = {}
+        for (sid, team), secs in session_team_best.items():
+            if secs < session_floor.get(sid, 0.0):
+                continue
+            canon = _canonical_of(team)
+            if _is_test_placeholder(canon):
+                continue
+            key = (canon, sid)
+            if key not in canon_session_best or secs < canon_session_best[key]:
+                canon_session_best[key] = secs
+
+        per_driver = {}  # canonical team -> list of (session_id, session_best_seconds)
+        for (canon, sid), secs in canon_session_best.items():
+            per_driver.setdefault(canon, []).append((sid, secs))
+
+        drivers = []
+        for team, rows in per_driver.items():
+            if len(rows) < min_sessions:
+                continue
+            session_bests = [s for _, s in rows]
+            pb = min(session_bests)
+            if pb <= 0:
+                continue
+            mean_sb = sum(session_bests) / len(session_bests)
+            sd_sb = _stddev(session_bests)
+            gaps_pct = [(s - pb) / pb * 100.0 for s in session_bests]
+            mean_gap_pct = sum(gaps_pct) / len(gaps_pct)
+            max_gap_pct = max(gaps_pct)
+            within_1 = sum(1 for s in session_bests if s <= pb * 1.01) / len(session_bests)
+            within_0_5 = sum(1 for s in session_bests if s <= pb * 1.005) / len(session_bests)
+
+            # Conditions-normalised metric: driver's session best / session's
+            # field median. Cancels weather / track temp / wind because they
+            # affect the field uniformly.
+            rel_paces = [
+                secs / session_median_best[sid]
+                for sid, secs in rows
+                if session_median_best.get(sid)
+            ]
+            if rel_paces:
+                mean_rel = sum(rel_paces) / len(rel_paces)
+                sd_rel = _stddev(rel_paces)
+                best_rel = min(rel_paces)
+                worst_rel = max(rel_paces)
+            else:
+                mean_rel = sd_rel = best_rel = worst_rel = None
+
+            drivers.append({
+                'name': team,
+                'sessions': len(session_bests),
+                'pb': _format_seconds(pb),
+                'pb_seconds': round(pb, 3),
+                'mean_session_best_seconds': round(mean_sb, 3),
+                'stddev_session_best_seconds': round(sd_sb, 3),
+                'mean_gap_to_pb_pct': round(mean_gap_pct, 3),
+                'max_gap_to_pb_pct': round(max_gap_pct, 3),
+                'pct_within_1pct_pb': round(within_1, 4),
+                'pct_within_0_5pct_pb': round(within_0_5, 4),
+                # Conditions-normalised pace (session best / field median)
+                'mean_relative_pace': round(mean_rel, 5) if mean_rel is not None else None,
+                'stddev_relative_pace': round(sd_rel, 5) if sd_rel is not None else None,
+                'best_relative_pace': round(best_rel, 5) if best_rel is not None else None,
+                'worst_relative_pace': round(worst_rel, 5) if worst_rel is not None else None,
+            })
+
+        # Default sort: lowest mean_gap_to_pb (consistently nearest own PB), then
+        # by σ ascending (low variance) as a tiebreaker.
+        drivers.sort(key=lambda d: (d['mean_gap_to_pb_pct'], d['stddev_session_best_seconds']))
+
+        return jsonify({
+            'track_id': track_id,
+            'track_name': track_row['track_name'],
+            'min_sessions_threshold': min_sessions,
+            'filter_min_field_best': min_field_best,
+            'filter_max_field_best': max_field_best,
+            'sessions_included': len(per_session_bests),
+            'driver_count': len(drivers),
+            'drivers': drivers,
+        })
+
+    except Exception as e:
+        app.logger.exception("track kart fairness endpoint failed")
+        return _internal_error(e)
+
+
+@app.route('/api/track/<int:track_id>/session-configs', methods=['GET'])
+def get_track_session_configs(track_id):
+    """Return the distribution of session field-best laps for this track, so
+    the UI can help users pick layout thresholds. A single track may run
+    multiple physical configurations whose lap times differ by >10%.
+    """
+    try:
+        track_row = track_db.get_track_by_id(track_id)
+        if not track_row:
+            return jsonify({'error': f'Unknown track_id {track_id}'}), 404
+
+        conn = get_track_db_connection(track_id)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT session_id, best_lap FROM lap_times
+             WHERE best_lap IS NOT NULL AND best_lap != ''
+             GROUP BY session_id, best_lap
+            """
+        )
+        rows = cur.fetchall()
+        conn.close()
+
+        per_session_min = {}
+        for sid, bl in rows:
+            secs = _safe_parse_time(bl)
+            if secs == float('inf') or secs < LAP_MIN_SECONDS or secs > LAP_MAX_SECONDS:
+                continue
+            if sid not in per_session_min or secs < per_session_min[sid]:
+                per_session_min[sid] = secs
+
+        values = sorted(per_session_min.values())
+        # Bucketise into 1-second bins for histogram display
+        buckets = {}
+        for v in values:
+            b = int(v)  # 1-second bins
+            buckets[b] = buckets.get(b, 0) + 1
+        histogram = [{'field_best_bin': b, 'count': c} for b, c in sorted(buckets.items())]
+
+        # Suggested layout splits: find the largest gap in the value distribution
+        gaps = []
+        for i in range(1, len(values)):
+            gaps.append((values[i] - values[i - 1], values[i - 1], values[i]))
+        gaps.sort(reverse=True)
+        suggested_splits = [
+            {'gap': round(g[0], 2), 'below': round(g[1], 2), 'above': round(g[2], 2)}
+            for g in gaps[:5] if g[0] >= 1.0
+        ]
+
+        return jsonify({
+            'track_id': track_id,
+            'track_name': track_row['track_name'],
+            'session_count': len(values),
+            'field_best_min': round(values[0], 2) if values else None,
+            'field_best_max': round(values[-1], 2) if values else None,
+            'histogram': histogram,
+            'suggested_splits': suggested_splits,
+        })
+
+    except Exception as e:
+        app.logger.exception("session configs endpoint failed")
+        return _internal_error(e)
+
 
 def start_multi_track_monitoring():
     """Start monitoring all configured tracks automatically"""
