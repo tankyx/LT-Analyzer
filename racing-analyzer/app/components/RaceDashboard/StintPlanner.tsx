@@ -18,9 +18,7 @@ import {
 import {
   getPrefs as fetchUserPrefs,
   makePrefsDebouncer,
-  getLastSeenUpdatedAt,
 } from '../../services/UserPrefsService';
-import webSocketService from '../../services/WebSocketService';
 
 interface StintPlannerProps {
   isDarkMode?: boolean;
@@ -157,49 +155,14 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     };
   }, [trackId]);
 
-  // Phase 2.5 live-sync: re-fetch + apply when another tab/device pushes new
-  // prefs. Echo dedup uses the `updated_at` returned by our last PUT/GET.
-  useEffect(() => {
-    if (trackId === undefined) return;
-    const unsubscribe = webSocketService.addPrefsListener(async (event) => {
-      if (event.track_id !== trackId) return;
-      if (event.updated_at && event.updated_at === getLastSeenUpdatedAt(trackId)) {
-        return; // our own write coming back, skip
-      }
-      try {
-        // Flush any pending PUT we owe to the server BEFORE re-fetching.
-        // Otherwise an unrelated emit (e.g. monitored_teams changing in the
-        // dashboard) would cause us to pull a `stint_planner_config` snapshot
-        // that's older than what we have locally and revert the just-applied
-        // preset.
-        await prefsDebouncerRef.current?.flush();
-        const fresh = await fetchUserPrefs(trackId);
-        // Skip the state-watching effects from echoing back to the server
-        // while we apply the fresh values. The flag bounces false → true
-        // synchronously after this batch, so the schedule() guards never see
-        // a stale `hasServerPrefsSynced=true` for the in-flight setState.
-        setHasServerPrefsSynced(false);
-        if (fresh.stint_planner_config && Object.keys(fresh.stint_planner_config).length > 0) {
-          setConfig(fresh.stint_planner_config as unknown as StintConfig);
-        }
-        if (Array.isArray(fresh.driver_names) && fresh.driver_names.length > 0) {
-          setDriverNames(fresh.driver_names);
-        }
-        if (typeof fresh.current_driver_index === 'number') {
-          setCurrentDriverIndex(fresh.current_driver_index);
-        }
-        if (Array.isArray(fresh.stint_planner_presets)) {
-          setAvailablePresets(fresh.stint_planner_presets as unknown as StintPreset[]);
-        }
-        // Re-enable server sync on the next tick so the just-applied state
-        // doesn't trigger echo PUTs.
-        setTimeout(() => setHasServerPrefsSynced(true), 0);
-      } catch (err) {
-        console.warn('StintPlanner: live prefs refresh failed', err);
-      }
-    });
-    return unsubscribe;
-  }, [trackId]);
+  // Note: the live-sync listener that used to live here was removed. It raced
+  // with the local edit flow — selecting a preset would briefly apply then get
+  // overwritten by a stale server snapshot when an unrelated PUT (e.g. the
+  // dashboard's monitored_teams) triggered a prefs_updated broadcast.
+  // Cross-device sync of stint planner state still works on track change /
+  // page reload (the per-trackId fetch above pulls server values). Real-time
+  // sync is just for the dashboard's monitored_teams + pit config, which is
+  // where the multi-tenant clobber risk actually lives.
 
   // Load saved values from localStorage on client-side mount (after SSR)
   useEffect(() => {
