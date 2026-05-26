@@ -385,7 +385,14 @@ const RaceDashboard = () => {
   const [requiredPitStops, setRequiredPitStops] = useState(7);
   const [defaultLapTime, setDefaultLapTime] = useState(90);
   const [updatedRows, setUpdatedRows] = useState<Map<string, number>>(new Map()); // Track updated rows with timestamps
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('disconnected');
+  // Initialise from the WebSocketService singleton in case the connection
+  // already completed before this component mounted (refresh race).
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>(() => {
+    if (typeof window !== 'undefined') {
+      return webSocketService.getConnectionStatus();
+    }
+    return 'disconnected';
+  });
   const [availableTracks, setAvailableTracks] = useState<Array<{id: number; track_name: string}>>([]);
   const [selectedTrackId, setSelectedTrackId] = useState<number>(1);
   const [sessionStatus, setSessionStatus] = useState<{active: boolean; message: string; trackName: string} | null>(null);
@@ -803,6 +810,16 @@ const RaceDashboard = () => {
   useEffect(() => {
     if (selectedTrackId) {
       console.log(`Switching to track ${selectedTrackId}`);
+      // Clear stale per-track state immediately. If the new track is broadcasting,
+      // the next track_update will repopulate within ~1s. If it's idle, the user
+      // sees an honest "no data" view instead of the previous track's standings.
+      setTeams([]);
+      setSessionInfo({});
+      setLastUpdate('');
+      setDeltaData({});
+      setGapHistory({});
+      setUpdatedRows(new Map());
+      setAlertedPitTeams(new Set());
       webSocketService.joinTrack(selectedTrackId);
       saveSelectedTrack(selectedTrackId);
     }

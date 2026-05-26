@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/ApiService';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ScatterChart, Scatter, ZAxis, ReferenceArea, ReferenceLine, Cell,
+  ScatterChart, Scatter, ZAxis, ReferenceLine, Cell,
 } from 'recharts';
 
 interface Team {
@@ -627,7 +627,7 @@ export default function DataPage() {
               activeTab === 'fairness' ? 'text-white border-blue-400' : 'text-gray-400 border-transparent hover:text-gray-200'
             }`}
           >
-            Drivers by Kart Luck
+            Kart-Draw Fairness
           </button>
           <button
             onClick={() => setActiveTab('leaderboard')}
@@ -1498,6 +1498,8 @@ export default function DataPage() {
 // Track Fairness Leaderboard panel
 // ============================================================================
 
+type VarDefVerdict = 'consistent' | 'deficit_flagged' | 'insufficient_data';
+
 interface TrackFairnessDriver {
   name: string;
   sessions: number;
@@ -1513,9 +1515,24 @@ interface TrackFairnessDriver {
   stddev_relative_pace: number | null;
   best_relative_pace: number | null;
   worst_relative_pace: number | null;
+  vardef_n_sessions: number;
+  vardef_observed_sd_seconds: number | null;
+  vardef_expected_sd_seconds: number | null;
+  vardef_ratio: number | null;
+  vardef_p_value: number | null;
+  vardef_verdict: VarDefVerdict;
 }
 
-type FairnessSortKey = 'mean_gap_to_pb_pct' | 'stddev_session_best_seconds' | 'pct_within_1pct_pb' | 'sessions' | 'pb_seconds' | 'stddev_relative_pace' | 'mean_relative_pace';
+type FairnessSortKey =
+  | 'mean_gap_to_pb_pct'
+  | 'stddev_session_best_seconds'
+  | 'pct_within_1pct_pb'
+  | 'sessions'
+  | 'pb_seconds'
+  | 'stddev_relative_pace'
+  | 'mean_relative_pace'
+  | 'vardef_ratio'
+  | 'vardef_p_value';
 
 interface SessionConfigsResponse {
   track_id: number;
@@ -1527,12 +1544,23 @@ interface SessionConfigsResponse {
   suggested_splits: { gap: number; below: number; above: number }[];
 }
 
+interface LayoutEntry {
+  id: number;
+  name: string;
+  min_field_best: number | null;
+  max_field_best: number | null;
+  is_default: boolean;
+}
+
 function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
   const router = useRouter();
   const [trackId, setTrackId] = useState<number | null>(null);
   const [minSessions, setMinSessions] = useState<number>(5);
   const [minFieldBest, setMinFieldBest] = useState<string>('');
   const [maxFieldBest, setMaxFieldBest] = useState<string>('');
+  const [layoutId, setLayoutId] = useState<number | null>(null);
+  const [windowMonths, setWindowMonths] = useState<number>(12);
+  const [layouts, setLayouts] = useState<LayoutEntry[]>([]);
   const [data, setData] = useState<TrackFairnessDriver[] | null>(null);
   const [configs, setConfigs] = useState<SessionConfigsResponse | null>(null);
   const [trackName, setTrackName] = useState<string>('');
@@ -1556,6 +1584,24 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
     return () => { cancelled = true; };
   }, [trackId]);
 
+  // Load layouts for the selected track
+  useEffect(() => {
+    if (trackId === null) { setLayouts([]); setLayoutId(null); return; }
+    let cancelled = false;
+    ApiService.getTrackLayouts(trackId)
+      .then(res => {
+        if (cancelled) return;
+        const list: LayoutEntry[] = res?.layouts || [];
+        setLayouts(list);
+        // Reset selection whenever track changes; user opts in per track.
+        setLayoutId(null);
+      })
+      .catch(() => {
+        if (!cancelled) { setLayouts([]); setLayoutId(null); }
+      });
+    return () => { cancelled = true; };
+  }, [trackId]);
+
   useEffect(() => {
     if (trackId === null) return;
     let cancelled = false;
@@ -1564,7 +1610,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
     setData(null);
     const minFB = minFieldBest.trim() === '' ? undefined : parseFloat(minFieldBest);
     const maxFB = maxFieldBest.trim() === '' ? undefined : parseFloat(maxFieldBest);
-    ApiService.getTrackKartFairness(trackId, minSessions, minFB, maxFB)
+    ApiService.getTrackKartFairness(trackId, minSessions, minFB, maxFB, layoutId, windowMonths)
       .then(res => {
         if (cancelled) return;
         setData(res.drivers || []);
@@ -1580,7 +1626,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
     return () => {
       cancelled = true;
     };
-  }, [trackId, minSessions, minFieldBest, maxFieldBest]);
+  }, [trackId, minSessions, minFieldBest, maxFieldBest, layoutId, windowMonths]);
 
   const sortedDrivers = (() => {
     if (!data) return [];
@@ -1608,6 +1654,18 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
           const bv = b.mean_relative_pace ?? 1e9;
           return dir * (av - bv);
         }
+        case 'vardef_ratio': {
+          // Lower ratio = less variance than typical fleet → suspect.
+          const av = a.vardef_ratio ?? 99;
+          const bv = b.vardef_ratio ?? 99;
+          return dir * (av - bv);
+        }
+        case 'vardef_p_value': {
+          // Smaller p = more significant variance deficit.
+          const av = a.vardef_p_value ?? 2;
+          const bv = b.vardef_p_value ?? 2;
+          return dir * (av - bv);
+        }
       }
     });
     return copy;
@@ -1631,8 +1689,12 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
     </th>
   );
 
-  // Scatter data: each point is one driver. X = σRel, Y = MeanRel.
-  // Flag driver in the lucky-quadrant (low σRel + low MeanRel)
+  // Scatter: each point is one driver. X = σRel, Y = MeanRel. Axis positions
+  // are descriptive — tight, fast-relative-to-field drivers are in the
+  // lower-left, but this mixes skill and kart-luck and is NOT by itself
+  // evidence of favoritism. The variance-deficit panel above is the test
+  // that speaks to "is the fleet's kart variation showing up in this
+  // driver's outcomes?"
   const scatterData = (data || [])
     .filter(r => r.stddev_relative_pace !== null && r.mean_relative_pace !== null)
     .map(r => ({
@@ -1642,23 +1704,29 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
       sessions: r.sessions,
       pb: r.pb,
       worst: r.worst_relative_pace,
+      vardefVerdict: r.vardef_verdict,
     }));
 
-  const LUCKY_SIGMA = 0.003;   // below this σRel is "tight enough to suspect"
-  const LUCKY_MEAN = 1.0;      // below 1.0 means consistently faster than field median
-  const flaggedDrivers = scatterData.filter(p => p.x < LUCKY_SIGMA && p.y < LUCKY_MEAN);
+  const vardefFlagged = scatterData.filter(p => p.vardefVerdict === 'deficit_flagged');
 
   const fmtRel = (v: number) => v.toFixed(4);
 
   return (
     <div className="bg-gray-800 rounded-lg p-6 mb-6">
-      <h2 className="text-xl font-semibold text-white mb-2">Drivers by Kart Luck — {trackName || 'select a track'}</h2>
+      <h2 className="text-xl font-semibold text-white mb-2">Kart-Draw Fairness — {trackName || 'select a track'}</h2>
       <p className="text-sm text-gray-400 mb-4">
-        Each driver&apos;s session best is compared to the <b>field median best for that session</b>, which cancels
-        weather/track conditions. <b>σRel</b> is how consistent their pace is relative to the field (low = always at
-        the same spot). <b>MeanRel</b> is where they typically sit (&lt; 1.0 = faster than field median). The
-        lower-left quadrant below — consistently faster than field + low variance — is the kart-luck signature that
-        skill alone can&apos;t explain.
+        The direct test for kart-draw favouritism is the <b>variance-deficit test</b> below. For each of a driver&apos;s
+        sessions we subtract that day&apos;s field-median from their session-best — this cancels the part of the swing
+        that comes from track conditions (grip, temperature, wear), since those move the whole field together. What&apos;s
+        left is the driver-specific variation: kart effect + execution noise. Under random kart draws the remaining
+        spread should look similar across drivers. When a driver&apos;s residual σ is significantly smaller than the
+        fleet-typical residual σ, the fleet&apos;s kart-to-kart noise isn&apos;t showing up in their outcomes —
+        evidence of systematically favourable draws. The test doesn&apos;t need stable kart numbers across sessions;
+        kart plates being shuffled between races doesn&apos;t break it.{' '}
+        <span className="text-gray-500">
+          σRel / MeanRel are shown for reference (consistency of relative pace) but mix skill and luck, so they
+          are <u>not</u> by themselves evidence of favouritism.
+        </span>
       </p>
 
       <div className="flex items-end gap-4 mb-4 flex-wrap">
@@ -1689,6 +1757,44 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
           />
         </div>
         <div>
+          <label className="block text-xs text-gray-400 mb-1">Layout</label>
+          <select
+            value={layoutId ?? ''}
+            onChange={e => setLayoutId(e.target.value === '' ? null : parseInt(e.target.value))}
+            disabled={layouts.length === 0}
+            className="px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+          >
+            <option value="">
+              {layouts.length === 0 ? 'no layouts configured' : 'all layouts'}
+            </option>
+            {layouts.map(l => {
+              const band = [
+                l.min_field_best !== null ? `${l.min_field_best}s+` : '',
+                l.max_field_best !== null ? `<${l.max_field_best}s` : '',
+              ].filter(Boolean).join(' ');
+              return (
+                <option key={l.id} value={l.id}>
+                  {l.name}{band ? ` (${band})` : ''}{l.is_default ? ' ★' : ''}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-400 mb-1">Window (months)</label>
+          <select
+            value={windowMonths}
+            onChange={e => setWindowMonths(parseInt(e.target.value))}
+            className="px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value={3}>3</option>
+            <option value={6}>6</option>
+            <option value={12}>12</option>
+            <option value={24}>24</option>
+            <option value={0}>all</option>
+          </select>
+        </div>
+        <div>
           <label className="block text-xs text-gray-400 mb-1">Min field best (s)</label>
           <input
             type="number"
@@ -1710,10 +1816,9 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
             className="w-24 px-3 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
-        <div className="flex flex-col text-xs text-gray-400">
-          <span>Layout filter restricts sessions to those whose field-wide</span>
-          <span>fastest lap falls in the range — use to isolate a single</span>
-          <span>track configuration or dry vs. wet.</span>
+        <div className="flex flex-col text-xs text-gray-400 max-w-xs">
+          <span>Layout = physical track configuration (admins define bands in the admin panel).</span>
+          <span>Window caps fleet-drift: a kart labelled #7 today isn&apos;t always the same hardware a year ago.</span>
         </div>
       </div>
 
@@ -1752,9 +1857,9 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
       {data && !loading && (
         <div className="text-sm text-gray-400 mb-3">
           {data.length} driver{data.length === 1 ? '' : 's'} at {trackName}
-          {flaggedDrivers.length > 0 && (
+          {vardefFlagged.length > 0 && (
             <span className="ml-3 text-red-300">
-              🚩 {flaggedDrivers.length} in the lucky quadrant (σRel &lt; {LUCKY_SIGMA}, MeanRel &lt; {LUCKY_MEAN})
+              ⚠️ {vardefFlagged.length} driver{vardefFlagged.length === 1 ? '' : 's'} with a statistically significant variance deficit
             </span>
           )}
         </div>
@@ -1763,11 +1868,15 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
       {loading && <div className="text-gray-300 py-4">Loading fairness data — this can take a few seconds for large tracks…</div>}
       {error && <div className="text-red-300 py-4">{error}</div>}
 
+      {data && !loading && <VarianceDeficitPanel drivers={data} router={router} />}
+
       {data && !loading && scatterData.length > 0 && (
         <div className="bg-gray-900 rounded-lg p-3 mb-4">
           <div className="text-xs text-gray-300 mb-2">
-            <b>σRel × MeanRel scatter</b> — each dot is a driver. Lower-left (red shaded area) = consistently
-            fast relative to field with low variance = lucky-kart signature.
+            <b>Consistency of relative pace</b> — each dot is a driver. X = σ of their session-best ÷ field median
+            (low = tight), Y = mean of that ratio (&lt; 1 = faster than field). Descriptive only: low-σ / fast drivers
+            mix skill and kart-luck. Red dots are the drivers formally flagged by the variance-deficit test above —
+            those are the kart-favoritism candidates, not position on this scatter.
           </div>
           <div style={{ height: 360 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -1827,17 +1936,6 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
                     );
                   }}
                 />
-                <ReferenceArea
-                  x1={0}
-                  x2={LUCKY_SIGMA}
-                  y1={0.95}
-                  y2={LUCKY_MEAN}
-                  stroke="#dc2626"
-                  strokeOpacity={0.3}
-                  fill="#dc2626"
-                  fillOpacity={0.12}
-                  ifOverflow="extendDomain"
-                />
                 {/* Prominent baseline at the field median. Above the line =
                     slower than median, below = faster. */}
                 <ReferenceLine
@@ -1849,7 +1947,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
                 />
                 <Scatter data={scatterData} onClick={(p: { name?: string }) => { if (p?.name) router.push(`/team/${encodeURIComponent(p.name)}`); }} cursor="pointer">
                   {scatterData.map((p, i) => {
-                    const isFlagged = p.x < LUCKY_SIGMA && p.y < LUCKY_MEAN;
+                    const isFlagged = p.vardefVerdict === 'deficit_flagged';
                     return (
                       <Cell
                         key={i}
@@ -1882,10 +1980,11 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
                   {headerCell('pb_seconds', 'PB')}
                   {headerCell('stddev_relative_pace', 'σRel')}
                   {headerCell('mean_relative_pace', 'MeanRel')}
+                  {headerCell('vardef_ratio', 'VarDef σ/σ*')}
+                  {headerCell('vardef_p_value', 'p')}
+                  <th className="px-3 py-2 text-gray-300">Verdict</th>
                   {headerCell('mean_gap_to_pb_pct', 'PB gap')}
-                  {headerCell('stddev_session_best_seconds', 'σ best (s)')}
                   {headerCell('pct_within_1pct_pb', '<1% PB')}
-                  <th className="px-3 py-2 text-gray-300">Worst rel</th>
                 </tr>
               </thead>
               <tbody>
@@ -1905,17 +2004,45 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
                     mean < 0.99 ? 'text-green-300 font-semibold' :
                     mean < 1.00 ? 'text-green-300' :
                     mean > 1.02 ? 'text-blue-300' : 'text-gray-200';
-                  const luckyRow = sig !== null && mean !== null && sig < 0.003 && mean < 1.0;
                   const pbgapClass =
                     dr.mean_gap_to_pb_pct < 0.5 ? 'text-red-300' :
                     dr.mean_gap_to_pb_pct > 2.0 ? 'text-blue-300' : 'text-gray-200';
+                  // Variance-deficit formatting
+                  const v = dr.vardef_verdict;
+                  const ratio = dr.vardef_ratio;
+                  const vp = dr.vardef_p_value;
+                  const obsSd = dr.vardef_observed_sd_seconds;
+                  const expSd = dr.vardef_expected_sd_seconds;
+                  const verdictLabel =
+                    v === 'deficit_flagged' ? '⚠️ variance deficit'
+                    : v === 'consistent' ? 'consistent'
+                    : `(n=${dr.vardef_n_sessions}/15)`;
+                  const verdictClass =
+                    v === 'deficit_flagged' ? 'text-red-300 font-semibold'
+                    : v === 'consistent' ? 'text-green-300'
+                    : 'text-gray-500';
+                  const ratioClass =
+                    ratio === null ? 'text-gray-500'
+                    : ratio < 0.5 ? 'text-red-300 font-semibold'
+                    : ratio < 0.8 ? 'text-yellow-300'
+                    : ratio < 1.2 ? 'text-gray-300'
+                    : 'text-blue-300';
+                  const pClass =
+                    vp === null ? 'text-gray-500'
+                    : vp < 0.01 ? 'text-red-300 font-semibold'
+                    : vp < 0.05 ? 'text-yellow-300'
+                    : 'text-gray-300';
+                  const rowHighlight =
+                    v === 'deficit_flagged' ? 'bg-red-900 bg-opacity-25 hover:bg-opacity-40'
+                    : 'hover:bg-gray-700';
+
                   return (
                     <tr
                       key={`${dr.name}-${i}`}
-                      className={`border-b border-gray-700 cursor-pointer ${luckyRow ? 'bg-red-900 bg-opacity-20 hover:bg-opacity-30' : 'hover:bg-gray-700'}`}
+                      className={`border-b border-gray-700 cursor-pointer ${rowHighlight}`}
                       onClick={() => router.push(`/team/${encodeURIComponent(dr.name)}`)}
                     >
-                      <td className="px-3 py-2 text-gray-500">{i + 1}{luckyRow ? ' 🚩' : ''}</td>
+                      <td className="px-3 py-2 text-gray-500">{i + 1}</td>
                       <td className="px-3 py-2 text-white">{dr.name}</td>
                       <td className="px-3 py-2 text-gray-300">{dr.sessions}</td>
                       <td className="px-3 py-2 text-green-300">{dr.pb}</td>
@@ -1925,31 +2052,182 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
                       <td className={`px-3 py-2 font-mono ${meanClass}`}>
                         {mean !== null ? mean.toFixed(4) : '—'}
                       </td>
-                      <td className={`px-3 py-2 ${pbgapClass}`}>{dr.mean_gap_to_pb_pct.toFixed(2)}%</td>
-                      <td className="px-3 py-2 text-gray-400">{dr.stddev_session_best_seconds.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-gray-300">{(dr.pct_within_1pct_pb * 100).toFixed(0)}%</td>
-                      <td className="px-3 py-2 font-mono text-gray-400">
-                        {dr.worst_relative_pace !== null ? dr.worst_relative_pace.toFixed(4) : '—'}
+                      <td
+                        className={`px-3 py-2 font-mono ${ratioClass}`}
+                        title={
+                          obsSd !== null && expSd !== null
+                            ? `Observed σ=${obsSd.toFixed(2)}s · fleet-typical σ=${expSd.toFixed(2)}s`
+                            : ''
+                        }
+                      >
+                        {ratio !== null ? ratio.toFixed(2) : '—'}
                       </td>
+                      <td className={`px-3 py-2 font-mono ${pClass}`}>
+                        {vp !== null ? (vp < 0.0001 ? '<0.0001' : vp.toFixed(4)) : '—'}
+                      </td>
+                      <td className={`px-3 py-2 text-xs ${verdictClass}`}>
+                        {verdictLabel}
+                      </td>
+                      <td className={`px-3 py-2 ${pbgapClass}`}>{dr.mean_gap_to_pb_pct.toFixed(2)}%</td>
+                      <td className="px-3 py-2 text-gray-300">{(dr.pct_within_1pct_pb * 100).toFixed(0)}%</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
             <p className="text-xs text-gray-500 mt-3">
-              <b>σRel</b> is the key column (sorts ascending by default): standard deviation of the driver&apos;s
-              relative pace (session best ÷ field median). Conditions are cancelled because the field median moves with
-              the day. <span className="text-red-300 font-semibold">σRel &lt; 0.002</span> = extreme,{' '}
-              <span className="text-yellow-300">&lt; 0.003</span> = tight flag zone,{' '}
-              <span className="text-blue-300">&gt; 0.010</span> = wide (normal kart variance).{' '}
-              <b>MeanRel</b>: <span className="text-green-300 font-semibold">&lt; 0.99</span> = consistently &gt;1%
-              faster than field, <span className="text-blue-300">&gt; 1.02</span> = consistently off pace.{' '}
-              <b>Lucky flag (row highlight + 🚩)</b> triggers when both σRel &lt; 0.003 AND MeanRel &lt; 1.0 — that&apos;s the
-              &quot;always same position near the front&quot; signature. <b>PB gap</b> and <b>σ best</b> are the old
-              condition-confounded metrics kept for reference.
+              <b>σRel</b> / <b>MeanRel</b> describe <i>outcome</i> consistency (session-best ÷ field median) — a
+              mix of skill and kart-luck that is <u>not</u> by itself evidence of favouritism. The direct test is{' '}
+              <b>VarDef σ/σ*</b> — the ratio of the driver&apos;s own σ of (session-best − session-median) vs. the
+              fleet-typical σ. The subtraction cancels track conditions (grip, weather, wear) that move the whole
+              field together, so what&apos;s left is each driver&apos;s own kart-effect + execution-noise spread.
+              Under random kart draws the ratio should be ≈ 1. A ratio well below 1, with a significant <b>p</b>,
+              means the fleet&apos;s kart-to-kart variation isn&apos;t showing up in this driver&apos;s results —
+              the telltale of systematically favourable draws.{' '}
+              <b>Verdict</b> fires only at n ≥ 15 sessions AND ratio &lt; 0.8 AND p &lt; 0.05; below that threshold the
+              cell shows <span className="text-gray-400">(n/15)</span> so we don&apos;t cry wolf on small samples.
+              Click any header to resort — try <b>VarDef σ/σ*</b> ascending to surface the tightest-variance drivers.
             </p>
           </div>
         )
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Variance-Deficit Panel — flags drivers whose session-best spread is tighter
+// than the fleet's inherent kart variation should impose under random draws.
+// ============================================================================
+
+function VardefCard({
+  dr,
+  tone,
+  router,
+}: {
+  dr: TrackFairnessDriver;
+  tone: 'red' | 'yellow';
+  router: ReturnType<typeof useRouter>;
+}) {
+  const obs = dr.vardef_observed_sd_seconds;
+  const exp = dr.vardef_expected_sd_seconds;
+  const ratio = dr.vardef_ratio;
+  const p = dr.vardef_p_value;
+  const fmtP = (v: number | null) => v === null ? '—' : (v < 0.0001 ? '<0.0001' : v.toFixed(4));
+  const border =
+    tone === 'red' ? 'border-red-600 bg-red-900 bg-opacity-25'
+    : 'border-yellow-600 bg-yellow-900 bg-opacity-20';
+  return (
+    <div
+      onClick={() => router.push(`/team/${encodeURIComponent(dr.name)}`)}
+      className={`border ${border} rounded-lg p-3 cursor-pointer hover:brightness-110`}
+    >
+      <div className="flex items-baseline justify-between mb-1">
+        <span className="text-white font-semibold">{dr.name}</span>
+        <span className="text-xs text-gray-400">{dr.vardef_n_sessions} sessions</span>
+      </div>
+      <div className="text-xs text-gray-200 font-mono">
+        Observed σ: <b>{obs !== null ? `${obs.toFixed(2)}s` : '—'}</b> ·
+        Fleet-typical σ: <b>{exp !== null ? `${exp.toFixed(2)}s` : '—'}</b> ·
+        Ratio: <b>{ratio !== null ? ratio.toFixed(2) : '—'}</b>
+      </div>
+      <div className="text-xs text-gray-400 font-mono">
+        One-sided χ² p = {fmtP(p)}
+      </div>
+    </div>
+  );
+}
+
+function VarianceDeficitPanel({
+  drivers,
+  router,
+}: {
+  drivers: TrackFairnessDriver[];
+  router: ReturnType<typeof useRouter>;
+}) {
+  // Buckets: formally flagged (n >= 15, ratio < 0.8, p < 0.05), watch
+  // (ratio < 0.8 and p < 0.05 but n < 15), and everyone else.
+  const flagged: TrackFairnessDriver[] = [];
+  const watch: TrackFairnessDriver[] = [];
+  let eligible = 0;
+  let expectedSd: number | null = null;
+  for (const d of drivers) {
+    if (expectedSd === null && d.vardef_expected_sd_seconds !== null) {
+      expectedSd = d.vardef_expected_sd_seconds;
+    }
+    if (d.vardef_n_sessions >= 3) eligible += 1;
+    const ratio = d.vardef_ratio;
+    const p = d.vardef_p_value;
+    if (ratio === null || p === null) continue;
+    if (d.vardef_verdict === 'deficit_flagged') {
+      flagged.push(d);
+    } else if (ratio < 0.8 && p < 0.05) {
+      watch.push(d);
+    }
+  }
+  const byRatioAsc = (a: TrackFairnessDriver, b: TrackFairnessDriver) =>
+    (a.vardef_ratio ?? 99) - (b.vardef_ratio ?? 99);
+  flagged.sort(byRatioAsc);
+  watch.sort(byRatioAsc);
+
+  if (eligible === 0) {
+    return (
+      <div className="bg-gray-900 rounded-lg p-4 mb-4 text-sm text-gray-400 border border-gray-700">
+        🎯 <b>Variance-deficit shortlist</b>: no driver has enough sessions in the current filter. Widen the window or
+        loosen min-sessions.
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900 rounded-lg p-4 mb-4 border border-gray-700">
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 className="text-white font-semibold">🎯 Variance-deficit shortlist</h3>
+        <span className="text-xs text-gray-400">
+          Scanned {eligible} driver{eligible === 1 ? '' : 's'} · fleet-typical σ ≈ {expectedSd !== null ? `${expectedSd.toFixed(2)}s` : '—'} · {flagged.length + watch.length} candidate{flagged.length + watch.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <p className="text-xs text-gray-400 mb-3">
+        For each driver we compute the standard deviation of (session-best − session-median) — this cancels track
+        conditions so only driver-specific variation remains. Then we compare it to the median residual σ across all
+        qualifying drivers (fleet-typical σ). Under random kart assignment the ratio should be ≈ 1. A ratio
+        significantly below 1 means the fleet&apos;s kart-to-kart variation isn&apos;t showing up in this
+        driver&apos;s results — consistent with systematically favourable draws.
+        <b> Flagged</b> = formal verdict (n ≥ 15, ratio &lt; 0.8, p &lt; 0.05).
+        <b> Watch list</b> = same magnitude + p-value but fewer than 15 sessions yet. Click any card for the profile.
+      </p>
+
+      {flagged.length === 0 && watch.length === 0 && (
+        <div className="text-sm text-green-300">
+          No driver&apos;s session-best spread is tighter than the fleet&apos;s inherent variation allows — consistent
+          with random kart draws. 👍
+        </div>
+      )}
+
+      {flagged.length > 0 && (
+        <div className="mb-3">
+          <div className="text-sm text-red-300 font-semibold mb-2">
+            ⚠️ Variance deficit — formal verdict (n ≥ 15)
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {flagged.map(d => (
+              <VardefCard key={d.name} dr={d} tone="red" router={router} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {watch.length > 0 && (
+        <div>
+          <div className="text-sm text-yellow-300 font-semibold mb-2">
+            👀 Watch list — tight σ + p &lt; 0.05 but fewer than 15 sessions
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {watch.map(d => (
+              <VardefCard key={d.name} dr={d} tone="yellow" router={router} />
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

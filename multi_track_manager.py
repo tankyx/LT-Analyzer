@@ -46,6 +46,31 @@ class MultiTrackManager:
                     )
                 ''')
 
+                # layout_id: physical-layout assignment (NULL until inferred
+                # from the session's field-best). Populated lazily by the
+                # fairness endpoints so ingestion doesn't depend on track
+                # config being present up-front.
+                # is_excluded: admin-controlled flag for sessions that
+                # shouldn't feed aggregate stats (test events, anomalous
+                # data, novice-only sessions whose field median is unreliable).
+                # The session and its laps stay in the DB for audit; only
+                # analytics-side queries skip is_excluded=1.
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(race_sessions)")
+                cols = [c[1] for c in cursor.fetchall()]
+                if 'layout_id' not in cols:
+                    conn.execute('ALTER TABLE race_sessions ADD COLUMN layout_id INTEGER')
+                if 'is_excluded' not in cols:
+                    conn.execute('ALTER TABLE race_sessions ADD COLUMN is_excluded INTEGER DEFAULT 0')
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_race_sessions_layout
+                    ON race_sessions(layout_id)
+                ''')
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_race_sessions_excluded
+                    ON race_sessions(is_excluded)
+                ''')
+
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS lap_times (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,6 +320,13 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
         # No-session detection
         self.last_data_time = None
         self.session_active_status = None  # None = unknown, True = active, False = inactive
+        # If we go this long between lap updates we treat the next data as a
+        # new race event, even if the lap number didn't reset to 1 (the
+        # parser may have reconnected mid-race after a websocket drop).
+        # Set to 30 min: longer than realistic intermissions/format changes
+        # within a single event, much shorter than the typical multi-hour
+        # gap between race meetings.
+        self.SESSION_GAP_THRESHOLD = 1800
         self.no_session_timeout = 120  # seconds (2 minutes without data = no session)
         self.check_interval = 30  # check every 30 seconds
         self.monitor_thread = None
@@ -846,50 +878,85 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
 
     def check_and_update_session(self, leader_gap: str) -> Optional[int]:
         """
-        Check if session should change based on leader's lap number.
-        Returns the current session_id to use for data storage, or None if no session should be active.
+        Decide which session_id to write to.
+
+        Triggers a new session when ANY of:
+          (a) no session yet,
+          (b) leader's lap reset to 1 from a higher number (classic boundary),
+          (c) the old session was already flagged ended (5-minute lap-stale),
+          (d) more than SESSION_GAP_THRESHOLD elapsed since the last lap update
+              (websocket reconnect after a long quiet — new race may already
+              be mid-flight, so we can't rely on seeing lap=1).
+
+        Without (d), reconnects after multi-hour gaps silently appended new
+        race data onto stale session_ids, producing the "merged-week"
+        sessions in the historical data.
         """
         current_lap = self.extract_lap_number(leader_gap)
         current_time = datetime.now()
 
-        # If we can't determine lap number, don't create a session
-        # Wait until we see Tour 1 to start tracking
+        # Without a lap number we have nothing to anchor on; preserve current
+        # session and wait for the next packet that includes one.
         if current_lap is None:
-            return self.current_session_id  # Return existing session or None
+            return self.current_session_id
 
-        # Detect new session start (lap resets to 1)
-        if current_lap == 1:
-            # Only create new session if:
-            # 1. No current session exists, OR
-            # 2. Previous lap was > 1 (actual reset), OR
-            # 3. Current session was marked as ended
-            if (self.current_session_id is None or
-                (self.current_leader_lap is not None and self.current_leader_lap > 1) or
-                self.session_ended):
+        # (d) Long activity gap → new race event, regardless of current lap.
+        if (self.current_session_id is not None
+                and self.last_lap_change_time is not None
+                and not self.session_ended):
+            gap_seconds = (current_time - self.last_lap_change_time).total_seconds()
+            if gap_seconds > self.SESSION_GAP_THRESHOLD:
+                self.logger.info(
+                    f"Track {self.track_id}: gap of {gap_seconds:.0f}s since last lap update "
+                    f"(>{self.SESSION_GAP_THRESHOLD}s) — closing session #{self.current_session_id}"
+                )
+                self.session_ended = True
 
-                self.logger.info(f"Track {self.track_id}: Detected new session start (lap reset to 1)")
-                self.current_session_id = self.create_new_session()
-                self.current_leader_lap = 1
-                self.last_lap_change_time = current_time
-                self.session_ended = False
-                return self.current_session_id
+        # Open a new session if any of the boundary conditions hold.
+        lap_reset_from_higher = (
+            current_lap == 1
+            and self.current_leader_lap is not None
+            and self.current_leader_lap > 1
+        )
+        needs_new_session = (
+            self.current_session_id is None
+            or lap_reset_from_higher
+            or self.session_ended
+        )
 
-        # Track lap progression
-        if current_lap != self.current_leader_lap:
-            # Lap number changed - racing is active
+        if needs_new_session:
+            reason = (
+                "no current session" if self.current_session_id is None
+                else "lap reset to 1" if lap_reset_from_higher
+                else "previous session ended (stale or gap)"
+            )
+            self.logger.info(
+                f"Track {self.track_id}: starting new session ({reason}; "
+                f"current_lap={current_lap}, prev_lap={self.current_leader_lap})"
+            )
+            self.current_session_id = self.create_new_session()
             self.current_leader_lap = current_lap
             self.last_lap_change_time = current_time
             self.session_ended = False
+            return self.current_session_id
+
+        # Continuing in the same session — update lap progression.
+        if current_lap != self.current_leader_lap:
+            self.current_leader_lap = current_lap
+            self.last_lap_change_time = current_time
+            # session_ended stays False; we already opened a new session
+            # above if a real boundary fired.
         else:
-            # Same lap number - check if it's been stale too long
+            # Same lap — check stale-lap timeout (legacy 5-minute check).
             if self.last_lap_change_time:
                 time_on_same_lap = (current_time - self.last_lap_change_time).total_seconds()
-
                 if time_on_same_lap > self.STALE_LAP_THRESHOLD and not self.session_ended:
-                    self.logger.info(f"Track {self.track_id}: Session ended (lap {current_lap} stale for {time_on_same_lap:.0f}s)")
+                    self.logger.info(
+                        f"Track {self.track_id}: lap {current_lap} stale for {time_on_same_lap:.0f}s — "
+                        f"session #{self.current_session_id} marked ended"
+                    )
                     self.session_ended = True
 
-        # Return current session (may be None if no session started yet)
         return self.current_session_id
 
     def create_new_session(self) -> int:

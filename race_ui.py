@@ -16,13 +16,21 @@ import sqlite3
 from functools import wraps
 
 import bcrypt
-from flask import Flask, jsonify, request, session
+from flask import Flask, has_request_context, jsonify, request, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from apex_timing_websocket import ApexTimingWebSocketParser
 from database_manager import TrackDatabase
+from email_service import (
+    get_email_sender,
+    send_password_reset_email,
+    send_verification_email,
+    send_welcome_email,
+)
 from multi_track_manager import MultiTrackManager
+from turnstile import require_turnstile
 
 
 def _parse_cors_origins():
@@ -48,15 +56,20 @@ if not _secret:
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = _secret
+# Trust nginx's X-Forwarded-{For,Proto} so request.remote_addr is the real
+# client IP (rate-limit keys depend on this) and request.scheme reflects HTTPS.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+_SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'true').lower() == 'true'
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
-    SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV') == 'production',
+    SESSION_COOKIE_SECURE=_SESSION_COOKIE_SECURE,
+    PREFERRED_URL_SCHEME='https',
 )
 CORS(app,
      origins=CORS_ORIGINS,
      supports_credentials=True,
-     allow_headers=["Content-Type", "Authorization"],
+     allow_headers=["Content-Type", "Authorization", "X-CSRF-Token"],
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # Initialize SocketIO — mirror the HTTP CORS whitelist (no wildcards).
@@ -212,13 +225,37 @@ def handle_disconnect():
 
 @socketio.on('join_track')
 def handle_join_track(data):
-    """Handle client joining a track-specific room"""
+    """Handle client joining a track-specific room.
+
+    After joining, emit a snapshot of the track's current standings so the
+    client doesn't show empty/stale data while waiting for the next periodic
+    broadcast (which only fires when the upstream WebSocket pushes new lap
+    data — could be a long wait if the track is idle).
+    """
     track_id = data.get('track_id')
-    if track_id:
-        room = f'track_{track_id}'
-        join_room(room)
-        print(f"Client {request.sid} joined {room}")
-        emit('track_joined', {'track_id': track_id})
+    if not track_id:
+        return
+    room = f'track_{track_id}'
+    join_room(room)
+    print(f"Client {request.sid} joined {room}")
+    emit('track_joined', {'track_id': track_id})
+
+    # Best-effort snapshot. Never block the join on this.
+    try:
+        if multi_track_manager and track_id in multi_track_manager.parsers:
+            parser = multi_track_manager.parsers[track_id]
+            if hasattr(parser, 'get_current_standings'):
+                standings_df = parser.get_current_standings()
+                teams_data = standings_df.to_dict('records') if not standings_df.empty else []
+                emit('track_update', {
+                    'track_id': track_id,
+                    'track_name': getattr(parser, 'track_name', None),
+                    'teams': teams_data,
+                    'session_id': getattr(parser, 'current_session_id', None),
+                    'timestamp': datetime.now().isoformat(),
+                })
+    except Exception as snapshot_err:  # pragma: no cover — defensive
+        print(f"join_track snapshot failed for track {track_id}: {snapshot_err}")
 
 @socketio.on('leave_track')
 def handle_leave_track(data):
@@ -1484,7 +1521,7 @@ def get_db_connection():
 
 def _ensure_auth_schema():
     """Normalize auth.db across versions (legacy 'timestamp' column -> 'attempted_at')
-    and create the driver_aliases table if missing."""
+    and create driver_aliases / Phase 1 tables defensively."""
     try:
         with sqlite3.connect('auth.db') as conn:
             cols = [row[1] for row in conn.execute('PRAGMA table_info(login_attempts)').fetchall()]
@@ -1504,6 +1541,90 @@ def _ensure_auth_schema():
             ''')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_driver_aliases_canon ON driver_aliases(canonical_name COLLATE NOCASE)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_driver_aliases_alias ON driver_aliases(alias_name COLLATE NOCASE)')
+
+            # --- Phase 1 columns on users (idempotent) -------------------------
+            user_cols = {row[1] for row in conn.execute('PRAGMA table_info(users)').fetchall()}
+            phase1_cols = [
+                ('email_verified', 'email_verified INTEGER NOT NULL DEFAULT 0'),
+                ('verification_token', 'verification_token TEXT'),
+                ('verification_token_expires', 'verification_token_expires TIMESTAMP'),
+                ('password_reset_token', 'password_reset_token TEXT'),
+                ('password_reset_expires', 'password_reset_expires TIMESTAMP'),
+                ('tos_accepted_at', 'tos_accepted_at TIMESTAMP'),
+                ('deleted_at', 'deleted_at TIMESTAMP'),
+            ]
+            for name, ddl in phase1_cols:
+                if name not in user_cols:
+                    conn.execute(f'ALTER TABLE users ADD COLUMN {ddl}')
+
+            # Partial unique indexes — fine to re-create with IF NOT EXISTS.
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_verification_token "
+                "ON users(verification_token) WHERE verification_token IS NOT NULL"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_password_reset_token "
+                "ON users(password_reset_token) WHERE password_reset_token IS NOT NULL"
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower "
+                "ON users(LOWER(email)) WHERE email IS NOT NULL AND deleted_at IS NULL"
+            )
+
+            # Backfill admin email_verified so the verification gate doesn't lock us out.
+            conn.execute(
+                "UPDATE users SET email_verified = 1 WHERE role = 'admin' AND email_verified = 0"
+            )
+
+            # --- New Phase 1 tables -----------------------------------------
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS invite_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT UNIQUE NOT NULL,
+                    max_uses INTEGER NOT NULL DEFAULT 1,
+                    uses INTEGER NOT NULL DEFAULT 0,
+                    created_by INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    note TEXT,
+                    FOREIGN KEY (created_by) REFERENCES users(id)
+                )
+            ''')
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code)'
+            )
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    actor_user_id INTEGER,
+                    action TEXT NOT NULL,
+                    target TEXT,
+                    ip_address TEXT,
+                    user_agent TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    details TEXT
+                )
+            ''')
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS idx_audit_log_actor '
+                'ON audit_log(actor_user_id, timestamp DESC)'
+            )
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS idx_audit_log_action '
+                'ON audit_log(action, timestamp DESC)'
+            )
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS rate_limit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bucket TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    occurred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS idx_rate_limit_bucket_key_time '
+                'ON rate_limit_events(bucket, key, occurred_at)'
+            )
     except sqlite3.Error as e:
         print(f'Warning: auth schema normalization skipped: {e}')
 
@@ -1570,6 +1691,129 @@ def admin_required(f):
 LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', '5'))
 LOGIN_WINDOW_MINUTES = int(os.environ.get('LOGIN_WINDOW_MINUTES', '15'))
 
+# Phase 1 auth knobs
+REGISTRATION_OPEN = os.environ.get('REGISTRATION_OPEN', 'false').lower() == 'true'
+VERIFICATION_TOKEN_HOURS = int(os.environ.get('VERIFICATION_TOKEN_HOURS', '48'))
+RESET_TOKEN_HOURS = int(os.environ.get('RESET_TOKEN_HOURS', '1'))
+ENABLE_TEST_ENDPOINTS = os.environ.get('ENABLE_TEST_ENDPOINTS', 'false').lower() == 'true'
+
+RATE_LIMITS = {
+    'register_ip': (int(os.environ.get('RATE_LIMIT_REGISTER_IP_PER_HOUR', '5')), 3600),
+    'forgot_password_ip': (int(os.environ.get('RATE_LIMIT_FORGOT_IP_PER_HOUR', '10')), 3600),
+    'forgot_password_email': (int(os.environ.get('RATE_LIMIT_FORGOT_EMAIL_PER_HOUR', '3')), 3600),
+    'verify_email_ip': (int(os.environ.get('RATE_LIMIT_VERIFY_IP_PER_HOUR', '30')), 3600),
+    'resend_verification_ip': (int(os.environ.get('RATE_LIMIT_RESEND_IP_PER_HOUR', '5')), 3600),
+    'resend_verification_email': (int(os.environ.get('RATE_LIMIT_RESEND_EMAIL_PER_HOUR', '3')), 3600),
+}
+
+RESERVED_USERNAMES = {'admin', 'root', 'system', 'support', 'security', 'administrator'}
+USERNAME_RE = re.compile(r'^[a-zA-Z0-9_.-]{3,32}$')
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+_email_sender = get_email_sender()
+
+
+def _rate_limit_hit(bucket: str, key: str, max_events: int | None = None,
+                    window_seconds: int | None = None) -> bool:
+    """Record a rate-limit event and report whether the bucket is now exhausted.
+
+    Looks up defaults from RATE_LIMITS when max/window not passed. Returns True
+    if the count in window has reached `max_events`. Probabilistic GC cleans
+    rows older than 24h on ~1% of calls so we don't need a background thread.
+    """
+    if max_events is None or window_seconds is None:
+        defaults = RATE_LIMITS.get(bucket)
+        if not defaults:
+            return False
+        max_events = max_events if max_events is not None else defaults[0]
+        window_seconds = window_seconds if window_seconds is not None else defaults[1]
+    if max_events <= 0:
+        return False
+    cutoff = (datetime.now() - timedelta(seconds=window_seconds)).strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        with sqlite3.connect('auth.db') as conn:
+            conn.execute(
+                'INSERT INTO rate_limit_events (bucket, key) VALUES (?, ?)',
+                (bucket, key or '-'),
+            )
+            row = conn.execute(
+                'SELECT COUNT(*) FROM rate_limit_events '
+                'WHERE bucket = ? AND key = ? AND occurred_at > ?',
+                (bucket, key or '-', cutoff),
+            ).fetchone()
+            count = row[0] if row else 0
+            if random.random() < 0.01:
+                gc_cutoff = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+                conn.execute(
+                    'DELETE FROM rate_limit_events WHERE occurred_at < ?', (gc_cutoff,)
+                )
+        return count >= max_events
+    except sqlite3.Error as exc:
+        # Don't fail the request on rate-limit infrastructure errors — log and pass.
+        print(f'[rate_limit] {bucket}/{key}: {exc}')
+        return False
+
+
+def _audit(action: str, *, actor_user_id=None, target=None, details=None):
+    """Best-effort append-only audit log. Never raises into the caller."""
+    try:
+        ip = None
+        ua = None
+        if has_request_context():
+            ip = request.remote_addr
+            ua = (request.headers.get('User-Agent') or '')[:512]
+        payload = None
+        if details is not None:
+            try:
+                payload = json.dumps(details, default=str)
+            except (TypeError, ValueError):
+                payload = json.dumps({'_unserialisable': repr(details)[:500]})
+        with sqlite3.connect('auth.db') as conn:
+            conn.execute(
+                'INSERT INTO audit_log (actor_user_id, action, target, ip_address, user_agent, details) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
+                (actor_user_id, action, target, ip, ua, payload),
+            )
+    except Exception as exc:  # pragma: no cover — defensive
+        print(f'[audit] failed to record {action}: {exc}')
+
+
+CSRF_EXEMPT_PATHS = {
+    '/api/auth/login',
+    '/api/auth/register',
+    '/api/auth/forgot-password',
+    '/api/auth/reset-password',
+    '/api/auth/verify-email',
+    '/api/auth/resend-verification',
+    '/api/auth/csrf',
+}
+
+
+@app.before_request
+def _csrf_guard():
+    """Require X-CSRF-Token on unsafe /api/* requests.
+
+    Anonymous endpoints (login/register/forgot/reset/verify/resend/csrf) are
+    skipped because they're protected by Turnstile or are themselves token
+    issuers. Socket.IO paths are skipped — the connection auth lives in the
+    session cookie. SameSite=Lax + this header check keeps us safe from CSRF
+    on authenticated endpoints.
+    """
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+    path = request.path or ''
+    if not path.startswith('/api/'):
+        return None
+    if path in CSRF_EXEMPT_PATHS:
+        return None
+    if path.startswith('/api/socket.io') or path.startswith('/socket.io'):
+        return None
+    expected = session.get('csrf_token')
+    provided = request.headers.get('X-CSRF-Token', '')
+    if not expected or not provided or not hmac.compare_digest(expected, provided):
+        return jsonify({'error': 'csrf_failed'}), 403
+    return None
+
 
 def _is_rate_limited(username: str, ip_address: str) -> bool:
     """Return True if (username, ip) has too many recent failed logins."""
@@ -1591,6 +1835,7 @@ def _is_rate_limited(username: str, ip_address: str) -> bool:
 
 
 @app.route('/api/auth/login', methods=['POST'])
+@require_turnstile()
 def login():
     """User login endpoint"""
     try:
@@ -1607,6 +1852,7 @@ def login():
         ip_address = request.remote_addr or '-'
 
         if _is_rate_limited(username, ip_address):
+            _audit('login_rate_limited', target=username)
             return jsonify({
                 'error': f'Too many failed attempts. Try again in {LOGIN_WINDOW_MINUTES} minutes.'
             }), 429
@@ -1623,15 +1869,28 @@ def login():
             attempt_id = cursor.lastrowid
 
             cursor.execute(
-                '''SELECT id, username, role, email, is_active, password_hash
+                '''SELECT id, username, role, email, is_active, password_hash,
+                          email_verified, deleted_at
                    FROM users WHERE username = ?''',
                 (username,),
             )
             user = cursor.fetchone()
 
-            if not user or not user['is_active'] or not verify_password(password, user['password_hash']):
+            if (not user or not user['is_active'] or user['deleted_at']
+                    or not verify_password(password, user['password_hash'])):
                 conn.commit()
+                _audit('login_failed',
+                       actor_user_id=user['id'] if user else None,
+                       target=username)
                 return jsonify({'error': 'Invalid credentials'}), 401
+
+            if not user['email_verified']:
+                conn.commit()
+                _audit('login_blocked_unverified', actor_user_id=user['id'], target=username)
+                return jsonify({
+                    'error': 'email_not_verified',
+                    'email': user['email'],
+                }), 401
 
             # Upgrade legacy SHA256 hash to bcrypt opportunistically.
             if not _looks_like_bcrypt(user['password_hash']):
@@ -1652,7 +1911,10 @@ def login():
 
             session_id = create_session(user['id'])
             session['session_id'] = session_id
+            # Rotate CSRF token so a pre-login attacker token can't be reused.
+            session['csrf_token'] = secrets.token_urlsafe(32)
 
+            _audit('login_success', actor_user_id=user['id'], target=username)
             return jsonify({
                 'success': True,
                 'user': {
@@ -1701,6 +1963,377 @@ def check_auth():
     
     return jsonify({'authenticated': False})
 
+
+# --- Phase 1 auth helpers ---------------------------------------------------
+
+_GENERIC_REGISTRATION_FAIL = ('registration_failed',
+                              'Registration failed. Check your inputs and try again.')
+
+
+class _RegisterStop(Exception):
+    """Sentinel raised inside register() to break out of the DB-connection block
+    after we've explicitly rolled back. Doing it this way (instead of a plain
+    `return`) ensures the sqlite3 connection's __exit__ doesn't auto-commit the
+    pending transaction, and we can safely call _audit() with no write-lock held."""
+
+
+def _validate_register_payload(data: dict) -> tuple[bool, str]:
+    username = (data.get('username') or '').strip()
+    email = (data.get('email') or '').strip().lower()
+    password = data.get('password') or ''
+    accept_terms = bool(data.get('accept_terms'))
+    if not USERNAME_RE.match(username):
+        return False, 'invalid_username'
+    if username.lower() in RESERVED_USERNAMES:
+        return False, 'reserved_username'
+    if not EMAIL_RE.match(email):
+        return False, 'invalid_email'
+    if len(password) < 12:
+        return False, 'weak_password'
+    if not accept_terms:
+        return False, 'terms_not_accepted'
+    return True, ''
+
+
+def _consume_invite_code(conn, code: str) -> bool:
+    """Atomic invite-code use. Returns True iff a usable code was found and incremented."""
+    if not code:
+        return False
+    row = conn.execute(
+        'SELECT id, max_uses, uses, expires_at FROM invite_codes WHERE code = ?',
+        (code,),
+    ).fetchone()
+    if not row:
+        return False
+    invite_id, max_uses, uses, expires_at = row['id'], row['max_uses'], row['uses'], row['expires_at']
+    if expires_at and expires_at < datetime.now().isoformat():
+        return False
+    if uses >= max_uses:
+        return False
+    # Conditional update prevents two concurrent registers from each consuming
+    # the last slot.
+    cur = conn.execute(
+        'UPDATE invite_codes SET uses = uses + 1 WHERE id = ? AND uses < max_uses',
+        (invite_id,),
+    )
+    return cur.rowcount == 1
+
+
+# --- CSRF token endpoint ----------------------------------------------------
+
+@app.route('/api/auth/csrf', methods=['GET'])
+def csrf_token():
+    """Issue (and persist in Flask session) a CSRF token the frontend echoes back."""
+    token = session.get('csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['csrf_token'] = token
+    return jsonify({'csrfToken': token})
+
+
+# --- Registration / verification -------------------------------------------
+
+@app.route('/api/auth/register', methods=['POST'])
+@require_turnstile()
+def register():
+    data = request.get_json(silent=True) or {}
+    ip_address = request.remote_addr or '-'
+    if _rate_limit_hit('register_ip', ip_address):
+        return jsonify({'error': 'rate_limited'}), 429
+
+    ok, reason = _validate_register_payload(data)
+    if not ok:
+        if reason in ('invalid_username', 'reserved_username'):
+            return jsonify({'error': 'invalid_username'}), 400
+        if reason == 'invalid_email':
+            return jsonify({'error': 'invalid_email'}), 400
+        if reason == 'weak_password':
+            return jsonify({'error': 'weak_password'}), 400
+        if reason == 'terms_not_accepted':
+            return jsonify({'error': 'terms_not_accepted'}), 400
+        return jsonify({'error': _GENERIC_REGISTRATION_FAIL[0]}), 400
+
+    username = data['username'].strip()
+    email = data['email'].strip().lower()
+    password = data['password']
+    invite_code = (data.get('invite_code') or '').strip()
+
+    new_user_id = None
+    token = None
+    invite_rejected = False
+    conflict = False
+    try:
+        with get_db_connection() as conn:
+            # Invite gate unless globally open
+            if not REGISTRATION_OPEN:
+                if not _consume_invite_code(conn, invite_code):
+                    conn.rollback()  # release locks before we audit/return
+                    invite_rejected = True
+                    raise _RegisterStop()
+
+            token = secrets.token_urlsafe(32)
+            expires = (datetime.now() + timedelta(hours=VERIFICATION_TOKEN_HOURS)).isoformat()
+            try:
+                cur = conn.execute(
+                    'INSERT INTO users (username, password_hash, email, role, is_active, '
+                    'email_verified, verification_token, verification_token_expires, tos_accepted_at) '
+                    'VALUES (?, ?, ?, ?, 1, 0, ?, ?, ?)',
+                    (username, hash_password(password), email, 'user',
+                     token, expires, datetime.now().isoformat()),
+                )
+                new_user_id = cur.lastrowid
+            except sqlite3.IntegrityError:
+                # Username or email collision — generic response (no enumeration).
+                # Rolling back also un-consumes the invite code so attackers can't
+                # burn invites by spamming colliding emails.
+                conn.rollback()
+                conflict = True
+                raise _RegisterStop()
+
+            conn.commit()
+    except _RegisterStop:
+        pass
+
+    # Outside the connection block, locks released — safe to audit + respond.
+    if invite_rejected:
+        _audit('register_invite_rejected', target=email,
+               details={'invite': bool(invite_code)})
+        return jsonify({'error': _GENERIC_REGISTRATION_FAIL[0]}), 400
+    if conflict:
+        _audit('register_conflict', target=email)
+        return jsonify({'error': _GENERIC_REGISTRATION_FAIL[0]}), 400
+
+    try:
+        ok, err = send_verification_email(
+            _email_sender,
+            {'username': username, 'email': email},
+            token,
+        )
+        if not ok:
+            _audit('email_send_failed', actor_user_id=new_user_id, target=email,
+                   details={'template': 'verification', 'error': err})
+
+        _audit('user_register', actor_user_id=new_user_id, target=email)
+        return jsonify({
+            'success': True,
+            'message': 'Check your inbox to verify your email.',
+        })
+
+    except sqlite3.Error as exc:
+        return _internal_error(exc, 'register')
+
+
+@app.route('/api/auth/verify-email', methods=['POST'])
+def verify_email():
+    data = request.get_json(silent=True) or {}
+    ip_address = request.remote_addr or '-'
+    if _rate_limit_hit('verify_email_ip', ip_address):
+        return jsonify({'error': 'rate_limited'}), 429
+    token = (data.get('token') or '').strip()
+    if not token:
+        return jsonify({'error': 'invalid_token'}), 400
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                'SELECT id, username, email, email_verified, verification_token_expires '
+                'FROM users WHERE verification_token = ? AND deleted_at IS NULL',
+                (token,),
+            ).fetchone()
+            if not row:
+                return jsonify({'error': 'invalid_token'}), 400
+            if row['verification_token_expires'] and row['verification_token_expires'] < datetime.now().isoformat():
+                return jsonify({'error': 'expired_token'}), 400
+            conn.execute(
+                'UPDATE users SET email_verified = 1, verification_token = NULL, '
+                'verification_token_expires = NULL WHERE id = ?',
+                (row['id'],),
+            )
+            conn.commit()
+        _audit('email_verified', actor_user_id=row['id'], target=row['email'])
+        send_welcome_email(_email_sender, {'username': row['username'], 'email': row['email']})
+        return jsonify({'success': True})
+    except sqlite3.Error as exc:
+        return _internal_error(exc, 'verify-email')
+
+
+@app.route('/api/auth/resend-verification', methods=['POST'])
+@require_turnstile()
+def resend_verification():
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    ip_address = request.remote_addr or '-'
+    if _rate_limit_hit('resend_verification_ip', ip_address):
+        return jsonify({'success': True})  # silent rate-limit
+    if email and _rate_limit_hit('resend_verification_email', email):
+        return jsonify({'success': True})
+    if not email or not EMAIL_RE.match(email):
+        return jsonify({'success': True})
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                'SELECT id, username, email, email_verified FROM users '
+                'WHERE LOWER(email) = ? AND deleted_at IS NULL',
+                (email,),
+            ).fetchone()
+            if row and not row['email_verified']:
+                token = secrets.token_urlsafe(32)
+                expires = (datetime.now() + timedelta(hours=VERIFICATION_TOKEN_HOURS)).isoformat()
+                conn.execute(
+                    'UPDATE users SET verification_token = ?, verification_token_expires = ? '
+                    'WHERE id = ?',
+                    (token, expires, row['id']),
+                )
+                conn.commit()
+                send_verification_email(
+                    _email_sender,
+                    {'username': row['username'], 'email': row['email']},
+                    token,
+                )
+                _audit('verification_resent', actor_user_id=row['id'], target=row['email'])
+        return jsonify({'success': True})
+    except sqlite3.Error:
+        return jsonify({'success': True})  # never leak DB errors here
+
+
+# --- Password reset --------------------------------------------------------
+
+@app.route('/api/auth/forgot-password', methods=['POST'])
+@require_turnstile()
+def forgot_password():
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    ip_address = request.remote_addr or '-'
+    if _rate_limit_hit('forgot_password_ip', ip_address):
+        return jsonify({'success': True})
+    if email and _rate_limit_hit('forgot_password_email', email):
+        return jsonify({'success': True})
+    if not email or not EMAIL_RE.match(email):
+        return jsonify({'success': True})
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                'SELECT id, username, email FROM users '
+                'WHERE LOWER(email) = ? AND is_active = 1 AND deleted_at IS NULL',
+                (email,),
+            ).fetchone()
+            if row:
+                token = secrets.token_urlsafe(32)
+                expires = (datetime.now() + timedelta(hours=RESET_TOKEN_HOURS)).isoformat()
+                conn.execute(
+                    'UPDATE users SET password_reset_token = ?, password_reset_expires = ? '
+                    'WHERE id = ?',
+                    (token, expires, row['id']),
+                )
+                conn.commit()
+                send_password_reset_email(
+                    _email_sender,
+                    {'username': row['username'], 'email': row['email']},
+                    token,
+                )
+                _audit('password_reset_requested', actor_user_id=row['id'], target=row['email'])
+        return jsonify({'success': True})
+    except sqlite3.Error:
+        return jsonify({'success': True})
+
+
+@app.route('/api/auth/reset-password', methods=['POST'])
+def reset_password():
+    data = request.get_json(silent=True) or {}
+    token = (data.get('token') or '').strip()
+    new_password = data.get('new_password') or ''
+    if not token:
+        return jsonify({'error': 'invalid_token'}), 400
+    if len(new_password) < 12:
+        return jsonify({'error': 'weak_password'}), 400
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                'SELECT id, email, password_reset_expires FROM users '
+                'WHERE password_reset_token = ? AND deleted_at IS NULL',
+                (token,),
+            ).fetchone()
+            if not row:
+                return jsonify({'error': 'invalid_token'}), 400
+            if row['password_reset_expires'] and row['password_reset_expires'] < datetime.now().isoformat():
+                return jsonify({'error': 'expired_token'}), 400
+            conn.execute(
+                'UPDATE users SET password_hash = ?, password_reset_token = NULL, '
+                'password_reset_expires = NULL WHERE id = ?',
+                (hash_password(new_password), row['id']),
+            )
+            # Invalidate all live sessions for this user.
+            conn.execute('DELETE FROM sessions WHERE user_id = ?', (row['id'],))
+            conn.commit()
+        _audit('password_reset_completed', actor_user_id=row['id'], target=row['email'])
+        return jsonify({'success': True})
+    except sqlite3.Error as exc:
+        return _internal_error(exc, 'reset-password')
+
+
+# --- Self-service /me endpoints --------------------------------------------
+
+@app.route('/api/auth/me', methods=['GET'])
+@login_required
+def me_get():
+    user = request.current_user
+    with get_db_connection() as conn:
+        row = conn.execute(
+            'SELECT id, username, email, role, created_at, last_login, '
+            'email_verified, tos_accepted_at, is_active '
+            'FROM users WHERE id = ?',
+            (user['id'],),
+        ).fetchone()
+    if not row:
+        return jsonify({'error': 'not_found'}), 404
+    return jsonify({'user': dict(row)})
+
+
+@app.route('/api/auth/me/export', methods=['POST'])
+@login_required
+def me_export():
+    user = request.current_user
+    with get_db_connection() as conn:
+        prof = conn.execute(
+            'SELECT id, username, email, role, created_at, last_login, '
+            'email_verified, tos_accepted_at, is_active '
+            'FROM users WHERE id = ?',
+            (user['id'],),
+        ).fetchone()
+        audit_rows = conn.execute(
+            'SELECT action, target, ip_address, timestamp, details FROM audit_log '
+            'WHERE actor_user_id = ? ORDER BY timestamp DESC LIMIT 1000',
+            (user['id'],),
+        ).fetchall()
+    _audit('self_export', actor_user_id=user['id'])
+    return jsonify({
+        'profile': dict(prof) if prof else None,
+        'audit_log': [dict(r) for r in audit_rows],
+        'planner': {},
+        'exported_at': datetime.now().isoformat(),
+    })
+
+
+@app.route('/api/auth/me', methods=['DELETE'])
+@login_required
+def me_delete():
+    user = request.current_user
+    scramble_suffix = secrets.token_urlsafe(6)
+    with get_db_connection() as conn:
+        conn.execute(
+            'UPDATE users SET deleted_at = CURRENT_TIMESTAMP, is_active = 0, '
+            'username = ?, email = ?, verification_token = NULL, password_reset_token = NULL '
+            'WHERE id = ?',
+            (f'deleted_{user["id"]}_{scramble_suffix}',
+             f'deleted+{user["id"]}@invalid',
+             user['id']),
+        )
+        conn.execute('DELETE FROM sessions WHERE user_id = ?', (user['id'],))
+        conn.commit()
+    _audit('account_deleted', actor_user_id=user['id'])
+    session.clear()
+    return jsonify({'success': True})
+
+
 # User management routes (admin only)
 @app.route('/api/admin/users', methods=['GET'])
 @admin_required
@@ -1734,14 +2367,16 @@ def create_user():
     try:
         with get_db_connection() as conn:
             cursor = conn.execute(
-                '''INSERT INTO users (username, password_hash, email, role)
-                   VALUES (?, ?, ?, ?)''',
+                '''INSERT INTO users (username, password_hash, email, role, email_verified)
+                   VALUES (?, ?, ?, ?, 1)''',
                 (username, password_hash, email, role),
             )
             user_id = cursor.lastrowid
     except sqlite3.IntegrityError:
         return jsonify({'error': 'Username already exists'}), 400
 
+    _audit('admin_user_created', actor_user_id=request.current_user['id'],
+           target=username, details={'role': role, 'user_id': user_id})
     return jsonify({
         'success': True,
         'user': {
@@ -1793,6 +2428,9 @@ def update_user(user_id):
             cursor.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
         conn.commit()
 
+    _audit('admin_user_updated', actor_user_id=request.current_user['id'],
+           target=str(user_id),
+           details={'fields': [c for c, _ in updates]})
     return jsonify({'success': True})
 
 @app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
@@ -1805,7 +2443,97 @@ def delete_user(user_id):
     with get_db_connection() as conn:
         conn.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
         conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    _audit('admin_user_deleted', actor_user_id=request.current_user['id'],
+           target=str(user_id))
     return jsonify({'success': True})
+
+
+# --- Admin invite codes -----------------------------------------------------
+
+@app.route('/api/admin/invite-codes', methods=['GET'])
+@admin_required
+def list_invite_codes():
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            'SELECT id, code, max_uses, uses, created_by, created_at, expires_at, note '
+            'FROM invite_codes ORDER BY created_at DESC'
+        ).fetchall()
+    return jsonify({'invites': [dict(r) for r in rows]})
+
+
+@app.route('/api/admin/invite-codes', methods=['POST'])
+@admin_required
+def create_invite_code():
+    data = request.get_json(silent=True) or {}
+    raw = data.get('max_uses', 1)
+    try:
+        max_uses = int(raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'invalid_max_uses'}), 400
+    if max_uses < 1 or max_uses > 1000:
+        return jsonify({'error': 'invalid_max_uses'}), 400
+    expires_at = (data.get('expires_at') or '').strip() or None
+    note = (data.get('note') or '').strip() or None
+    code = secrets.token_urlsafe(8)
+    with get_db_connection() as conn:
+        conn.execute(
+            'INSERT INTO invite_codes (code, max_uses, created_by, expires_at, note) '
+            'VALUES (?, ?, ?, ?, ?)',
+            (code, max_uses, request.current_user['id'], expires_at, note),
+        )
+    _audit('admin_invite_created', actor_user_id=request.current_user['id'],
+           target=code, details={'max_uses': max_uses, 'expires_at': expires_at})
+    return jsonify({'success': True, 'code': code, 'max_uses': max_uses})
+
+
+@app.route('/api/admin/invite-codes/<int:invite_id>', methods=['DELETE'])
+@admin_required
+def revoke_invite_code(invite_id):
+    with get_db_connection() as conn:
+        cur = conn.execute('DELETE FROM invite_codes WHERE id = ?', (invite_id,))
+    if cur.rowcount == 0:
+        return jsonify({'error': 'not_found'}), 404
+    _audit('admin_invite_revoked', actor_user_id=request.current_user['id'],
+           target=str(invite_id))
+    return jsonify({'success': True})
+
+
+# --- Admin audit-log reader -------------------------------------------------
+
+@app.route('/api/admin/audit-log', methods=['GET'])
+@admin_required
+def admin_audit_log():
+    action = (request.args.get('action') or '').strip()
+    actor = (request.args.get('actor') or '').strip()
+    try:
+        limit = min(max(int(request.args.get('limit') or 200), 1), 1000)
+    except (TypeError, ValueError):
+        limit = 200
+    try:
+        offset = max(int(request.args.get('offset') or 0), 0)
+    except (TypeError, ValueError):
+        offset = 0
+    clauses = []
+    params: list = []
+    if action:
+        clauses.append('action = ?')
+        params.append(action)
+    if actor:
+        clauses.append('actor_user_id = ?')
+        try:
+            params.append(int(actor))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid_actor'}), 400
+    where = ('WHERE ' + ' AND '.join(clauses)) if clauses else ''
+    sql = (
+        f'SELECT id, actor_user_id, action, target, ip_address, user_agent, timestamp, details '
+        f'FROM audit_log {where} ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+    )
+    params.extend([limit, offset])
+    with get_db_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return jsonify({'rows': [dict(r) for r in rows], 'limit': limit, 'offset': offset})
+
 
 # REST API routes
 @app.route('/api/race-data')
@@ -2187,6 +2915,146 @@ def admin_delete_track(track_id):
 
 
 # ---------------------------------------------------------------------------
+# Track layouts (admin-managed; public read so fairness UI can populate)
+# ---------------------------------------------------------------------------
+
+def _parse_opt_float(payload, key):
+    v = payload.get(key) if payload else None
+    if v is None or v == '':
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+@app.route('/api/tracks/<int:track_id>/layouts', methods=['GET'])
+def list_track_layouts(track_id):
+    """List layouts configured for a track. Public so the fairness UI can
+    render a layout picker without requiring admin."""
+    if not track_db.get_track_by_id(track_id):
+        return jsonify({'error': f'Unknown track_id {track_id}'}), 404
+    return jsonify({'track_id': track_id, 'layouts': track_db.get_layouts_for_track(track_id)})
+
+
+@app.route('/api/admin/tracks/<int:track_id>/layouts', methods=['POST'])
+@admin_required
+def admin_add_track_layout(track_id):
+    if not track_db.get_track_by_id(track_id):
+        return jsonify({'error': f'Unknown track_id {track_id}'}), 404
+    data = request.json or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Layout name is required'}), 400
+    result = track_db.add_layout(
+        track_id=track_id,
+        name=name,
+        min_field_best=_parse_opt_float(data, 'min_field_best'),
+        max_field_best=_parse_opt_float(data, 'max_field_best'),
+        is_default=bool(data.get('is_default', False)),
+    )
+    if 'error' in result:
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@app.route('/api/admin/layouts/<int:layout_id>', methods=['PUT'])
+@admin_required
+def admin_update_layout(layout_id):
+    data = request.json or {}
+    # Allow explicit clearing of bands by passing null / empty string.
+    clear_min = 'min_field_best' in data and (data['min_field_best'] in (None, ''))
+    clear_max = 'max_field_best' in data and (data['max_field_best'] in (None, ''))
+    result = track_db.update_layout(
+        layout_id=layout_id,
+        name=data.get('name'),
+        min_field_best=None if clear_min else _parse_opt_float(data, 'min_field_best'),
+        max_field_best=None if clear_max else _parse_opt_float(data, 'max_field_best'),
+        is_default=data.get('is_default') if isinstance(data.get('is_default'), bool) else None,
+        clear_min=clear_min,
+        clear_max=clear_max,
+    )
+    if 'error' in result:
+        status = 404 if result['error'] == 'Layout not found' else 400
+        return jsonify(result), status
+    return jsonify(result)
+
+
+@app.route('/api/admin/layouts/<int:layout_id>', methods=['DELETE'])
+@admin_required
+def admin_delete_layout(layout_id):
+    result = track_db.delete_layout(layout_id)
+    if 'error' in result:
+        return jsonify(result), 404
+    return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Session exclusion (admin) — flag a session out of all aggregate analytics.
+# Per-session lap data stays in the DB; only the fairness/leaderboard queries
+# filter on is_excluded.
+# ---------------------------------------------------------------------------
+
+@app.route('/api/admin/tracks/<int:track_id>/sessions/<int:session_id>/exclude', methods=['POST'])
+@admin_required
+def admin_set_session_exclusion(track_id, session_id):
+    """Toggle is_excluded on a single session. Body: {"excluded": true|false}."""
+    if not track_db.get_track_by_id(track_id):
+        return jsonify({'error': f'Unknown track_id {track_id}'}), 404
+    data = request.json or {}
+    excluded = 1 if bool(data.get('excluded', True)) else 0
+    try:
+        with get_track_db_connection(track_id) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                'UPDATE race_sessions SET is_excluded = ? WHERE session_id = ?',
+                (excluded, session_id),
+            )
+            if cur.rowcount == 0:
+                return jsonify({'error': f'Session {session_id} not found on track {track_id}'}), 404
+            conn.commit()
+            row = cur.execute(
+                'SELECT session_id, name, start_time, is_excluded FROM race_sessions WHERE session_id = ?',
+                (session_id,),
+            ).fetchone()
+        _audit('admin_session_exclusion',
+               actor_user_id=request.current_user['id'],
+               target=f'track_{track_id}/session_{session_id}',
+               details={'excluded': bool(excluded)})
+        return jsonify({
+            'track_id': track_id,
+            'session_id': row[0],
+            'name': row[1],
+            'start_time': row[2],
+            'is_excluded': bool(row[3]),
+        })
+    except UnknownTrackError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        app.logger.exception('admin_set_session_exclusion failed')
+        return _internal_error(e)
+
+
+@app.route('/api/admin/tracks/<int:track_id>/sessions/excluded', methods=['GET'])
+@admin_required
+def admin_list_excluded_sessions(track_id):
+    """List sessions on this track currently flagged is_excluded=1."""
+    if not track_db.get_track_by_id(track_id):
+        return jsonify({'error': f'Unknown track_id {track_id}'}), 404
+    try:
+        with get_track_db_connection(track_id) as conn:
+            rows = conn.execute(
+                'SELECT session_id, name, start_time FROM race_sessions WHERE is_excluded = 1 ORDER BY start_time DESC'
+            ).fetchall()
+        return jsonify({
+            'track_id': track_id,
+            'excluded': [{'session_id': r[0], 'name': r[1], 'start_time': r[2]} for r in rows],
+        })
+    except UnknownTrackError as e:
+        return jsonify({'error': str(e)}), 404
+
+
+# ---------------------------------------------------------------------------
 # Driver aliases (admin-managed)
 # ---------------------------------------------------------------------------
 
@@ -2285,6 +3153,8 @@ def admin_add_alias():
                 (canonical, alias, added_by),
             )
             new_id = cur.lastrowid
+        _audit('admin_alias_added', actor_user_id=request.current_user['id'],
+               target=f'{canonical}<-{alias}', details={'id': new_id})
         return jsonify({'success': True, 'id': new_id})
     except sqlite3.IntegrityError:
         return jsonify({'error': 'This alias already exists for that canonical name'}), 409
@@ -2302,92 +3172,89 @@ def admin_delete_alias(alias_id):
             cur = conn.execute('DELETE FROM driver_aliases WHERE id = ?', (alias_id,))
             if cur.rowcount == 0:
                 return jsonify({'error': 'alias not found'}), 404
+        _audit('admin_alias_removed', actor_user_id=request.current_user['id'],
+               target=str(alias_id))
         return jsonify({'success': True})
     except Exception as e:
         app.logger.exception('admin_delete_alias failed')
         return _internal_error(e)
 
 
-# Test endpoints for simulating track sessions
-@app.route('/api/test/simulate-session/<int:track_id>', methods=['POST'])
-@admin_required
-def simulate_track_session(track_id):
-    """Simulate an active session on a track for testing purposes"""
-    global multi_track_manager
+# Test endpoints for simulating track sessions.
+# Routes are only registered when ENABLE_TEST_ENDPOINTS=true; in production
+# (default) they don't exist at all and return 404.
+if ENABLE_TEST_ENDPOINTS:
+    @app.route('/api/test/simulate-session/<int:track_id>', methods=['POST'])
+    @admin_required
+    def simulate_track_session(track_id):
+        """Simulate an active session on a track for testing purposes"""
+        global multi_track_manager
 
-    if not multi_track_manager:
-        return jsonify({'error': 'Multi-track manager not initialized'}), 500
+        if not multi_track_manager:
+            return jsonify({'error': 'Multi-track manager not initialized'}), 500
 
-    # Check if track exists
-    if track_id not in multi_track_manager.parsers:
-        return jsonify({'error': f'Track {track_id} not found'}), 404
+        if track_id not in multi_track_manager.parsers:
+            return jsonify({'error': f'Track {track_id} not found'}), 404
 
-    parser = multi_track_manager.parsers[track_id]
+        parser = multi_track_manager.parsers[track_id]
 
-    # Simulate active session by updating last_data_time
-    from datetime import datetime
-    parser.last_data_time = datetime.now()
-    parser.session_active_status = True
+        from datetime import datetime
+        parser.last_data_time = datetime.now()
+        parser.session_active_status = True
 
-    # Broadcast session status update for this specific track
-    room = f'track_{track_id}'
-    socketio.emit('session_status', {
-        'track_id': track_id,
-        'track_name': parser.track_name,
-        'active': True,
-        'message': 'Simulated session active',
-        'timestamp': datetime.now().isoformat()
-    }, room=room)
+        room = f'track_{track_id}'
+        socketio.emit('session_status', {
+            'track_id': track_id,
+            'track_name': parser.track_name,
+            'active': True,
+            'message': 'Simulated session active',
+            'timestamp': datetime.now().isoformat()
+        }, room=room)
 
-    # Broadcast all tracks status update
-    multi_track_manager.broadcast_all_tracks_status()
+        multi_track_manager.broadcast_all_tracks_status()
 
-    return jsonify({
-        'success': True,
-        'message': f'Simulated active session for track {track_id} ({parser.track_name})',
-        'track_id': track_id,
-        'track_name': parser.track_name
-    })
+        return jsonify({
+            'success': True,
+            'message': f'Simulated active session for track {track_id} ({parser.track_name})',
+            'track_id': track_id,
+            'track_name': parser.track_name
+        })
 
-@app.route('/api/test/stop-session/<int:track_id>', methods=['POST'])
-@admin_required
-def stop_simulated_session(track_id):
-    """Stop simulated session on a track"""
-    global multi_track_manager
+    @app.route('/api/test/stop-session/<int:track_id>', methods=['POST'])
+    @admin_required
+    def stop_simulated_session(track_id):
+        """Stop simulated session on a track"""
+        global multi_track_manager
 
-    if not multi_track_manager:
-        return jsonify({'error': 'Multi-track manager not initialized'}), 500
+        if not multi_track_manager:
+            return jsonify({'error': 'Multi-track manager not initialized'}), 500
 
-    # Check if track exists
-    if track_id not in multi_track_manager.parsers:
-        return jsonify({'error': f'Track {track_id} not found'}), 404
+        if track_id not in multi_track_manager.parsers:
+            return jsonify({'error': f'Track {track_id} not found'}), 404
 
-    parser = multi_track_manager.parsers[track_id]
+        parser = multi_track_manager.parsers[track_id]
 
-    # Mark session as inactive
-    parser.last_data_time = None
-    parser.session_active_status = False
+        parser.last_data_time = None
+        parser.session_active_status = False
 
-    # Broadcast session status update for this specific track
-    from datetime import datetime
-    room = f'track_{track_id}'
-    socketio.emit('session_status', {
-        'track_id': track_id,
-        'track_name': parser.track_name,
-        'active': False,
-        'message': 'Simulated session stopped',
-        'timestamp': datetime.now().isoformat()
-    }, room=room)
+        from datetime import datetime
+        room = f'track_{track_id}'
+        socketio.emit('session_status', {
+            'track_id': track_id,
+            'track_name': parser.track_name,
+            'active': False,
+            'message': 'Simulated session stopped',
+            'timestamp': datetime.now().isoformat()
+        }, room=room)
 
-    # Broadcast all tracks status update
-    multi_track_manager.broadcast_all_tracks_status()
+        multi_track_manager.broadcast_all_tracks_status()
 
-    return jsonify({
-        'success': True,
-        'message': f'Stopped simulated session for track {track_id} ({parser.track_name})',
-        'track_id': track_id,
-        'track_name': parser.track_name
-    })
+        return jsonify({
+            'success': True,
+            'message': f'Stopped simulated session for track {track_id} ({parser.track_name})',
+            'track_id': track_id,
+            'track_name': parser.track_name
+        })
 
 # Keep original track routes for backwards compatibility
 @app.route('/api/tracks', methods=['POST'])
@@ -2480,6 +3347,7 @@ def reset_race_data():
 
 # Team data analysis API endpoints
 @app.route('/api/team-data/common-sessions', methods=['POST'])
+@login_required
 def get_common_sessions():
     """Get sessions where all specified teams participated"""
     try:
@@ -2544,6 +3412,7 @@ def get_common_sessions():
         return _internal_error(e)
 
 @app.route('/api/team-data/sessions', methods=['GET'])
+@login_required
 def get_all_sessions():
     """Get all sessions for a track"""
     try:
@@ -2584,6 +3453,7 @@ def get_all_sessions():
         return _internal_error(e)
 
 @app.route('/api/team-data/search', methods=['GET'])
+@login_required
 def search_teams():
     """Search for teams by name (case-insensitive, removes class prefix)"""
     try:
@@ -2653,6 +3523,7 @@ def search_teams():
 
 
 @app.route('/api/team-data/search-all', methods=['GET'])
+@login_required
 def search_teams_all_tracks():
     """Search driver/team names across EVERY track's database.
 
@@ -2766,6 +3637,7 @@ def search_teams_all_tracks():
 
 
 @app.route('/api/team-data/top-teams', methods=['GET'])
+@login_required
 def get_top_teams():
     """Get top N teams ranked by best lap time"""
     try:
@@ -2957,6 +3829,7 @@ def get_top_teams():
         return _internal_error(e)
 
 @app.route('/api/team-data/stats', methods=['GET'])
+@login_required
 def get_team_stats():
     """Get statistics for a specific team"""
     try:
@@ -3163,6 +4036,7 @@ def get_team_stats():
         return _internal_error(e)
 
 @app.route('/api/team-data/lap-details', methods=['POST'])
+@login_required
 def get_lap_details():
     """Get detailed lap-by-lap data for teams in a session"""
     try:
@@ -3303,6 +4177,7 @@ def get_lap_details():
         return _internal_error(e)
 
 @app.route('/api/team-data/compare', methods=['POST'])
+@login_required
 def compare_teams():
     """Compare statistics for multiple teams"""
     try:
@@ -3583,6 +4458,10 @@ def delete_best_lap():
                 if rows_updated == 0:
                     return jsonify({'error': 'No matching lap time found for this team'}), 404
 
+                _audit('admin_delete_best_lap',
+                       actor_user_id=request.current_user['id'],
+                       target=f'track_{track_id}/{team_name}',
+                       details={'best_lap_time': best_lap_time, 'rows_updated': rows_updated})
                 return jsonify({
                     'success': True,
                     'message': f'Deleted best lap time for {team_name}',
@@ -3699,6 +4578,12 @@ def mass_delete_laps():
                 conn.commit()
                 conn.close()
 
+                _audit('admin_mass_delete_laps',
+                       actor_user_id=request.current_user['id'],
+                       target=f'track_{track_id}',
+                       details={'delete_type': delete_type,
+                                'threshold_seconds': threshold_seconds,
+                                'rows_affected': rows_affected})
                 return jsonify({
                     'success': True,
                     'message': f'Mass deletion completed',
@@ -3732,6 +4617,7 @@ def mass_delete_laps():
         return _internal_error(e)
 
 @app.route('/api/team-data/all-laps', methods=['GET'])
+@login_required
 def get_all_laps():
     """
     Get all laps for a specific team on a track
@@ -3835,6 +4721,7 @@ def get_all_laps():
         return _internal_error(e)
 
 @app.route('/api/team-data/cross-track-sessions', methods=['GET'])
+@login_required
 def get_cross_track_sessions():
     """
     Get all sessions for a team across all tracks
@@ -3939,6 +4826,7 @@ def get_cross_track_sessions():
         return _internal_error(e)
 
 @app.route('/api/team-data/session-laps', methods=['GET'])
+@login_required
 def get_session_laps():
     """
     Get all lap details for a specific team in a specific session
@@ -3991,7 +4879,6 @@ def get_session_laps():
 
         cursor.execute(query, params)
         rows = cursor.fetchall()
-        conn.close()
 
         laps = []
         for row in rows:
@@ -4003,6 +4890,57 @@ def get_session_laps():
                 'pit_this_lap': bool(pit_this_lap),
                 'position_after_lap': position_after_lap
             })
+
+        # Fallback: many tracks only populate lap_times. Reconstruct per-lap
+        # rows from last_lap snapshots — dedupe consecutive duplicates (the
+        # parser writes on every socket tick, so the same last_lap appears
+        # many times), derive pit_this_lap from pit_stops deltas, and number
+        # chronologically.
+        if not laps:
+            lt_conditions = []
+            lt_params = [session_id]
+            for token in name_tokens:
+                lt_conditions.append("LOWER(team_name) LIKE ?")
+                lt_params.append(f'%{token}%')
+            lt_where = " AND ".join(lt_conditions) if lt_conditions else "1=1"
+            cursor.execute(
+                f"""
+                SELECT timestamp, last_lap, position, pit_stops
+                  FROM lap_times
+                 WHERE session_id = ?
+                   AND ({lt_where})
+                   AND last_lap IS NOT NULL AND last_lap != ''
+                 ORDER BY timestamp ASC
+                """,
+                lt_params,
+            )
+            prev_lap = None
+            prev_pit = None
+            idx = 0
+            for ts, last_lap, position, pit_stops in cursor.fetchall():
+                # Skip repeated ticks with the same last_lap value
+                if last_lap == prev_lap:
+                    continue
+                try:
+                    pit_val = int(pit_stops) if pit_stops is not None else None
+                except (TypeError, ValueError):
+                    pit_val = None
+                pit_this_lap = (
+                    prev_pit is not None and pit_val is not None and pit_val > prev_pit
+                )
+                idx += 1
+                laps.append({
+                    'lap_number': idx,
+                    'lap_time': last_lap,
+                    'timestamp': ts,
+                    'pit_this_lap': bool(pit_this_lap),
+                    'position_after_lap': position,
+                })
+                prev_lap = last_lap
+                if pit_val is not None:
+                    prev_pit = pit_val
+
+        conn.close()
 
         return jsonify({
             'laps': laps,
@@ -4560,6 +5498,198 @@ def get_driver_consistency():
         return _internal_error(e)
 
 
+# ---------------------------------------------------------------------------
+# Statistical helpers (no scipy available — pure-Python implementations)
+# ---------------------------------------------------------------------------
+
+def _normal_cdf(z):
+    """Standard-normal CDF Φ(z) via math.erf."""
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+
+def _gammainc_upper_reg(a, x):
+    """Regularised upper incomplete gamma Q(a, x) = Γ(a, x) / Γ(a).
+
+    Series below the crossover, Lentz's continued fraction above. Standard
+    Numerical Recipes technique; good to ~12 significant digits for the
+    regimes we use (a in {1, 1.5, 2, ...}, x >= 0).
+    """
+    if x < 0 or a <= 0:
+        return float('nan')
+    if x == 0:
+        return 1.0
+    log_pref = -x + a * math.log(x) - math.lgamma(a)
+    if x < a + 1.0:
+        term = 1.0 / a
+        total = term
+        for n in range(1, 500):
+            term *= x / (a + n)
+            total += term
+            if abs(term) < abs(total) * 1e-14:
+                break
+        p_lower = total * math.exp(log_pref)
+        return max(0.0, min(1.0, 1.0 - p_lower))
+    # Continued fraction for Q(a, x) when x >= a+1
+    b = x + 1.0 - a
+    c = 1e300
+    d = 1.0 / b
+    h = d
+    for i in range(1, 500):
+        an = -i * (i - a)
+        b += 2.0
+        d = an * d + b
+        if abs(d) < 1e-300:
+            d = 1e-300
+        c = b + an / c
+        if abs(c) < 1e-300:
+            c = 1e-300
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-14:
+            break
+    return max(0.0, min(1.0, h * math.exp(log_pref)))
+
+
+def _chi2_sf(chi2, df):
+    """P(X > chi2) for chi-squared with df degrees of freedom."""
+    if chi2 <= 0 or df <= 0:
+        return 1.0
+    return _gammainc_upper_reg(df / 2.0, chi2 / 2.0)
+
+
+def _quantile(sorted_values, q):
+    """Linear-interpolated quantile (type-7, same as numpy.quantile default).
+
+    `sorted_values` must already be sorted ascending; returns None for empty.
+    """
+    n = len(sorted_values)
+    if n == 0:
+        return None
+    if n == 1:
+        return sorted_values[0]
+    pos = (n - 1) * q
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+        return sorted_values[lo]
+    frac = pos - lo
+    return sorted_values[lo] * (1 - frac) + sorted_values[hi] * frac
+
+
+# ---------------------------------------------------------------------------
+# Layout + window filter helpers
+# ---------------------------------------------------------------------------
+
+# Sessions with this many session-best samples are surfaced as aggregates,
+# but a higher bar is required before we'll quote a randomness verdict —
+# a binomial test on 5 samples has almost no power against plausible
+# alternatives.
+MIN_SESSIONS_AGG = 5
+MIN_SESSIONS_VERDICT = 20
+
+
+def _window_cutoff(window_months):
+    """Return an ISO-8601 string cutoff, or None to disable filtering.
+
+    `window_months <= 0` (or None) disables; otherwise cutoff = now - N * 30d.
+    """
+    if not window_months or window_months <= 0:
+        return None
+    cutoff = datetime.now() - timedelta(days=int(window_months) * 30)
+    return cutoff.isoformat()
+
+
+def _load_track_layouts(track_id):
+    """Wrapper that returns [] on error — callers treat 'no layouts' as a
+    no-op rather than failing the whole query."""
+    try:
+        return track_db.get_layouts_for_track(track_id)
+    except Exception as e:
+        app.logger.warning(f"layout load failed for track {track_id}: {e}")
+        return []
+
+
+def _match_layout_for_field_best(field_best_seconds, layouts, default_layout):
+    """Pick the layout whose [min, max) band contains field_best. Falls back
+    to the default layout (if any), else None."""
+    for lay in layouts:
+        lo = lay.get('min_field_best')
+        hi = lay.get('max_field_best')
+        if lo is not None and field_best_seconds < lo:
+            continue
+        if hi is not None and field_best_seconds >= hi:
+            continue
+        return lay
+    return default_layout
+
+
+def _ensure_session_layouts(conn, track_id, session_field_best):
+    """Backfill layout_id for any session currently NULL, using the session's
+    field-best vs the track's configured layout bands.
+
+    `session_field_best` is a {session_id: field_best_seconds} dict that the
+    caller has already computed from lap_times (avoids a second scan).
+    Safe no-op if no layouts are configured for the track.
+    """
+    layouts = _load_track_layouts(track_id)
+    if not layouts:
+        return
+    default_layout = next((l for l in layouts if l.get('is_default')), None)
+    cur = conn.cursor()
+    cur.execute('SELECT session_id FROM race_sessions WHERE layout_id IS NULL')
+    null_sids = [r[0] for r in cur.fetchall()]
+    if not null_sids:
+        return
+    updates = []
+    for sid in null_sids:
+        fb = session_field_best.get(sid)
+        if fb is None:
+            continue
+        chosen = _match_layout_for_field_best(fb, layouts, default_layout)
+        if chosen:
+            updates.append((chosen['id'], sid))
+    if updates:
+        cur.executemany(
+            'UPDATE race_sessions SET layout_id = ? WHERE session_id = ?',
+            updates,
+        )
+        conn.commit()
+
+
+def _filter_sessions_by_layout_and_window(conn, layout_id, window_cutoff_iso):
+    """Return the set of session_ids that pass the layout + window filters
+    AND are not flagged is_excluded=1. Excluded sessions are always dropped
+    from analytics — admins use the exclusion flag exactly because they
+    shouldn't influence aggregates.
+
+    Returns a set (possibly empty) when any filter applies; returns None
+    only when no filters AND no exclusions exist, so callers can skip work.
+    """
+    cur = conn.cursor()
+    # Cheap probe for any excluded sessions; if there are none and no other
+    # filters, the caller can fast-path with `None` and skip the scan.
+    cur.execute("SELECT COUNT(*) FROM race_sessions WHERE is_excluded = 1")
+    has_exclusions = (cur.fetchone()[0] or 0) > 0
+
+    if layout_id is None and window_cutoff_iso is None and not has_exclusions:
+        return None
+
+    clauses = ['(is_excluded IS NULL OR is_excluded = 0)']
+    params: list = []
+    if layout_id is not None:
+        clauses.append('layout_id = ?')
+        params.append(layout_id)
+    if window_cutoff_iso is not None:
+        clauses.append('start_time >= ?')
+        params.append(window_cutoff_iso)
+    cur.execute(
+        f"SELECT session_id FROM race_sessions WHERE {' AND '.join(clauses)}",
+        params,
+    )
+    return {r[0] for r in cur.fetchall()}
+
+
 def _kart_bests_from_lap_history(cur, session_id):
     cur.execute(
         """
@@ -4648,6 +5778,14 @@ def _analyze_sprint_session(cur, session_id, session_date, history_names, times_
     Each sample = one (driver, kart_number) pair within the session. Uses
     lap_history for per-kart bests when available; falls back to lap_times
     best_lap snapshots otherwise.
+
+    The session median used as the kart-factor denominator is computed
+    leave-one-out — it excludes the karts the target driver sat in — so a
+    driver's own pace cannot move the baseline they're measured against. If
+    leaving the driver's karts out drops the remaining field below 3 karts
+    we fall back to the full-field median (the self-reference bias is small
+    at that point anyway because each driver accounts for only ~1/3 of the
+    field).
     """
     kart_best = _kart_bests_from_lap_history(cur, session_id)
     if len(kart_best) < 3:
@@ -4655,28 +5793,50 @@ def _analyze_sprint_session(cur, session_id, session_date, history_names, times_
     if len(kart_best) < 3:
         return []
 
-    sorted_best = sorted(kart_best.values())
-    median = sorted_best[len(sorted_best) // 2]
-    if median <= 0:
+    driver_karts = [k for k in _driver_karts_in_session(cur, session_id, history_names, times_names) if k in kart_best]
+    if not driver_karts:
         return []
 
-    driver_karts = [k for k in _driver_karts_in_session(cur, session_id, history_names, times_names) if k in kart_best]
+    driver_kart_set = set(driver_karts)
+    field_values = sorted(kart_best.values())
+    field_median = field_values[len(field_values) // 2]
+    if field_median <= 0:
+        return []
+
+    loo_values = sorted(v for k, v in kart_best.items() if k not in driver_kart_set)
+    if len(loo_values) >= 3:
+        loo_median = loo_values[len(loo_values) // 2]
+        median_source = 'leave_one_out'
+    else:
+        loo_median = field_median
+        median_source = 'full_field'
+    if loo_median <= 0:
+        return []
 
     ranked = sorted(kart_best.items(), key=lambda kv: kv[1])
     rank_of = {k: i + 1 for i, (k, _) in enumerate(ranked)}
+    n_karts = len(kart_best)
 
     samples = []
     for kart in driver_karts:
         kb = kart_best[kart]
+        rank = rank_of[kart]
+        # Continuous percentile rank in (0, 1). Under random kart assignment
+        # this is Uniform(0, 1) — the basis for the chi-sq + binomial tests
+        # in the caller. (rank - 0.5)/K avoids boundary effects from integer
+        # thresholds like floor(K/4).
+        percentile = (rank - 0.5) / n_karts
         samples.append({
             'session_id': session_id,
             'session_date': session_date,
             'kart_number': kart,
             'kart_best_seconds': round(kb, 3),
-            'session_median_seconds': round(median, 3),
-            'kart_factor': round(kb / median, 5),
-            'kart_rank': rank_of[kart],
-            'karts_in_session': len(kart_best),
+            'session_median_seconds': round(loo_median, 3),
+            'session_median_source': median_source,
+            'kart_factor': round(kb / loo_median, 5),
+            'kart_rank': rank,
+            'karts_in_session': n_karts,
+            'rank_percentile': round(percentile, 6),
         })
     return samples
 
@@ -4845,12 +6005,15 @@ def _analyze_endurance_session(cur, session_id, session_date, driver_names):
 def get_driver_fairness():
     """Per-track kart fairness analysis for a driver.
 
-    Returns sprint kart-factor samples and endurance stint-pace stability,
-    each with a minimum-sessions threshold before aggregate conclusions are shown.
+    Returns sprint kart-factor samples + a randomness test on kart assignment,
+    plus endurance stint-pace stability. Aggregate conclusions are gated by
+    MIN_SESSIONS_AGG; randomness verdicts require MIN_SESSIONS_VERDICT.
 
     Query params:
-      name (required) - driver/team name
-      track_id (required) - track to analyze
+      name (required)       - driver/team name
+      track_id (required)   - track to analyze
+      layout_id (optional)  - restrict to one physical layout
+      window_months         - rolling window in months (default 12; 0 = all)
     """
     try:
         raw_name = request.args.get('name', '').strip()
@@ -4868,8 +6031,56 @@ def get_driver_fairness():
         if not track_row:
             return jsonify({'error': f'Unknown track_id {track_id}'}), 404
 
+        layout_id = request.args.get('layout_id', type=int)
+        try:
+            window_months = int(request.args.get('window_months', 12))
+        except (TypeError, ValueError):
+            window_months = 12
+        window_cutoff = _window_cutoff(window_months)
+
+        # Legacy field-best band (same semantics as the track endpoint) — lets
+        # callers scope the randomness tests to a sub-band of a layout without
+        # having to define a new one.
+        def _opt_float(name):
+            v = request.args.get(name)
+            if v is None or v == '':
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+        min_field_best = _opt_float('min_field_best')
+        max_field_best = _opt_float('max_field_best')
+
         conn = get_track_db_connection(track_id)
         cur = conn.cursor()
+
+        # Compute field-best per session (used for backfill + band filter).
+        raw_field = {}
+        cur.execute('SELECT session_id, best_lap FROM lap_times WHERE best_lap IS NOT NULL AND best_lap != ""')
+        for sid, bl in cur.fetchall():
+            secs = _safe_parse_time(bl)
+            if secs == float('inf') or secs < LAP_MIN_SECONDS or secs > LAP_MAX_SECONDS:
+                continue
+            if sid not in raw_field or secs < raw_field[sid]:
+                raw_field[sid] = secs
+
+        if layout_id is not None:
+            _ensure_session_layouts(conn, track_id, raw_field)
+
+        allowed_sids = _filter_sessions_by_layout_and_window(conn, layout_id, window_cutoff)
+
+        # Apply the legacy field-best band on top of layout/window. Intersect
+        # with allowed_sids when both are active.
+        if min_field_best is not None or max_field_best is not None:
+            band_sids = set()
+            for sid, fb in raw_field.items():
+                if min_field_best is not None and fb < min_field_best:
+                    continue
+                if max_field_best is not None and fb > max_field_best:
+                    continue
+                band_sids.add(sid)
+            allowed_sids = band_sids if allowed_sids is None else (allowed_sids & band_sids)
 
         # Find all sessions where any alias appears — in EITHER lap_history or
         # lap_times, so we don't miss tracks where the parser only wrote to
@@ -4879,6 +6090,8 @@ def get_driver_fairness():
             (sid, start) for sid, _name, start in
             _fetch_driver_session_ids(cur, history_names, times_names)
         ]
+        if allowed_sids is not None:
+            session_rows = [(sid, s) for sid, s in session_rows if sid in allowed_sids]
 
         sprint_samples = []
         endurance_sessions = []
@@ -4897,10 +6110,9 @@ def get_driver_fairness():
         conn.close()
 
         # Sprint aggregate
-        MIN_SESSIONS = 5
         sprint_session_count = len({s['session_id'] for s in sprint_samples})
         sprint_block = {
-            'enabled': sprint_session_count >= MIN_SESSIONS,
+            'enabled': sprint_session_count >= MIN_SESSIONS_AGG,
             'session_count': sprint_session_count,
             'sample_count': len(sprint_samples),
             'samples': sprint_samples,
@@ -4910,18 +6122,87 @@ def get_driver_fairness():
             mean_factor = sum(factors) / len(factors)
             sprint_block['mean_factor'] = round(mean_factor, 5)
             sprint_block['stddev_factor'] = round(_stddev(factors), 5)
-            # Top-quartile karts in sessions where the driver appeared
-            top_q = [s for s in sprint_samples if s['kart_rank'] <= max(1, s['karts_in_session'] // 4)]
-            sprint_block['top_quartile_count'] = len(top_q)
-            sprint_block['top_quartile_expected'] = round(len(sprint_samples) * 0.25, 2)
+
+            # Top-quartile karts in sessions where the driver appeared.
+            # Threshold per session = max(1, K//4). Expected count under
+            # random assignment = sum of (threshold_i / K_i) across samples —
+            # NOT n*0.25, because the threshold rounds down and small
+            # sessions contribute less than 25% per sample.
+            top_q_obs = 0
+            expected_sum = 0.0
+            var_sum = 0.0  # sum of p_i*(1-p_i) for normal approximation
+            # Quartile bucket counts (0 = best 25% via rank_percentile)
+            quartile_counts = [0, 0, 0, 0]
+            for s in sprint_samples:
+                K = s['karts_in_session']
+                threshold = max(1, K // 4)
+                p_i = threshold / K
+                expected_sum += p_i
+                var_sum += p_i * (1.0 - p_i)
+                if s['kart_rank'] <= threshold:
+                    top_q_obs += 1
+                # Quartile via rank_percentile so buckets carry ~equal mass
+                # under Uniform(0,1) null
+                p = s.get('rank_percentile', (s['kart_rank'] - 0.5) / K)
+                q = min(3, int(p * 4))
+                quartile_counts[q] += 1
+
+            sprint_block['top_quartile_count'] = top_q_obs
+            sprint_block['top_quartile_expected'] = round(expected_sum, 3)
+            sprint_block['quartile_counts'] = quartile_counts
+
+            # One-sided p-value for "more top-quartile karts than random".
+            # Poisson-binomial via normal approximation with continuity
+            # correction; valid for the sample sizes we care about (n >= ~10).
+            n = len(sprint_samples)
+            if var_sum > 0:
+                z = (top_q_obs - 0.5 - expected_sum) / math.sqrt(var_sum)
+                sprint_block['top_quartile_p_value'] = round(1.0 - _normal_cdf(z), 5)
+            else:
+                sprint_block['top_quartile_p_value'] = None
+
+            # Chi-squared goodness-of-fit against Uniform(0,1) percentile
+            # under random assignment → 4 buckets with 25% mass each.
+            expected_per_bucket = n / 4.0
+            chi2 = 0.0
+            if expected_per_bucket > 0:
+                for obs in quartile_counts:
+                    chi2 += (obs - expected_per_bucket) ** 2 / expected_per_bucket
+            sprint_block['chi2_statistic'] = round(chi2, 4)
+            sprint_block['chi2_df'] = 3
+            sprint_block['chi2_p_value'] = round(_chi2_sf(chi2, 3), 5)
+
+            # Verdict is only meaningful with enough samples to power the
+            # test against realistic alternatives. Below the threshold we
+            # withhold the verdict entirely rather than mislead with a
+            # "looks random" result that just reflects low power.
+            if n >= MIN_SESSIONS_VERDICT:
+                p_chi = sprint_block['chi2_p_value']
+                p_top = sprint_block['top_quartile_p_value']
+                if p_chi is not None and p_chi < 0.05:
+                    sprint_block['randomness_verdict'] = 'non_random'
+                elif p_top is not None and p_top < 0.05:
+                    sprint_block['randomness_verdict'] = 'non_random_top_heavy'
+                else:
+                    sprint_block['randomness_verdict'] = 'consistent_with_random'
+            else:
+                sprint_block['randomness_verdict'] = 'insufficient_data'
         else:
             sprint_block['mean_factor'] = None
             sprint_block['stddev_factor'] = None
             sprint_block['top_quartile_count'] = 0
             sprint_block['top_quartile_expected'] = 0.0
+            sprint_block['quartile_counts'] = [0, 0, 0, 0]
+            sprint_block['top_quartile_p_value'] = None
+            sprint_block['chi2_statistic'] = None
+            sprint_block['chi2_df'] = 3
+            sprint_block['chi2_p_value'] = None
+            sprint_block['randomness_verdict'] = 'insufficient_data'
+
+        sprint_block['min_sessions_verdict'] = MIN_SESSIONS_VERDICT
 
         endurance_block = {
-            'enabled': len(endurance_sessions) >= MIN_SESSIONS,
+            'enabled': len(endurance_sessions) >= MIN_SESSIONS_AGG,
             'session_count': len(endurance_sessions),
             'sessions': endurance_sessions,
             'flagged_count': sum(1 for s in endurance_sessions if s.get('flagged')),
@@ -4931,7 +6212,10 @@ def get_driver_fairness():
             'driver_name': raw_name,
             'track_id': track_id,
             'track_name': track_row.get('track_name') if isinstance(track_row, dict) else track_row[1],
-            'min_sessions_threshold': MIN_SESSIONS,
+            'layout_id': layout_id,
+            'window_months': window_months,
+            'min_sessions_threshold': MIN_SESSIONS_AGG,
+            'min_sessions_verdict': MIN_SESSIONS_VERDICT,
             'sprint': sprint_block,
             'endurance': endurance_block,
         })
@@ -4946,23 +6230,26 @@ def get_track_kart_fairness(track_id):
     """Track-wide kart-fairness leaderboard, driver-normalized.
 
     Rather than comparing drivers' absolute pace (which mixes skill with kart
-    quality), this compares each driver to THEIR OWN personal best at the
-    track. The intuition: a fast driver will post a time close to their PB when
-    they draw a good kart and a much slower time with a bad one; low variance
-    in their session-best times + consistently hitting near PB = consistently
-    getting good-enough karts. Skill cancels because each driver's reference is
-    their own PB.
+    quality), this compares each driver to a STABLE personal reference — the
+    10th-percentile of their session bests (PB-min has extreme-value bias that
+    worsens the more sessions a driver has).
 
     Per-driver metrics:
-      pb_seconds              - driver's personal best at this track
-      mean_session_best       - avg of each session's best lap
-      stddev_session_best     - σ of the session bests (KEY: low = consistent karts)
-      mean_gap_to_pb_pct      - avg (session_best - pb) / pb, in percent
-      pct_within_1pct_pb      - fraction of sessions within 1% of PB
-      pct_within_0_5pct_pb    - fraction within 0.5% of PB
+      pb_seconds                  - min session-best (legacy "best ever")
+      reference_p10_seconds       - 10th-percentile session-best (stable ref)
+      mean_session_best_seconds   - avg of each session's best lap
+      stddev_session_best_seconds - σ of session bests (dispersion)
+      iqr_session_best_seconds    - IQR of session bests (robust dispersion)
+      mean_gap_to_reference_pct   - avg (session_best - ref) / ref, in percent
+      mean_relative_pace          - mean (session_best / session_median_best)
+      stddev_relative_pace        - σ of that ratio (HEADLINE metric — low =
+                                    consistent relative pace = lucky karts)
 
     Query params:
-      min_sessions (optional, default 3) - minimum sessions to include a driver.
+      min_sessions (default 3)  - minimum sessions to include a driver
+      layout_id                 - restrict to a single physical layout
+      window_months (default 12)- rolling window; 0 = no window
+      min_field_best / max_field_best - legacy band filter (still supported)
     """
     try:
         try:
@@ -4971,9 +6258,15 @@ def get_track_kart_fairness(track_id):
             min_sessions = 3
         min_sessions = max(2, min(50, min_sessions))
 
-        # Optional field-best filters to restrict analysis to a specific track
-        # configuration (many karting tracks run multiple layouts — lap times
-        # differ 10%+ between short/long configs, distorting per-driver PBs).
+        layout_id = request.args.get('layout_id', type=int)
+        try:
+            window_months = int(request.args.get('window_months', 12))
+        except (TypeError, ValueError):
+            window_months = 12
+        window_cutoff = _window_cutoff(window_months)
+
+        # Legacy field-best filter: still honoured when layout_id is not
+        # provided. Layout id supersedes these when present.
         def _opt_float(name):
             v = request.args.get(name)
             if v is None or v == '':
@@ -5004,7 +6297,6 @@ def get_track_kart_fairness(track_id):
             """
         )
         raw_rows = cur.fetchall()
-        conn.close()
 
         # (session, team) -> best seconds (keep the min across snapshots).
         # Test/staff placeholders are dropped here so they don't inflate session
@@ -5026,11 +6318,21 @@ def get_track_kart_fairness(track_id):
             per_session_bests.setdefault(sid, []).append(secs)
         session_field_best = {sid: min(v) for sid, v in per_session_bests.items() if v}
 
-        # Apply config filter: drop sessions whose field-best falls outside the
-        # requested layout band. If no filter, keep everything.
+        # Backfill layout_id on any NULL sessions using the field-best we
+        # just computed; then apply the layout + window filter.
+        _ensure_session_layouts(conn, track_id, session_field_best)
+        allowed_sids = _filter_sessions_by_layout_and_window(conn, layout_id, window_cutoff)
+        conn.close()
+        if allowed_sids is not None:
+            session_team_best = {k: v for k, v in session_team_best.items() if k[0] in allowed_sids}
+            per_session_bests = {k: v for k, v in per_session_bests.items() if k in allowed_sids}
+
+        # Legacy field-best band filter (for UI that hasn't migrated to layout_id yet)
         if min_field_best is not None or max_field_best is not None:
             allowed = set()
             for sid, fb in session_field_best.items():
+                if allowed_sids is not None and sid not in allowed_sids:
+                    continue
                 if min_field_best is not None and fb < min_field_best:
                     continue
                 if max_field_best is not None and fb > max_field_best:
@@ -5103,16 +6405,36 @@ def get_track_kart_fairness(track_id):
             if len(rows) < min_sessions:
                 continue
             session_bests = [s for _, s in rows]
-            pb = min(session_bests)
+            sorted_sb = sorted(session_bests)
+            pb = sorted_sb[0]
             if pb <= 0:
                 continue
+
+            # Stable reference: 10th-percentile. Bounded below by pb, above by
+            # the median — immune to extreme-value bias in a way that min()
+            # (classic "PB") is not. At ≥10 sessions P10 is a true order stat;
+            # at <10 the linear-interpolated quantile gracefully degrades
+            # toward min without collapsing onto it.
+            ref_p10 = _quantile(sorted_sb, 0.10)
+            q1 = _quantile(sorted_sb, 0.25)
+            q3 = _quantile(sorted_sb, 0.75)
+            iqr = (q3 - q1) if (q1 is not None and q3 is not None) else 0.0
+
             mean_sb = sum(session_bests) / len(session_bests)
             sd_sb = _stddev(session_bests)
-            gaps_pct = [(s - pb) / pb * 100.0 for s in session_bests]
-            mean_gap_pct = sum(gaps_pct) / len(gaps_pct)
-            max_gap_pct = max(gaps_pct)
-            within_1 = sum(1 for s in session_bests if s <= pb * 1.01) / len(session_bests)
-            within_0_5 = sum(1 for s in session_bests if s <= pb * 1.005) / len(session_bests)
+
+            gaps_ref_pct = [(s - ref_p10) / ref_p10 * 100.0 for s in session_bests]
+            mean_gap_ref_pct = sum(gaps_ref_pct) / len(gaps_ref_pct)
+            max_gap_ref_pct = max(gaps_ref_pct)
+            within_1_ref = sum(1 for s in session_bests if s <= ref_p10 * 1.01) / len(session_bests)
+            within_0_5_ref = sum(1 for s in session_bests if s <= ref_p10 * 1.005) / len(session_bests)
+
+            # Legacy PB-based gap (kept for backward compat with old UI)
+            gaps_pb_pct = [(s - pb) / pb * 100.0 for s in session_bests]
+            mean_gap_pb_pct = sum(gaps_pb_pct) / len(gaps_pb_pct)
+            max_gap_pb_pct = max(gaps_pb_pct)
+            within_1_pb = sum(1 for s in session_bests if s <= pb * 1.01) / len(session_bests)
+            within_0_5_pb = sum(1 for s in session_bests if s <= pb * 1.005) / len(session_bests)
 
             # Conditions-normalised metric: driver's session best / session's
             # field median. Cancels weather / track temp / wind because they
@@ -5135,12 +6457,22 @@ def get_track_kart_fairness(track_id):
                 'sessions': len(session_bests),
                 'pb': _format_seconds(pb),
                 'pb_seconds': round(pb, 3),
+                'reference_p10_seconds': round(ref_p10, 3),
+                'reference_p10': _format_seconds(ref_p10),
                 'mean_session_best_seconds': round(mean_sb, 3),
                 'stddev_session_best_seconds': round(sd_sb, 3),
-                'mean_gap_to_pb_pct': round(mean_gap_pct, 3),
-                'max_gap_to_pb_pct': round(max_gap_pct, 3),
-                'pct_within_1pct_pb': round(within_1, 4),
-                'pct_within_0_5pct_pb': round(within_0_5, 4),
+                'iqr_session_best_seconds': round(iqr, 3),
+                # NEW: P10-referenced gap metrics (preferred — no extreme-value bias)
+                'mean_gap_to_reference_pct': round(mean_gap_ref_pct, 3),
+                'max_gap_to_reference_pct': round(max_gap_ref_pct, 3),
+                'pct_within_1pct_reference': round(within_1_ref, 4),
+                'pct_within_0_5pct_reference': round(within_0_5_ref, 4),
+                # Legacy PB-referenced gap metrics (backward compat; biased for
+                # frequent racers — use the reference_p10 versions above)
+                'mean_gap_to_pb_pct': round(mean_gap_pb_pct, 3),
+                'max_gap_to_pb_pct': round(max_gap_pb_pct, 3),
+                'pct_within_1pct_pb': round(within_1_pb, 4),
+                'pct_within_0_5pct_pb': round(within_0_5_pb, 4),
                 # Conditions-normalised pace (session best / field median)
                 'mean_relative_pace': round(mean_rel, 5) if mean_rel is not None else None,
                 'stddev_relative_pace': round(sd_rel, 5) if sd_rel is not None else None,
@@ -5148,14 +6480,114 @@ def get_track_kart_fairness(track_id):
                 'worst_relative_pace': round(worst_rel, 5) if worst_rel is not None else None,
             })
 
-        # Default sort: lowest mean_gap_to_pb (consistently nearest own PB), then
-        # by σ ascending (low variance) as a tiebreaker.
-        drivers.sort(key=lambda d: (d['mean_gap_to_pb_pct'], d['stddev_session_best_seconds']))
+        # ------------------------------------------------------------------
+        # Variance-deficit test (conditions-residualized): does the driver's
+        # session-best, AFTER subtracting each session's field-median, cluster
+        # tighter than what the fleet's inherent kart variation should allow?
+        # ------------------------------------------------------------------
+        # Rental-kart fleets have real kart-to-kart variation (≈1–2 s at most
+        # venues). Under random kart assignment this variation has to show up
+        # in every driver's lap-time series. A driver whose outcomes don't
+        # swing as much as the fleet typically does is a candidate for
+        # systematically favourable draws.
+        #
+        # Why residuals, not raw session-bests: track conditions (grip,
+        # weather, tyre wear) move the WHOLE field together by seconds. A
+        # driver who races in a wider range of conditions would get a larger
+        # raw σ even under perfectly random draws — the test would be biased
+        # against frequent racers. Subtracting the session median cancels the
+        # common-mode shift, leaving only the driver-specific component
+        # (kart effect + execution noise). Under H0 that residual variance
+        # ≈ σ²_kart + σ²_noise and should be similar for every driver.
+        #
+        # Null estimator: the MEDIAN across every qualifying driver of their
+        # own sample variance of residuals. Robust to a few very consistent
+        # or very erratic drivers.
+        #
+        # Test: (n-1)·s²_obs / σ²_expected ~ χ²(n-1) under H0. One-sided lower
+        # tail p. Flag only when ratio < 0.8 AND p < 0.05 AND n ≥ 15.
+        MIN_N_VARDEF = 15
+
+        def _residuals(canon):
+            res = []
+            for sid, sec in per_driver[canon]:
+                med = session_median_best.get(sid)
+                if med is not None and med > 0:
+                    res.append(sec - med)
+            return res
+
+        driver_variances = []
+        for canon, rows_ in per_driver.items():
+            residuals = _residuals(canon)
+            if len(residuals) < 3:
+                continue
+            mean_r = sum(residuals) / len(residuals)
+            var_r = sum((r - mean_r) ** 2 for r in residuals) / (len(residuals) - 1)
+            if var_r > 0:
+                driver_variances.append(var_r)
+
+        if driver_variances:
+            sv = sorted(driver_variances)
+            expected_variance = sv[len(sv) // 2]  # median
+            expected_sd = math.sqrt(expected_variance)
+        else:
+            expected_variance = None
+            expected_sd = None
+
+        for driver_dict in drivers:
+            canon = driver_dict['name']
+            residuals = _residuals(canon)
+            n = len(residuals)
+            observed_sd = None
+            ratio = None
+            p_low = None
+            verdict = 'insufficient_data'
+
+            if n >= 3 and expected_variance and expected_variance > 0:
+                mean_r = sum(residuals) / n
+                observed_var = sum((r - mean_r) ** 2 for r in residuals) / (n - 1)
+                observed_sd = math.sqrt(observed_var)
+                ratio = observed_sd / expected_sd if expected_sd > 0 else None
+                chi_stat = (n - 1) * observed_var / expected_variance
+                # One-sided lower-tail p-value: P(X < chi_stat | X ~ χ²(n-1)).
+                if chi_stat > 0:
+                    upper = _gammainc_upper_reg((n - 1) / 2.0, chi_stat / 2.0)
+                    p_low = max(0.0, min(1.0, 1.0 - upper))
+                else:
+                    p_low = 0.0
+
+                if n >= MIN_N_VARDEF:
+                    if ratio is not None and ratio < 0.8 and p_low < 0.05:
+                        verdict = 'deficit_flagged'
+                    else:
+                        verdict = 'consistent'
+                else:
+                    verdict = 'insufficient_data'
+
+            driver_dict.update({
+                'vardef_n_sessions': n,
+                'vardef_observed_sd_seconds': round(observed_sd, 3) if observed_sd is not None else None,
+                'vardef_expected_sd_seconds': round(expected_sd, 3) if expected_sd is not None else None,
+                'vardef_ratio': round(ratio, 3) if ratio is not None else None,
+                'vardef_p_value': round(p_low, 5) if p_low is not None else None,
+                'vardef_verdict': verdict,
+            })
+
+        # Default sort: σRel asc (dispersion of relative pace — the
+        # headline metric, immune to both PB-bias and condition drift).
+        # Drivers with no σRel (singleton sessions) sink to the bottom.
+        drivers.sort(key=lambda d: (
+            d['stddev_relative_pace'] if d['stddev_relative_pace'] is not None else float('inf'),
+            d['mean_gap_to_reference_pct'],
+        ))
 
         return jsonify({
             'track_id': track_id,
             'track_name': track_row['track_name'],
             'min_sessions_threshold': min_sessions,
+            'min_sessions_verdict': MIN_SESSIONS_VERDICT,
+            'layout_id': layout_id,
+            'window_months': window_months,
             'filter_min_field_best': min_field_best,
             'filter_max_field_best': max_field_best,
             'sessions_included': len(per_session_bests),

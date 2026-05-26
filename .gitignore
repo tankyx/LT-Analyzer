@@ -15,6 +15,15 @@ racing-venv/
 *_original.py
 *_original.ts
 *_original.tsx
+*.db.bak-*
+*.bak
+
+# Local archives / tarballs
+*.tar.gz
+*.tar.bz2
+
+# Claude Code's local-only state
+.claude/scheduled_tasks.lock
 
 # Test coverage
 .coverage

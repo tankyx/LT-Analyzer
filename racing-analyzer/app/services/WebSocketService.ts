@@ -177,6 +177,9 @@ class WebSocketService {
   private maxReconnectDelay = 30000; // Max 30 seconds
   private connectionStatus: ConnectionStatus = 'disconnected';
   private currentTrackId: number | null = null;
+  // Cache the last race_data_update so a late-mounting consumer (refresh race)
+  // gets the snapshot it missed.
+  private lastRaceDataUpdate: RaceDataUpdate | null = null;
 
   constructor() {
     // Only connect on client side
@@ -242,8 +245,10 @@ class WebSocketService {
       this.updateConnectionStatus('error');
     });
 
-    // Race data events
+    // Race data events — cache the most recent snapshot so late-mounting
+    // consumers (page refresh, slow render) can replay it via setCallbacks.
     this.socket.on('race_data_update', (data: RaceDataUpdate) => {
+      this.lastRaceDataUpdate = data;
       this.callbacks.onRaceDataUpdate?.(data);
     });
 
@@ -317,6 +322,13 @@ class WebSocketService {
 
   setCallbacks(callbacks: WebSocketCallbacks): void {
     this.callbacks = { ...this.callbacks, ...callbacks };
+    // Replay the cached connection status + race-data snapshot so a consumer
+    // that mounts after the socket already connected isn't stuck on the
+    // initial state.
+    callbacks.onConnectionStatusChange?.(this.connectionStatus);
+    if (this.lastRaceDataUpdate) {
+      callbacks.onRaceDataUpdate?.(this.lastRaceDataUpdate);
+    }
   }
 
   removeCallbacks(): void {

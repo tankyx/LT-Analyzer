@@ -29,23 +29,50 @@ class TrackDatabase:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-                
+
                 # Add column_mappings column if it doesn't exist (for existing databases)
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA table_info(tracks)")
                 columns = [col[1] for col in cursor.fetchall()]
                 if 'column_mappings' not in columns:
                     conn.execute("ALTER TABLE tracks ADD COLUMN column_mappings TEXT DEFAULT '{}'")
-                
+
+                # Physical-layout definitions per track. A single karting venue
+                # often runs multiple configs whose lap times differ 10%+; the
+                # fairness analytics bucket sessions into layouts to avoid
+                # mixing them. Bands are inclusive-of-min, exclusive-of-max.
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS track_layouts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        track_id INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        min_field_best REAL,
+                        max_field_best REAL,
+                        is_default INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE,
+                        UNIQUE(track_id, name)
+                    )
+                ''')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_track_layouts_track ON track_layouts(track_id)')
+
                 # Create trigger to update updated_at timestamp
                 conn.execute('''
-                    CREATE TRIGGER IF NOT EXISTS update_tracks_timestamp 
+                    CREATE TRIGGER IF NOT EXISTS update_tracks_timestamp
                     AFTER UPDATE ON tracks
                     BEGIN
                         UPDATE tracks SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
                     END
                 ''')
-                
+                conn.execute('''
+                    CREATE TRIGGER IF NOT EXISTS update_track_layouts_timestamp
+                    AFTER UPDATE ON track_layouts
+                    BEGIN
+                        UPDATE track_layouts SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+                    END
+                ''')
+
                 conn.commit()
                 self.logger.info(f"Database initialized with tracks table in {self.db_path}")
                 
@@ -282,15 +309,157 @@ class TrackDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('DELETE FROM tracks WHERE id = ?', (track_id,))
-                
+
                 if cursor.rowcount == 0:
                     return {'error': 'Track not found'}
-                
+
                 conn.commit()
                 return {'message': 'Track deleted successfully'}
-                
+
         except Exception as e:
             self.logger.error(f"Error deleting track: {e}")
+            return {'error': str(e)}
+
+    # ------------------------------------------------------------------
+    # Layouts
+    # ------------------------------------------------------------------
+    def _layout_row_to_dict(self, row) -> Dict:
+        return {
+            'id': row['id'],
+            'track_id': row['track_id'],
+            'name': row['name'],
+            'min_field_best': row['min_field_best'],
+            'max_field_best': row['max_field_best'],
+            'is_default': bool(row['is_default']),
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at'],
+        }
+
+    def get_layouts_for_track(self, track_id: int) -> List[Dict]:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, track_id, name, min_field_best, max_field_best,
+                           is_default, created_at, updated_at
+                      FROM track_layouts
+                     WHERE track_id = ?
+                     ORDER BY is_default DESC, min_field_best ASC, name ASC
+                ''', (track_id,))
+                return [self._layout_row_to_dict(r) for r in cursor.fetchall()]
+        except Exception as e:
+            self.logger.error(f"Error listing layouts for track {track_id}: {e}")
+            return []
+
+    def get_layout_by_id(self, layout_id: int) -> Optional[Dict]:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT id, track_id, name, min_field_best, max_field_best,
+                           is_default, created_at, updated_at
+                      FROM track_layouts WHERE id = ?
+                ''', (layout_id,))
+                row = cursor.fetchone()
+                return self._layout_row_to_dict(row) if row else None
+        except Exception as e:
+            self.logger.error(f"Error getting layout {layout_id}: {e}")
+            return None
+
+    def add_layout(self, track_id: int, name: str,
+                   min_field_best: Optional[float] = None,
+                   max_field_best: Optional[float] = None,
+                   is_default: bool = False) -> Dict:
+        if not name or not name.strip():
+            return {'error': 'Layout name is required'}
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                if is_default:
+                    cursor.execute(
+                        'UPDATE track_layouts SET is_default = 0 WHERE track_id = ?',
+                        (track_id,)
+                    )
+                cursor.execute('''
+                    INSERT INTO track_layouts (track_id, name, min_field_best,
+                                               max_field_best, is_default)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (track_id, name.strip(), min_field_best, max_field_best,
+                      1 if is_default else 0))
+                layout_id = cursor.lastrowid
+                conn.commit()
+                return self.get_layout_by_id(layout_id) or {'error': 'insert failed'}
+        except sqlite3.IntegrityError as e:
+            return {'error': f'Layout name already exists for this track: {e}'}
+        except Exception as e:
+            self.logger.error(f"Error adding layout: {e}")
+            return {'error': str(e)}
+
+    def update_layout(self, layout_id: int,
+                      name: Optional[str] = None,
+                      min_field_best: Optional[float] = None,
+                      max_field_best: Optional[float] = None,
+                      is_default: Optional[bool] = None,
+                      clear_min: bool = False,
+                      clear_max: bool = False) -> Dict:
+        try:
+            existing = self.get_layout_by_id(layout_id)
+            if not existing:
+                return {'error': 'Layout not found'}
+            fields = []
+            params: list = []
+            if name is not None:
+                if not name.strip():
+                    return {'error': 'Layout name cannot be empty'}
+                fields.append('name = ?')
+                params.append(name.strip())
+            if clear_min:
+                fields.append('min_field_best = NULL')
+            elif min_field_best is not None:
+                fields.append('min_field_best = ?')
+                params.append(min_field_best)
+            if clear_max:
+                fields.append('max_field_best = NULL')
+            elif max_field_best is not None:
+                fields.append('max_field_best = ?')
+                params.append(max_field_best)
+            if is_default is not None:
+                fields.append('is_default = ?')
+                params.append(1 if is_default else 0)
+            if not fields:
+                return {'error': 'No fields to update'}
+            params.append(layout_id)
+            with sqlite3.connect(self.db_path) as conn:
+                if is_default:
+                    conn.execute(
+                        'UPDATE track_layouts SET is_default = 0 WHERE track_id = ? AND id != ?',
+                        (existing['track_id'], layout_id)
+                    )
+                conn.execute(
+                    f"UPDATE track_layouts SET {', '.join(fields)} WHERE id = ?",
+                    params
+                )
+                conn.commit()
+            return self.get_layout_by_id(layout_id) or {'error': 'update failed'}
+        except sqlite3.IntegrityError as e:
+            return {'error': f'Layout name already exists for this track: {e}'}
+        except Exception as e:
+            self.logger.error(f"Error updating layout {layout_id}: {e}")
+            return {'error': str(e)}
+
+    def delete_layout(self, layout_id: int) -> Dict:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM track_layouts WHERE id = ?', (layout_id,))
+                if cursor.rowcount == 0:
+                    return {'error': 'Layout not found'}
+                conn.commit()
+                return {'message': 'Layout deleted successfully'}
+        except Exception as e:
+            self.logger.error(f"Error deleting layout {layout_id}: {e}")
             return {'error': str(e)}
 
 

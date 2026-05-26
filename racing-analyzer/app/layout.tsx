@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import Script from "next/script";
 import "./globals.css";
 import { AuthProvider } from "./contexts/AuthContext";
 
@@ -32,6 +33,10 @@ export default function RootLayout({
         <AuthProvider>
           {children}
         </AuthProvider>
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );

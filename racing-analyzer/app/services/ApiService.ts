@@ -582,6 +582,8 @@ export const ApiService = {
     minSessions: number = 3,
     minFieldBest?: number,
     maxFieldBest?: number,
+    layoutId?: number | null,
+    windowMonths?: number,
   ) => {
     try {
       const params = new URLSearchParams({ min_sessions: String(minSessions) });
@@ -590,6 +592,12 @@ export const ApiService = {
       }
       if (maxFieldBest !== undefined && maxFieldBest !== null && !isNaN(maxFieldBest)) {
         params.set('max_field_best', String(maxFieldBest));
+      }
+      if (layoutId !== undefined && layoutId !== null) {
+        params.set('layout_id', String(layoutId));
+      }
+      if (windowMonths !== undefined && windowMonths !== null && !isNaN(windowMonths)) {
+        params.set('window_months', String(windowMonths));
       }
       const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/kart-fairness?${params.toString()}`, {
         method: 'GET',
@@ -605,6 +613,66 @@ export const ApiService = {
       console.error('Error fetching track kart fairness:', error);
       throw error;
     }
+  },
+
+  getTrackLayouts: async (trackId: number) => {
+    const response = await fetch(`${API_BASE_URL}/api/tracks/${trackId}/layouts`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to fetch layouts');
+    }
+    return await response.json();
+  },
+
+  createTrackLayout: async (
+    trackId: number,
+    payload: { name: string; min_field_best?: number | null; max_field_best?: number | null; is_default?: boolean },
+  ) => {
+    const response = await fetch(`${API_BASE_URL}/api/admin/tracks/${trackId}/layouts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to create layout');
+    }
+    return await response.json();
+  },
+
+  updateTrackLayout: async (
+    layoutId: number,
+    payload: { name?: string; min_field_best?: number | null; max_field_best?: number | null; is_default?: boolean },
+  ) => {
+    const response = await fetch(`${API_BASE_URL}/api/admin/layouts/${layoutId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to update layout');
+    }
+    return await response.json();
+  },
+
+  deleteTrackLayout: async (layoutId: number) => {
+    const response = await fetch(`${API_BASE_URL}/api/admin/layouts/${layoutId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to delete layout');
+    }
+    return await response.json();
   },
 
   getDriverAliases: async (name: string) => {
@@ -663,12 +731,23 @@ export const ApiService = {
     }
   },
 
-  getDriverFairness: async (name: string, trackId: number) => {
+  getDriverFairness: async (
+    name: string,
+    trackId: number,
+    layoutId?: number | null,
+    windowMonths?: number,
+  ) => {
     try {
       const params = new URLSearchParams({
         name,
         track_id: trackId.toString(),
       });
+      if (layoutId !== undefined && layoutId !== null) {
+        params.set('layout_id', String(layoutId));
+      }
+      if (windowMonths !== undefined && windowMonths !== null && !isNaN(windowMonths)) {
+        params.set('window_months', String(windowMonths));
+      }
       const response = await fetch(`${API_BASE_URL}/api/driver/fairness?${params.toString()}`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },

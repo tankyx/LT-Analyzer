@@ -94,9 +94,11 @@ interface SprintSample {
   kart_number: number;
   kart_best_seconds: number;
   session_median_seconds: number;
+  session_median_source?: 'leave_one_out' | 'full_field';
   kart_factor: number;
   kart_rank: number;
   karts_in_session: number;
+  rank_percentile?: number;
 }
 
 interface EnduranceSessionRow {
@@ -113,11 +115,20 @@ interface EnduranceSessionRow {
   flagged: boolean;
 }
 
+type RandomnessVerdict =
+  | 'consistent_with_random'
+  | 'non_random'
+  | 'non_random_top_heavy'
+  | 'insufficient_data';
+
 interface FairnessResponse {
   driver_name: string;
   track_id: number;
   track_name: string;
+  layout_id: number | null;
+  window_months: number;
   min_sessions_threshold: number;
+  min_sessions_verdict: number;
   sprint: {
     enabled: boolean;
     session_count: number;
@@ -127,6 +138,13 @@ interface FairnessResponse {
     stddev_factor: number | null;
     top_quartile_count: number;
     top_quartile_expected: number;
+    top_quartile_p_value: number | null;
+    quartile_counts: [number, number, number, number];
+    chi2_statistic: number | null;
+    chi2_df: number;
+    chi2_p_value: number | null;
+    randomness_verdict: RandomnessVerdict;
+    min_sessions_verdict: number;
   };
   endurance: {
     enabled: boolean;
@@ -139,6 +157,14 @@ interface FairnessResponse {
 interface Track {
   id: number;
   track_name: string;
+}
+
+interface LayoutEntry {
+  id: number;
+  name: string;
+  min_field_best: number | null;
+  max_field_best: number | null;
+  is_default: boolean;
 }
 
 interface AliasRow {
@@ -194,6 +220,9 @@ export default function TeamProfilePage() {
   // Fairness tab state
   const [tracks, setTracks] = useState<Track[]>([]);
   const [fairnessTrackId, setFairnessTrackId] = useState<number | null>(null);
+  const [fairnessLayoutId, setFairnessLayoutId] = useState<number | null>(null);
+  const [fairnessLayouts, setFairnessLayouts] = useState<LayoutEntry[]>([]);
+  const [fairnessWindowMonths, setFairnessWindowMonths] = useState<number>(12);
   const [fairness, setFairness] = useState<FairnessResponse | null>(null);
   const [loadingFairness, setLoadingFairness] = useState(false);
   const [fairnessError, setFairnessError] = useState<string | null>(null);
@@ -309,25 +338,36 @@ export default function TeamProfilePage() {
     };
   }, [activeTab, teamName]);
 
-  // Lazy-load fairness when tab opened or track changes. Keyed by (team, track).
-  const fairnessLoadedFor = useRef<string | null>(null);
+  // Load layouts whenever the fairness track changes.
+  useEffect(() => {
+    if (!fairnessTrackId) { setFairnessLayouts([]); setFairnessLayoutId(null); return; }
+    let cancelled = false;
+    ApiService.getTrackLayouts(fairnessTrackId)
+      .then(res => {
+        if (cancelled) return;
+        setFairnessLayouts(res?.layouts || []);
+        setFairnessLayoutId(null);
+      })
+      .catch(() => {
+        if (!cancelled) { setFairnessLayouts([]); setFairnessLayoutId(null); }
+      });
+    return () => { cancelled = true; };
+  }, [fairnessTrackId]);
+
+  // Lazy-load fairness when tab opens or any filter changes.
   useEffect(() => {
     if (activeTab !== 'fairness' || !fairnessTrackId) return;
-    const key = `${teamName}__${fairnessTrackId}`;
-    if (fairnessLoadedFor.current === key) return;
-    fairnessLoadedFor.current = key;
     let cancelled = false;
     setLoadingFairness(true);
     setFairnessError(null);
     setFairness(null);
-    ApiService.getDriverFairness(teamName, fairnessTrackId)
+    ApiService.getDriverFairness(teamName, fairnessTrackId, fairnessLayoutId, fairnessWindowMonths)
       .then(res => {
         if (cancelled) return;
         setFairness(res);
       })
       .catch(err => {
         if (cancelled) return;
-        fairnessLoadedFor.current = null;
         setFairnessError(err instanceof Error ? err.message : 'Failed to load fairness');
       })
       .finally(() => {
@@ -336,7 +376,7 @@ export default function TeamProfilePage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, teamName, fairnessTrackId]);
+  }, [activeTab, teamName, fairnessTrackId, fairnessLayoutId, fairnessWindowMonths]);
 
   // Sessions tab helpers
   const filteredAndSortedSessions = sessions
@@ -552,6 +592,11 @@ export default function TeamProfilePage() {
             tracks={tracks}
             trackId={fairnessTrackId}
             setTrackId={setFairnessTrackId}
+            layouts={fairnessLayouts}
+            layoutId={fairnessLayoutId}
+            setLayoutId={setFairnessLayoutId}
+            windowMonths={fairnessWindowMonths}
+            setWindowMonths={setFairnessWindowMonths}
           />
         )}
       </div>
@@ -1057,6 +1102,11 @@ function FairnessTab({
   tracks,
   trackId,
   setTrackId,
+  layouts,
+  layoutId,
+  setLayoutId,
+  windowMonths,
+  setWindowMonths,
 }: {
   loading: boolean;
   error: string | null;
@@ -1064,10 +1114,15 @@ function FairnessTab({
   tracks: Track[];
   trackId: number | null;
   setTrackId: (id: number) => void;
+  layouts: LayoutEntry[];
+  layoutId: number | null;
+  setLayoutId: (id: number | null) => void;
+  windowMonths: number;
+  setWindowMonths: (m: number) => void;
 }) {
   return (
     <div className="space-y-6">
-      <div className="bg-gray-800 rounded-lg p-4 flex items-center gap-3">
+      <div className="bg-gray-800 rounded-lg p-4 flex items-center gap-3 flex-wrap">
         <label className="text-gray-300 text-sm">Track:</label>
         <select
           value={trackId || ''}
@@ -1078,8 +1133,32 @@ function FairnessTab({
             <option key={t.id} value={t.id}>{t.track_name}</option>
           ))}
         </select>
+        <label className="text-gray-300 text-sm ml-2">Layout:</label>
+        <select
+          value={layoutId ?? ''}
+          onChange={e => setLayoutId(e.target.value === '' ? null : parseInt(e.target.value))}
+          disabled={layouts.length === 0}
+          className="px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+        >
+          <option value="">{layouts.length === 0 ? 'no layouts' : 'all layouts'}</option>
+          {layouts.map(l => (
+            <option key={l.id} value={l.id}>{l.name}{l.is_default ? ' ★' : ''}</option>
+          ))}
+        </select>
+        <label className="text-gray-300 text-sm ml-2">Window:</label>
+        <select
+          value={windowMonths}
+          onChange={e => setWindowMonths(parseInt(e.target.value))}
+          className="px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value={3}>3 mo</option>
+          <option value={6}>6 mo</option>
+          <option value={12}>12 mo</option>
+          <option value={24}>24 mo</option>
+          <option value={0}>all</option>
+        </select>
         <p className="text-xs text-gray-500 ml-3">
-          Kart analysis is per-track. A minimum of {data?.min_sessions_threshold ?? 5} sessions is required before aggregate conclusions are shown.
+          Aggregates appear at ≥ {data?.min_sessions_threshold ?? 5} sessions; the random-draw verdict requires ≥ {data?.min_sessions_verdict ?? 20} kart samples.
         </p>
       </div>
 
@@ -1139,6 +1218,8 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
         />
       </div>
 
+      <RandomnessVerdictPanel block={block} />
+
       {samples.length > 0 && (
         <>
           <div className="h-64 mb-4">
@@ -1194,6 +1275,65 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
 
       {samples.length === 0 && (
         <div className="text-gray-400 text-sm">No sprint sessions for this driver at this track.</div>
+      )}
+    </div>
+  );
+}
+
+function RandomnessVerdictPanel({ block }: { block: FairnessResponse['sprint'] }) {
+  const verdict = block.randomness_verdict;
+  const n = block.sample_count;
+  const minN = block.min_sessions_verdict;
+
+  let label = '';
+  let explanation = '';
+  let color = 'bg-gray-800 text-gray-300';
+  if (verdict === 'insufficient_data') {
+    label = `Verdict: insufficient data (${n}/${minN} kart samples)`;
+    explanation =
+      `A binomial/χ² test on ${n} samples doesn't have enough power to distinguish a biased draw from chance. ` +
+      `Come back once this driver has at least ${minN} sprint kart samples at this track.`;
+    color = 'bg-gray-800 text-gray-300 border border-gray-700';
+  } else if (verdict === 'non_random') {
+    label = 'Verdict: NOT consistent with a random kart draw';
+    explanation =
+      `The distribution of kart ranks across the driver's sessions fails a χ² goodness-of-fit test (p=${block.chi2_p_value?.toFixed(4)}). ` +
+      `Either the venue isn't assigning karts randomly for this driver, or the driver skill is moving field median in a way the leave-one-out doesn't fully cancel.`;
+    color = 'bg-red-900 bg-opacity-40 text-red-200 border border-red-700';
+  } else if (verdict === 'non_random_top_heavy') {
+    label = 'Verdict: draw leans top-heavy';
+    explanation =
+      `Overall rank distribution is compatible with random, but the driver has more top-quartile karts than expected (p=${block.top_quartile_p_value?.toFixed(4)}). ` +
+      `Suggests a mild bias toward good karts rather than a fully non-random assignment.`;
+    color = 'bg-yellow-900 bg-opacity-40 text-yellow-200 border border-yellow-700';
+  } else {
+    label = 'Verdict: consistent with a random kart draw';
+    explanation =
+      `The driver's rank distribution matches what a uniform random assignment would produce (χ² p=${block.chi2_p_value?.toFixed(4)}, ` +
+      `top-quartile p=${block.top_quartile_p_value?.toFixed(4)}).`;
+    color = 'bg-green-900 bg-opacity-30 text-green-200 border border-green-700';
+  }
+
+  return (
+    <div className={`rounded-lg p-4 mb-4 ${color}`}>
+      <div className="font-semibold mb-1">{label}</div>
+      <div className="text-xs mb-3 opacity-90">{explanation}</div>
+      {n > 0 && (
+        <div className="grid grid-cols-4 gap-2 text-xs">
+          {block.quartile_counts.map((c, i) => (
+            <div key={i} className="bg-black bg-opacity-30 rounded px-2 py-1">
+              <div className="opacity-70">Q{i + 1}{i === 0 ? ' (best)' : ''}</div>
+              <div className="font-mono text-base">{c}</div>
+              <div className="opacity-60">exp {(n / 4).toFixed(1)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {block.chi2_statistic !== null && (
+        <div className="text-xs mt-2 opacity-70 font-mono">
+          χ²={block.chi2_statistic.toFixed(2)} · df={block.chi2_df} · p={block.chi2_p_value?.toFixed(4)} ·
+          top-quartile p={block.top_quartile_p_value?.toFixed(4)}
+        </div>
       )}
     </div>
   );
