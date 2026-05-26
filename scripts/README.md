@@ -1,172 +1,63 @@
-# Test Scripts Documentation
+# scripts/
 
-This directory contains various scripts to help run and manage tests for the LT-Analyzer project.
+One-off operational scripts and test helpers. Migrations are
+idempotent — safe to re-run.
 
-## Quick Start
+## Migrations
 
-From the project root directory:
+| Script | Purpose |
+|---|---|
+| `migrate_phase1_auth.py` | Phase 1: add email-verified, verification + reset tokens, `tos_accepted_at`, `deleted_at` on `users`; create `invite_codes`, `audit_log`, `rate_limit_events`; backfill admin `email_verified=1`; create a bootstrap invite code (printed once) |
+| `migrate_phase2_prefs.py` | Phase 2: create `user_track_prefs` table + index; add the `stint_assignments` column added in Phase 2.6 |
 
-```bash
-# Run all tests
-./test.sh
+Both have idempotent ALTER/CREATE-IF-NOT-EXISTS guards and call
+`PRAGMA table_info()` / `sqlite_master` before changing anything. They
+abort with `RuntimeError` and a clear message if they find a state
+they can't reconcile (e.g. duplicate emails before adding the partial
+unique index).
 
-# Run with coverage
-./test.sh --coverage
-
-# Using make
-make test
-```
-
-## Available Scripts
-
-### test.sh (Project Root)
-Simple wrapper that calls the main test runner.
+Run via:
 
 ```bash
-./test.sh              # Run all tests
-./test.sh --coverage   # Run with coverage
-./test.sh --help       # Show help
+cp auth.db auth.db.bak-before-<thing>     # snapshot first
+./racing-venv/bin/python scripts/migrate_<thing>.py
+sqlite3 auth.db "<verify>"
+pm2 restart lt-analyzer-backend
 ```
 
-### scripts/test-all.sh
-Main test orchestrator that runs both frontend and backend tests.
+Backend's `_ensure_auth_schema()` also runs the same DDL defensively at
+boot, so the migration script + boot-time check are belt-and-braces.
+
+## Data tools
+
+### `recover_merged_sessions.py`
+
+When Apex Timing's parser sees the WebSocket break and reconnect, it
+sometimes glues multiple distinct races into a single "session" row.
+The recovery script walks `lap_times` chronologically for a flagged
+session, detects bursts of new lap data, and splits them back into
+separate `race_sessions` rows. See the script's docstring for
+tunables.
 
 ```bash
-./scripts/test-all.sh              # Run all tests
-./scripts/test-all.sh --coverage   # Run with coverage reports
-./scripts/test-all.sh --verbose    # Run with verbose output
-./scripts/test-all.sh --ci         # Run in CI mode
+python scripts/recover_merged_sessions.py --track 10 --preview   # dry run
+python scripts/recover_merged_sessions.py --track 10 --apply
+python scripts/recover_merged_sessions.py --track 10 --apply --session 440
 ```
 
-### scripts/test-frontend.sh
-Frontend-specific test runner.
+Operates only on rows where `is_excluded=1` (you flag the session as
+bad first), so it's safe to re-run.
 
-```bash
-./scripts/test-frontend.sh          # Run tests once
-./scripts/test-frontend.sh watch    # Run in watch mode
-./scripts/test-frontend.sh coverage # Run with coverage
-./scripts/test-frontend.sh ci       # Run in CI mode
-```
+## Test wrappers
 
-### scripts/test-backend.sh
-Backend-specific test runner with advanced options.
+| Script | Purpose |
+|---|---|
+| `test-all.sh` | Runs `npm test` + `pytest`, prints a colored summary, supports `--coverage` + `--verbose` + `--ci` |
+| `test-backend.sh` | pytest only |
+| `test-frontend.sh` | Jest only |
+| `check-test-env.sh` | Sanity-checks that pytest, npm, and required packages are installed |
+| `install-hooks.sh` | Installs a pre-commit hook that runs the linter + a quick pytest pass |
 
-```bash
-./scripts/test-backend.sh                    # Run all tests
-./scripts/test-backend.sh coverage           # Run with coverage
-./scripts/test-backend.sh verbose            # Run with -v flag
-./scripts/test-backend.sh vv                 # Run with -vv flag
-./scripts/test-backend.sh specific <path>    # Run specific test
-./scripts/test-backend.sh markers unit       # Run tests by marker
-./scripts/test-backend.sh failed             # Run only failed tests
-```
-
-Examples:
-```bash
-# Run specific test file
-./scripts/test-backend.sh specific tests/test_api/test_race_endpoints.py
-
-# Run specific test class
-./scripts/test-backend.sh specific tests/test_api/test_race_endpoints.py::TestRaceDataEndpoint
-
-# Run specific test method
-./scripts/test-backend.sh specific tests/test_api/test_race_endpoints.py::TestRaceDataEndpoint::test_get_race_data_success
-```
-
-### scripts/check-test-env.sh
-Verifies that the test environment is properly configured.
-
-```bash
-./scripts/check-test-env.sh
-```
-
-This will check:
-- System requirements (Node.js, Python, etc.)
-- Frontend test packages
-- Backend test packages
-- Configuration files
-- Test directories
-
-### scripts/install-hooks.sh
-Installs git pre-commit hooks that run tests before commits.
-
-```bash
-./scripts/install-hooks.sh
-```
-
-After installation, tests will automatically run when you commit changes.
-To skip temporarily: `git commit --no-verify`
-
-## Using Make
-
-The Makefile provides convenient shortcuts:
-
-```bash
-make test              # Run all tests
-make test-frontend     # Run frontend tests only
-make test-backend      # Run backend tests only
-make test-coverage     # Run all tests with coverage
-make test-watch        # Run frontend tests in watch mode
-```
-
-## CI/CD Integration
-
-The project includes GitHub Actions workflow (`.github/workflows/tests.yml`) that:
-- Runs on push to main/develop branches
-- Runs on pull requests
-- Tests multiple Node.js versions (18.x, 20.x)
-- Tests multiple Python versions (3.10, 3.11, 3.12)
-- Generates coverage reports
-- Runs integration tests
-- Verifies build output
-
-## Tips
-
-1. **Quick Test During Development**
-   ```bash
-   # Frontend watch mode
-   make test-watch
-   
-   # Backend specific file
-   ./scripts/test-backend.sh specific tests/test_api/test_race_endpoints.py
-   ```
-
-2. **Before Committing**
-   ```bash
-   ./test.sh --coverage
-   ```
-
-3. **Fix Test Environment Issues**
-   ```bash
-   ./scripts/check-test-env.sh
-   make install  # Install all dependencies
-   ```
-
-4. **View Coverage Reports**
-   - Frontend: `open racing-analyzer/coverage/lcov-report/index.html`
-   - Backend: `open htmlcov/index.html`
-
-## Troubleshooting
-
-If tests fail to run:
-
-1. Check environment setup:
-   ```bash
-   ./scripts/check-test-env.sh
-   ```
-
-2. Install missing dependencies:
-   ```bash
-   # Frontend
-   cd racing-analyzer && npm install
-   
-   # Backend
-   source racing-venv/bin/activate
-   pip install -r requirements.txt
-   pip install pytest pytest-cov pytest-asyncio pytest-mock
-   ```
-
-3. Make scripts executable:
-   ```bash
-   chmod +x scripts/*.sh test.sh
-   ```
+These are convenience wrappers — `./test.sh` from the project root
+forwards to `test-all.sh`. CI doesn't use them (it calls `npm test` and
+`pytest` directly).

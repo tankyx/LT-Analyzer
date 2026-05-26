@@ -1,279 +1,138 @@
-# Testing Guide for LT-Analyzer
+# Testing Guide
 
-This document provides comprehensive information about the testing setup and procedures for both frontend and backend components of the LT-Analyzer project.
+Both backend (pytest) and frontend (Jest) test suites. CI runs them on
+every push via `.github/workflows/tests.yml`.
 
-## Table of Contents
-1. [Frontend Testing (Next.js/React)](#frontend-testing)
-2. [Backend Testing (Python/Flask)](#backend-testing)
-3. [Running Tests](#running-tests)
-4. [Writing New Tests](#writing-new-tests)
-5. [Test Coverage](#test-coverage)
-6. [CI/CD Integration](#cicd-integration)
-
-## Frontend Testing
-
-### Test Framework
-- **Jest**: JavaScript testing framework
-- **React Testing Library**: For testing React components
-- **Testing Library User Event**: For simulating user interactions
-
-### Directory Structure
-```
-racing-analyzer/
-├── __tests__/
-│   ├── components/
-│   │   └── RaceDashboard/
-│   │       ├── RaceDashboard.test.tsx
-│   │       └── StintPlanner.test.tsx
-│   ├── services/
-│   │   └── WebSocketService.test.ts
-│   └── utils/
-│       └── config.test.ts
-├── jest.config.js
-└── jest.setup.js
-```
-
-### Running Frontend Tests
+## Quick start
 
 ```bash
-cd racing-analyzer
-
-# Run all tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Run tests with coverage
-npm run test:coverage
-
-# Run specific test file
-npm test -- StintPlanner.test.tsx
-```
-
-### Frontend Test Examples
-
-#### Component Testing
-```typescript
-// Testing React components
-test('renders StintPlanner component', () => {
-  render(<StintPlanner {...defaultProps} />);
-  expect(screen.getByText('Stint Planner')).toBeInTheDocument();
-});
-
-// Testing user interactions
-test('saves data to localStorage when config changes', async () => {
-  render(<StintPlanner {...defaultProps} />);
-  
-  const numStintsInput = screen.getByLabelText('Number of Stints:');
-  await userEvent.clear(numStintsInput);
-  await userEvent.type(numStintsInput, '5');
-
-  await waitFor(() => {
-    expect(mockLocalStorage.setItem).toHaveBeenCalled();
-  });
-});
-```
-
-#### Service Testing
-```typescript
-// Testing WebSocket service
-test('connects to WebSocket server', () => {
-  webSocketService.connect();
-  
-  expect(io).toHaveBeenCalledWith(expect.any(String), {
-    reconnection: true,
-    reconnectionAttempts: 5,
-    reconnectionDelay: 1000,
-    transports: ['websocket', 'polling'],
-  });
-});
-```
-
-## Backend Testing
-
-### Test Framework
-- **pytest**: Python testing framework
-- **pytest-asyncio**: For testing async code
-- **pytest-cov**: For code coverage
-- **pytest-mock**: For mocking
-
-### Directory Structure
-```
-tests/
-├── __init__.py
-├── conftest.py          # Shared fixtures and configuration
-├── test_api/
-│   ├── __init__.py
-│   ├── test_race_endpoints.py
-│   └── test_websocket_events.py
-└── test_websocket/
-    ├── __init__.py
-    └── test_apex_parser.py
-```
-
-### Running Backend Tests
-
-```bash
-# Activate virtual environment
+# Backend (from project root)
 source racing-venv/bin/activate
+pytest --no-cov                   # all 123 tests, ~30s
+pytest -m unit --no-cov           # unit-level only, ~1s
+pytest -m integration --no-cov    # integration (real sqlite), ~25s
 
-# Run all tests
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run specific test file
-pytest tests/test_api/test_race_endpoints.py
-
-# Run specific test class or method
-pytest tests/test_api/test_race_endpoints.py::TestRaceDataEndpoint::test_get_race_data_success
-
-# Run with coverage
-pytest --cov=. --cov-report=html
-
-# Run tests matching a pattern
-pytest -k "test_update_monitoring"
+# Frontend
+cd racing-analyzer
+npm test                          # all 57 tests, ~3s
+npm test -- --testPathPatterns=auth   # subset
 ```
 
-### Backend Test Examples
+## Layout
 
-#### API Endpoint Testing
+### Backend (`tests/`)
+
+| Directory | What it covers | Count |
+|---|---|---|
+| `tests/test_auth/` | Phase 1 — registration, email verification, password reset, login, CSRF guard, audit log, rate limits, gated reads, `/api/auth/me`, ProxyFix, admin invite + audit endpoints | 82 |
+| `tests/test_phase2/` | Per-user-per-track prefs CRUD + auth isolation + validation, legacy endpoint removal | 32 |
+| `tests/test_phase3/` | TTL query cache + heavy-read rate limit | 8 |
+| `tests/test_migrations/` | Phase 1 + 2 schema migration idempotency + duplicate-email guard + FK cascade | 9 |
+
+The shared fixture `tests/test_auth/conftest.py` stands up a real
+sqlite-backed Flask test client. `test_phase2/conftest.py` and
+`test_phase3/conftest.py` re-export those fixtures so their tests
+don't have to duplicate setup.
+
+Markers:
+- `@pytest.mark.unit` — no I/O, mocks only (`test_email_service`,
+  `test_turnstile`, etc.).
+- `@pytest.mark.integration` — touches a temporary sqlite DB.
+
+### Frontend (`racing-analyzer/__tests__/`)
+
+| Directory | What it covers | Count |
+|---|---|---|
+| `__tests__/auth/` | Phase 1 — Turnstile widget, AuthContext (CSRF + login result codes), register / verify-email / forgot-password / reset-password pages | 21 |
+| `__tests__/phase2/` | UserPrefsService (CSRF header injection, debouncer coalescing with fake timers), raceMath (parse, head-to-head gap, adjusted gap, trend arrows) | 32 |
+| `__tests__/utils/` | Existing config helper test | 4 |
+
+Jest config is in `racing-analyzer/jest.config.js` with `next/jest` so
+the same module resolution + babel preset Next uses applies.
+`jest.setup.js` mocks `window.matchMedia` and `localStorage`.
+
+## Adding a new test
+
+### Backend (integration)
+
 ```python
-def test_get_race_data_success(client, mock_race_data):
-    """Test successful retrieval of race data."""
-    response = client.get('/api/race-data')
-    assert response.status_code == 200
-    
-    data = json.loads(response.data)
-    assert 'teams' in data
-    assert 'sessionInfo' in data
+# tests/test_phaseX/test_thing.py
+import pytest
+from tests.test_auth.conftest import login_as, csrf_token
+
+pytestmark = pytest.mark.integration
+
+def test_X_does_Y(client, authenticated_user):
+    login_as(client, authenticated_user["username"], authenticated_user["password"])
+    token = csrf_token(client)
+    resp = client.post("/api/...", json={...}, headers={"X-CSRF-Token": token})
+    assert resp.status_code == 200
+    # ... inspect auth.db directly via sqlite3.connect("auth.db") ...
 ```
 
-#### WebSocket Event Testing
+Need a `tests/test_phaseX/conftest.py` that re-exports from
+`tests/test_auth/conftest.py` so the fixtures resolve:
+
 ```python
-def test_connect_success(socket_client):
-    """Test successful WebSocket connection."""
-    assert socket_client.is_connected()
-    received = socket_client.get_received()
-    
-    # Should receive initial race data on connect
-    race_data_msg = next((msg for msg in received if msg['name'] == 'race_data_update'), None)
-    assert race_data_msg is not None
+from tests.test_auth.conftest import (  # noqa: F401
+    auth_app, reset_db, client, mock_email,
+    authenticated_admin, authenticated_user,
+)
 ```
 
-#### Async Testing
-```python
-@pytest.mark.asyncio
-async def test_handle_message_grid_update(parser):
-    """Test handling grid update messages."""
-    message = json.dumps({
-        'cmd': 'grid_update',
-        'row': 'row1',
-        'col': 0,
-        'value': '1'
-    })
-    
-    await parser.handle_message(message)
-    assert parser.grid_data['row1']['Position'] == '1'
+### Frontend
+
+```typescript
+// racing-analyzer/__tests__/<area>/Thing.test.tsx
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+jest.mock('@/utils/config', () => ({
+  API_BASE_URL: 'http://api.test',
+  TURNSTILE_SITE_KEY: '',   // dev short-circuit
+  INVITE_REQUIRED: true,
+}));
+
+import Thing from '@/app/.../Thing';
+
+describe('Thing', () => {
+  beforeEach(() => { (global.fetch as unknown) = jest.fn(); });
+
+  test('does X', async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({ ok: true, json: () => Promise.resolve({...}) });
+    render(<Thing />);
+    fireEvent.click(screen.getByRole('button', { name: /label/i }));
+    await waitFor(() => expect(/* ... */).toBeTruthy());
+  });
+});
 ```
 
-## Writing New Tests
+## Coverage
 
-### Frontend Test Guidelines
+`pytest --cov=. --cov-report=html` generates `htmlcov/index.html`.
+Coverage threshold isn't enforced (yet); the goal is meaningful tests
+not a number. Auth + prefs paths sit around 85–90%; pure read endpoints
+(e.g. `cross-track-sessions`) are tested but not exhaustively because
+they hit per-track DBs that aren't present in the test sandbox.
 
-1. **Component Tests**: Test component rendering, user interactions, and state changes
-2. **Service Tests**: Test API calls, WebSocket connections, and data transformations
-3. **Mock External Dependencies**: Use Jest mocks for API calls and WebSocket connections
-4. **Test Accessibility**: Include tests for keyboard navigation and screen readers
+## CI
 
-### Backend Test Guidelines
+GitHub Actions (`.github/workflows/tests.yml`) runs:
 
-1. **Unit Tests**: Test individual functions and methods in isolation
-2. **Integration Tests**: Test API endpoints with mocked dependencies
-3. **Async Tests**: Use `pytest.mark.asyncio` for async functions
-4. **Fixtures**: Use pytest fixtures for reusable test data and mocks
+- `frontend-tests` (Node 20.x, 22.x): `npm ci` + `npm run lint`
+  (`continue-on-error`) + `npm test`.
+- `backend-tests` (Python 3.11, 3.12): `pip install -r requirements.txt`
+  + `pytest --cov=. --cov-report=xml --cov-report=term`.
+- `build`: runs after both pass — `npm run build` of the Next app with
+  `NEXT_PUBLIC_TURNSTILE_SITE_KEY=""` set so the dev-mode soft-pass
+  path is exercised.
 
-### Best Practices
+Coverage XML is uploaded to Codecov (`fail_ci_if_error: false`).
 
-1. **Descriptive Test Names**: Use clear, descriptive names that explain what is being tested
-2. **Arrange-Act-Assert**: Structure tests with clear setup, execution, and verification phases
-3. **Test Edge Cases**: Include tests for error conditions and boundary values
-4. **Keep Tests Independent**: Each test should be able to run in isolation
-5. **Mock External Services**: Don't make real API calls or database connections in tests
+## What was removed
 
-## Test Coverage
-
-### Frontend Coverage
-```bash
-# Generate coverage report
-npm run test:coverage
-
-# View HTML coverage report
-open coverage/lcov-report/index.html
-```
-
-### Backend Coverage
-```bash
-# Generate coverage report
-pytest --cov=. --cov-report=html
-
-# View HTML coverage report
-open htmlcov/index.html
-```
-
-### Coverage Goals
-- Aim for at least 80% code coverage
-- Focus on critical business logic
-- Don't test implementation details
-- Prioritize testing user-facing functionality
-
-## CI/CD Integration
-
-### GitHub Actions Example
-```yaml
-name: Tests
-
-on: [push, pull_request]
-
-jobs:
-  frontend-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
-        with:
-          node-version: '18'
-      - run: cd racing-analyzer && npm ci
-      - run: cd racing-analyzer && npm test
-
-  backend-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - run: pytest
-```
-
-## Troubleshooting
-
-### Common Frontend Issues
-- **Module not found**: Check import paths and tsconfig.json aliases
-- **Act warnings**: Wrap state updates in `waitFor` or `act`
-- **Mock not working**: Ensure mocks are set up before imports
-
-### Common Backend Issues
-- **Import errors**: Check PYTHONPATH and __init__.py files
-- **Database errors**: Ensure database mocks are properly configured
-- **Async test failures**: Use proper async/await syntax and fixtures
-
-## Continuous Improvement
-
-1. **Regular Test Reviews**: Review and update tests as features change
-2. **Performance Testing**: Add performance benchmarks for critical paths
-3. **Integration Testing**: Add end-to-end tests for complete user workflows
-4. **Security Testing**: Include tests for authentication and authorization
+The pre-Phase-1 test suites (`tests/test_api/`, `tests/test_websocket/`,
+`__tests__/components/RaceDashboard/*`, `__tests__/services/WebSocketService.test.ts`)
+were deleted on 2026-05-26. They imported APIs that had been removed
+(`race_ui.db_pool`) or asserted on UI behavior that Phase 1 + 2
+replaced. Restoring them would require rewriting the tests, not just
+unblocking them.

@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# racing-analyzer (frontend)
 
-## Getting Started
+Next.js 15 (App Router) + React 19 + TypeScript + Tailwind dashboard
+for the LT-Analyzer backend. Project overview, architecture, and
+deployment guide are in the [repo root README](../README.md).
 
-First, run the development server:
+## Development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp ../.env.example .env.local
+# edit .env.local: NEXT_PUBLIC_API_URL=http://localhost:5000,
+#                  NEXT_PUBLIC_WS_URL=ws://localhost:5000,
+#                  NEXT_PUBLIC_TURNSTILE_SITE_KEY="" (dev soft-pass),
+#                  NEXT_PUBLIC_INVITE_REQUIRED=true
+
+npm run dev                    # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The backend needs to be running on port 5000 separately (`python race_ui.py`
+from the project root).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Production build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build                  # Next.js production build into .next/
+npm start                      # serve the build on port 3000
+```
 
-## Learn More
+In prod, pm2 wraps `npm start` via `start-frontend.sh`. `NEXT_PUBLIC_*`
+vars are baked into the bundle at build time — any change requires a
+rebuild + pm2 restart.
 
-To learn more about Next.js, take a look at the following resources:
+## Tests
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm test                                       # all 57 tests
+npm test -- --testPathPatterns=auth            # subset
+npm run test:coverage                          # with coverage report
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+See [`../TESTING.md`](../TESTING.md) for the full guide.
 
-## Deploy on Vercel
+## Notable directories
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Path | Purpose |
+|---|---|
+| `app/` | App Router pages + components |
+| `app/components/RaceDashboard/` | Main live view (track switcher, standings, deltas, stint planner) |
+| `app/contexts/AuthContext.tsx` | Auth state, CSRF token, `apiFetch` wrapper, Socket.IO user-prefs subscription |
+| `app/services/` | `ApiService`, `WebSocketService`, `UserPrefsService`, `SelectedTrackService` |
+| `app/login`, `app/register`, `app/verify-email`, `app/forgot-password`, `app/reset-password`, `app/privacy`, `app/terms` | Auth + GDPR pages |
+| `app/admin/` | Track / user / alias / invite-code admin |
+| `app/data/` | Search + top-teams + cross-track team profile |
+| `app/team/[teamName]/` | Per-team page |
+| `utils/raceMath.ts` | Client-side delta math (Phase 2) |
+| `utils/persistence.ts` | localStorage helpers (legacy + active) |
+| `utils/config.ts` | Env-var-driven config (`API_BASE_URL`, `TURNSTILE_SITE_KEY`, etc.) |
+| `__tests__/` | Jest tests (auth, phase2, utils) |
+| `.env.production` | Build-time public env vars |
