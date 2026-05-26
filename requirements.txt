@@ -1,0 +1,32 @@
+# Runtime dependencies. Pinned to versions known-good in production
+# (racing-venv) as of 2026-05-26. CI uses this file to install backend deps.
+#
+# Update via:
+#   pip install -U <pkg> && pip freeze | grep -iE '^(<pkg>)' >> requirements.txt
+# then de-dup.
+
+# Web framework + WebSocket transport
+Flask>=3.1,<4
+Flask-Cors>=6.0,<7
+Flask-SocketIO>=5.6,<6
+python-engineio>=4.13,<5
+python-socketio>=5.16,<6
+eventlet>=0.40,<1
+
+# Auth / crypto
+bcrypt>=5.0,<6
+
+# HTTP client (Brevo email, Cloudflare Turnstile)
+requests>=2.33,<3
+urllib3>=2.7,<3
+idna>=3.16,<4
+certifi>=2026
+charset-normalizer>=3.4,<4
+
+# Live timing scraper
+websockets>=16.0,<17
+beautifulsoup4>=4.14,<5
+
+# Analytics
+pandas>=3.0,<4
+numpy>=2.4,<3
