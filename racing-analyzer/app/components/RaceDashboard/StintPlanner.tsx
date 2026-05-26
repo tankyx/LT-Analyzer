@@ -15,6 +15,7 @@ import {
   setActivePreset,
   getActivePreset
 } from '../../utils/persistence';
+import { getPrefs as fetchUserPrefs, makePrefsDebouncer } from '../../services/UserPrefsService';
 
 interface StintPlannerProps {
   isDarkMode?: boolean;
@@ -101,11 +102,56 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   const [showSavePresetDialog, setShowSavePresetDialog] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
 
-  // TODO(phase-2.5): mirror stint planner state to /api/me/prefs/<track_id>
-  // (columns stint_planner_config / stint_planner_presets / driver_names /
-  // current_driver_index are already in the schema). Today this component
-  // remains localStorage-only — multi-tenant correctness is unaffected,
-  // it's purely a cross-device convenience.
+  // --- Phase 2.5: cross-device sync ----------------------------------------
+  // Mirror the four planner-related fields (config, presets, driverNames,
+  // currentDriverIndex) to /api/me/prefs/<track_id>. The localStorage stays
+  // as a cache (so we paint the previous state instantly), but the server
+  // is now the source of truth across devices.
+  //
+  // The `hasServerPrefsSynced` flag prevents the state-watching effects below
+  // from firing PUTs while we're still hydrating from the server — otherwise
+  // every initial setState would echo back to the server and we'd loop.
+  const prefsDebouncerRef = useRef<ReturnType<typeof makePrefsDebouncer> | null>(null);
+  const [hasServerPrefsSynced, setHasServerPrefsSynced] = useState(false);
+
+  useEffect(() => {
+    if (trackId === undefined) return;
+    // Reset sync state for the new track. Flush any pending PUT for the old.
+    prefsDebouncerRef.current?.flush();
+    prefsDebouncerRef.current = makePrefsDebouncer(trackId, 500);
+    setHasServerPrefsSynced(false);
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const prefs = await fetchUserPrefs(trackId);
+        if (cancelled) return;
+        // Apply server values when they're meaningful. If server has empties
+        // (new account / new track), we keep whatever came from localStorage.
+        if (prefs.stint_planner_config && Object.keys(prefs.stint_planner_config).length > 0) {
+          setConfig(prefs.stint_planner_config as unknown as StintConfig);
+        }
+        if (Array.isArray(prefs.driver_names) && prefs.driver_names.length > 0) {
+          setDriverNames(prefs.driver_names);
+        }
+        if (typeof prefs.current_driver_index === 'number') {
+          setCurrentDriverIndex(prefs.current_driver_index);
+        }
+        if (Array.isArray(prefs.stint_planner_presets) && prefs.stint_planner_presets.length > 0) {
+          setAvailablePresets(prefs.stint_planner_presets as unknown as StintPreset[]);
+        }
+      } catch (err) {
+        console.warn('StintPlanner: failed to fetch prefs', err);
+      } finally {
+        if (!cancelled) setHasServerPrefsSynced(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      prefsDebouncerRef.current?.flush();
+    };
+  }, [trackId]);
+
   // Load saved values from localStorage on client-side mount (after SSR)
   useEffect(() => {
     // Only run on client side
@@ -429,25 +475,46 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     };
   }, [activeStint]);
 
-  // Persist stint configuration to localStorage
+  // Persist stint configuration to localStorage + (phase 2.5) to server prefs
   useEffect(() => {
     saveStintConfig(config);
-  }, [config]);
+    if (hasServerPrefsSynced) {
+      prefsDebouncerRef.current?.schedule({ stint_planner_config: config as unknown as Record<string, unknown> });
+    }
+  }, [config, hasServerPrefsSynced]);
 
-  // Persist driver names to localStorage
+  // Persist driver names to localStorage + server
   useEffect(() => {
     saveDriverNames(driverNames);
-  }, [driverNames]);
+    if (hasServerPrefsSynced) {
+      prefsDebouncerRef.current?.schedule({ driver_names: driverNames });
+    }
+  }, [driverNames, hasServerPrefsSynced]);
 
-  // Persist stint assignments to localStorage
+  // Persist stint assignments — localStorage only (recalculated from config
+  // on load, so server-side persistence is unnecessary).
   useEffect(() => {
     saveStintAssignments(stintAssignments);
   }, [stintAssignments]);
 
-  // Persist current driver index to localStorage
+  // Persist current driver index to localStorage + server
   useEffect(() => {
     saveCurrentDriverIndex(currentDriverIndex);
-  }, [currentDriverIndex]);
+    if (hasServerPrefsSynced) {
+      prefsDebouncerRef.current?.schedule({ current_driver_index: currentDriverIndex });
+    }
+  }, [currentDriverIndex, hasServerPrefsSynced]);
+
+  // Phase 2.5: presets are also kept in localStorage today (via the
+  // saveTrackPreset / deleteTrackPreset helpers). Mirror them to the server
+  // whenever the in-memory list changes so they survive a device switch.
+  useEffect(() => {
+    if (hasServerPrefsSynced && trackId !== undefined) {
+      prefsDebouncerRef.current?.schedule({
+        stint_planner_presets: availablePresets as unknown as Array<Record<string, unknown>>,
+      });
+    }
+  }, [availablePresets, hasServerPrefsSynced, trackId]);
 
   const driverStats = useMemo(() => {
     const stats: DriverStats[] = [];

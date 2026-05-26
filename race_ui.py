@@ -163,6 +163,47 @@ connected_clients_lock = threading.Lock()
 last_race_data_hash = None
 
 
+# --- Tiny in-process TTL cache (Phase 3) -----------------------------------
+# Used to wrap expensive read endpoints (top-teams, cross-track-sessions,
+# search-all). Single-process Werkzeug means a plain dict + lock suffices.
+# When we move to multi-worker gunicorn this needs to become Redis or similar.
+
+_query_cache: dict = {}
+_query_cache_lock = threading.Lock()
+QUERY_CACHE_TTL_SECONDS = int(os.environ.get('QUERY_CACHE_TTL_SECONDS', '60'))
+_query_cache_stats = {'hits': 0, 'misses': 0, 'evictions': 0}
+
+
+def _cache_get(key: str):
+    with _query_cache_lock:
+        entry = _query_cache.get(key)
+        if entry is None:
+            _query_cache_stats['misses'] += 1
+            return None
+        expires_at, value = entry
+        if time.time() > expires_at:
+            del _query_cache[key]
+            _query_cache_stats['evictions'] += 1
+            _query_cache_stats['misses'] += 1
+            return None
+        _query_cache_stats['hits'] += 1
+        return value
+
+
+def _cache_put(key: str, value, ttl: int | None = None):
+    expires_at = time.time() + (ttl if ttl is not None else QUERY_CACHE_TTL_SECONDS)
+    with _query_cache_lock:
+        _query_cache[key] = (expires_at, value)
+
+
+def _cache_invalidate_prefix(prefix: str):
+    """Drop any entry whose key starts with `prefix`. Use after admin writes
+    that would otherwise serve stale data (e.g. delete-best-lap, mass-delete)."""
+    with _query_cache_lock:
+        for k in [k for k in _query_cache if k.startswith(prefix)]:
+            del _query_cache[k]
+
+
 def _internal_error(exc: Exception, context: str = 'request'):
     """Log full error server-side, return a generic JSON error to the client.
 
@@ -1696,6 +1737,10 @@ RATE_LIMITS = {
     'verify_email_ip': (int(os.environ.get('RATE_LIMIT_VERIFY_IP_PER_HOUR', '30')), 3600),
     'resend_verification_ip': (int(os.environ.get('RATE_LIMIT_RESEND_IP_PER_HOUR', '5')), 3600),
     'resend_verification_email': (int(os.environ.get('RATE_LIMIT_RESEND_EMAIL_PER_HOUR', '3')), 3600),
+    # Phase 3: throttle the expensive reads. Limits are deliberately generous
+    # so a legitimate user using the dashboard isn't blocked; the goal is to
+    # catch automated scraping or runaway loops.
+    'heavy_read_ip': (int(os.environ.get('RATE_LIMIT_HEAVY_READ_IP_PER_HOUR', '120')), 3600),
 }
 
 RESERVED_USERNAMES = {'admin', 'root', 'system', 'support', 'security', 'administrator'}
@@ -3634,6 +3679,9 @@ def search_teams_all_tracks():
       limit (optional) - max distinct names to return (default 20, max 100)
     """
     try:
+        if _rate_limit_hit('heavy_read_ip', request.remote_addr or '-'):
+            return jsonify({'error': 'rate_limited'}), 429
+
         q = request.args.get('q', '').strip()
         if not q:
             return jsonify({'teams': []})
@@ -3739,6 +3787,9 @@ def search_teams_all_tracks():
 def get_top_teams():
     """Get top N teams ranked by best lap time"""
     try:
+        if _rate_limit_hit('heavy_read_ip', request.remote_addr or '-'):
+            return jsonify({'error': 'rate_limited'}), 429
+
         limit = request.args.get('limit', 10, type=int)
         track_id = request.args.get('track_id', 1, type=int)  # Default to track 1
         session_id = request.args.get('session_id', None)
@@ -3746,6 +3797,14 @@ def get_top_teams():
         # Validate limit
         if limit not in [10, 20, 30]:
             limit = 10
+
+        # Phase 3: cache lookup. ~60s TTL is fine for a leaderboard — laps
+        # don't change that fast at the ranks that matter, and admin
+        # delete/mass-delete operations invalidate the prefix.
+        cache_key = f'top_teams:{track_id}:{session_id}:{limit}'
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
 
         conn = get_track_db_connection(track_id)
         cursor = conn.cursor()
@@ -3920,7 +3979,9 @@ def get_top_teams():
 
         conn.close()
 
-        return jsonify({'teams': teams, 'limit': limit})
+        payload = {'teams': teams, 'limit': limit}
+        _cache_put(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         print(f"Error getting top teams: {e}")
         traceback.print_exc()
@@ -4560,6 +4621,9 @@ def delete_best_lap():
                        actor_user_id=request.current_user['id'],
                        target=f'track_{track_id}/{team_name}',
                        details={'best_lap_time': best_lap_time, 'rows_updated': rows_updated})
+                # Bust caches that might surface stale results.
+                _cache_invalidate_prefix(f'top_teams:{track_id}:')
+                _cache_invalidate_prefix('cross_track_sessions:')
                 return jsonify({
                     'success': True,
                     'message': f'Deleted best lap time for {team_name}',
@@ -4682,6 +4746,9 @@ def mass_delete_laps():
                        details={'delete_type': delete_type,
                                 'threshold_seconds': threshold_seconds,
                                 'rows_affected': rows_affected})
+                # Mass deletion almost certainly changes the leaderboard.
+                _cache_invalidate_prefix(f'top_teams:{track_id}:')
+                _cache_invalidate_prefix('cross_track_sessions:')
                 return jsonify({
                     'success': True,
                     'message': f'Mass deletion completed',
@@ -4828,10 +4895,19 @@ def get_cross_track_sessions():
     - team (required): team name (supports flexible matching - finds all name variations)
     """
     try:
+        if _rate_limit_hit('heavy_read_ip', request.remote_addr or '-'):
+            return jsonify({'error': 'rate_limited'}), 429
+
         team_name = request.args.get('team', '').strip()
 
         if not team_name:
             return jsonify({'error': 'team parameter is required'}), 400
+
+        # Phase 3 cache lookup — keyed by the normalised team name.
+        cache_key = f'cross_track_sessions:{team_name.lower()}'
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
 
         # Expand through alias group so one search finds all name variants
         alias_names = _expand_alias_group(team_name)
@@ -4907,7 +4983,7 @@ def get_cross_track_sessions():
                 print(f"Error querying track {track_id}: {track_error}")
                 continue
 
-        return jsonify({
+        payload = {
             'team_name': team_name,
             'sessions': sessions,
             'overall_stats': {
@@ -4916,7 +4992,9 @@ def get_cross_track_sessions():
                 'tracks_raced': tracks_raced,
                 'bests_by_track': sorted(bests_by_track_map.values(), key=lambda e: e['track_name']),
             }
-        })
+        }
+        _cache_put(cache_key, payload)
+        return jsonify(payload)
 
     except Exception as e:
         print(f"Error getting cross-track sessions: {e}")
