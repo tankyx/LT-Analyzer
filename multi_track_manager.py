@@ -105,19 +105,16 @@ class MultiTrackManager:
 
                 # Create indices for better query performance
                 # lap_times table indexes
-                conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_lap_times_session_time
-                    ON lap_times(session_id, timestamp DESC)
-                ''')
-
+                # Note: idx_lap_times_session_time (session_id, timestamp DESC) and
+                # idx_lap_times_team_session (team_name, session_id) used to be
+                # created here too but they were exact duplicates of
+                # idx_lap_times_session and idx_lap_times_team — SQLite can scan
+                # an ASC index in either direction, and the team_session pair
+                # had identical columns to the team index. Dropped 2026-05-26
+                # for ~28% per-DB size reduction.
                 conn.execute('''
                     CREATE INDEX IF NOT EXISTS idx_lap_times_session_kart
                     ON lap_times(session_id, kart_number, timestamp DESC)
-                ''')
-
-                conn.execute('''
-                    CREATE INDEX IF NOT EXISTS idx_lap_times_team_session
-                    ON lap_times(team_name, session_id)
                 ''')
 
                 conn.execute('''
@@ -649,7 +646,7 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                 with self.get_db_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute('''
-                        SELECT DISTINCT kart_number, RunTime, last_lap, best_lap, pit_stops
+                        SELECT DISTINCT kart_number, RunTime, position, last_lap, best_lap, pit_stops
                         FROM lap_times
                         WHERE session_id = ?
                         ORDER BY timestamp DESC
@@ -657,11 +654,12 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                     rows = cursor.fetchall()
                     self.previous_state_cache[session_id] = {}
                     for row in rows:
-                        kart_num, runtime, last_lap, best_lap, pit_stops = row
+                        kart_num, runtime, position_seed, last_lap, best_lap, pit_stops = row
                         # Only keep the most recent state for each kart
                         if kart_num not in self.previous_state_cache[session_id]:
                             self.previous_state_cache[session_id][kart_num] = {
                                 'RunTime': runtime,
+                                'position': position_seed,
                                 'last_lap': last_lap,
                                 'best_lap': best_lap,
                                 'pit_stops': pit_stops
@@ -694,43 +692,64 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                     # This is a count
                     pit_stops = int(pit_stops_str) if pit_stops_str and pit_stops_str.isdigit() else 0
 
-                current_records.append((
-                    session_id,
-                    timestamp,
-                    position,
-                    kart,
-                    row.get('Team', ''),
-                    row.get('Last Lap', ''),
-                    row.get('Best Lap', ''),
-                    row.get('Gap', ''),
-                    runtime,
-                    pit_stops
-                ))
+                last_lap_val = row.get('Last Lap', '')
+                best_lap_val = row.get('Best Lap', '')
+
+                # Phase: write-dedup. lap_times used to be a per-tick snapshot
+                # (~44M rows per active track in 7 months because most ticks
+                # carry no new information — just gap/runtime drift). Only
+                # insert when something query-relevant actually changed: the
+                # team's position, last lap completed, best lap, or pit stop
+                # count. The first sighting of a kart in a session is always
+                # recorded as a baseline.
+                should_record = True
+                if kart and kart in previous_state:
+                    prev = previous_state[kart]
+                    if (position == prev.get('position') and
+                            last_lap_val == prev.get('last_lap') and
+                            best_lap_val == prev.get('best_lap') and
+                            pit_stops == prev.get('pit_stops')):
+                        should_record = False
+
+                if should_record:
+                    current_records.append((
+                        session_id,
+                        timestamp,
+                        position,
+                        kart,
+                        row.get('Team', ''),
+                        last_lap_val,
+                        best_lap_val,
+                        row.get('Gap', ''),
+                        runtime,
+                        pit_stops
+                    ))
 
                 # Check for new laps using in-memory cache
                 if kart and kart in previous_state:
-                    prev_runtime = previous_state[kart]['RunTime']
-                    prev_last_lap = previous_state[kart]['last_lap']
-                    current_last_lap = row.get('Last Lap', '')
+                    prev_runtime = previous_state[kart].get('RunTime')
+                    prev_last_lap = previous_state[kart].get('last_lap')
 
-                    if runtime != prev_runtime and current_last_lap and current_last_lap != prev_last_lap:
+                    if runtime != prev_runtime and last_lap_val and last_lap_val != prev_last_lap:
                         lap_history_records.append((
                             session_id,
                             timestamp,
                             kart,
                             row.get('Team', ''),
                             runtime,
-                            current_last_lap,
+                            last_lap_val,
                             position,
                             pit_stops  # Use the already parsed pit_stops value
                         ))
 
-                # Update cache with current state
+                # Update cache with current state. `position` was added in
+                # the write-dedup pass so we can compare it on the next tick.
                 if kart:
                     self.previous_state_cache[session_id][kart] = {
                         'RunTime': runtime,
-                        'last_lap': row.get('Last Lap', ''),
-                        'best_lap': row.get('Best Lap', ''),
+                        'position': position,
+                        'last_lap': last_lap_val,
+                        'best_lap': best_lap_val,
                         'pit_stops': pit_stops
                     }
 
