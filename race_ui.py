@@ -6278,6 +6278,689 @@ def _analyze_endurance_session(cur, session_id, session_date, driver_names):
     }
 
 
+# ---------------------------------------------------------------------------
+# Fleet Tracker — live physical-machine tracking for endurance races
+# ---------------------------------------------------------------------------
+# The Apex Timing feed exposes only team identity (the number plate follows the
+# team). Which *physical* kart a team runs each stint is supplied manually by
+# the operator via fleet_assignments. This block segments each team's race into
+# stints, residualizes each stint's pace against a rolling field reference (to
+# cancel track conditions), and attributes the residual to the physical kart
+# currently mapped to that team — producing a live fleet quality ranking plus
+# "fast/slow machine in the pits" signals. See _segment_stints / the kart-
+# fairness residualization for the methodology this reuses.
+
+FLEET_MIN_SAMPLE_LAPS = 5          # below this, a kart's pace reads 'insufficient'
+FLEET_FIELD_WINDOW_SECONDS = 600   # rolling field-reference window (~10 min)
+FLEET_MIN_BAND_SECONDS = 0.15      # floor for the fast/slow classification band
+
+# Fleet data is per user, so the cache is keyed by (track_id, user_id).
+# {(track_id, user_id): {session_id, computed_at, payload}}
+_fleet_cache = {}
+
+
+def _live_session_id(track_id):
+    """Current session id from the live parser, or None when not running."""
+    if multi_track_manager and track_id in multi_track_manager.parsers:
+        return getattr(multi_track_manager.parsers[track_id], 'current_session_id', None)
+    return None
+
+
+def _live_standings_df(track_id):
+    """Current standings DataFrame from the live parser (for location/holder),
+    or None when the parser isn't running or has no data."""
+    try:
+        if multi_track_manager and track_id in multi_track_manager.parsers:
+            df = multi_track_manager.parsers[track_id].get_current_standings()
+            if df is not None and not df.empty:
+                return df
+    except Exception:
+        pass
+    return None
+
+
+def _fleet_assignment_map(cur, session_id, user_id):
+    """team_name -> {stint_index: fleet_kart_id} for this user, using the newest
+    non-superseded row per (team, stint_index)."""
+    cur.execute(
+        """SELECT team_name, stint_index, fleet_kart_id
+             FROM fleet_assignments
+            WHERE session_id = ? AND user_id = ? AND superseded = 0
+            ORDER BY team_name, stint_index, created_at ASC, id ASC""",
+        (session_id, user_id),
+    )
+    amap = {}
+    for team, stint_idx, kid in cur.fetchall():
+        amap.setdefault(team, {})[stint_idx] = kid  # last (newest) wins
+    return amap
+
+
+def _infer_stint_index(cur, session_id, team_name):
+    """Best-effort current stint index = cumulative pit count for the team."""
+    cur.execute(
+        "SELECT MAX(pit_this_lap) FROM lap_history WHERE session_id = ? AND team_name = ?",
+        (session_id, team_name),
+    )
+    row = cur.fetchone()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None):
+    """Core fleet pace fingerprint for one user. Reads lap_history (shared) +
+    the user's fleet tables for the session and returns the board body.
+
+    Pure with respect to its inputs (conn + standings_df) so it is unit-testable
+    without a live websocket. standings_df (optional) supplies live location and
+    holder kart-number/position from the current feed.
+    """
+    cur = conn.cursor()
+
+    # 1. This user's active registry: id -> label
+    cur.execute(
+        "SELECT id, label FROM fleet_karts WHERE is_active = 1 AND user_id = ? ORDER BY label",
+        (user_id,))
+    registry = {row[0]: row[1] for row in cur.fetchall()}
+
+    # 2. Per-team clean lap series (reuse the dedup/parse/clamp of the endurance
+    #    analyzer) and a flat field list for the rolling reference.
+    cur.execute(
+        """SELECT team_name, timestamp, lap_time, pit_this_lap
+             FROM lap_history
+            WHERE session_id = ? AND lap_time IS NOT NULL AND lap_time != ''
+            ORDER BY team_name, timestamp ASC""",
+        (session_id,),
+    )
+    per_team = {}
+    prev_raw = {}
+    all_clean = []  # (ts, secs) across the whole field
+    for team, ts, lt, pit in cur.fetchall():
+        if lt == prev_raw.get(team):
+            continue
+        prev_raw[team] = lt
+        secs = _safe_parse_time(lt)
+        if secs == float('inf') or secs <= 0 or secs > LAP_MAX_SECONDS:
+            continue
+        per_team.setdefault(team, []).append((ts, secs, int(pit) if pit is not None else 0))
+        all_clean.append((ts, secs))
+
+    # 3. Rolling field reference (cancels track conditions). Median of clean laps
+    #    in the last FLEET_FIELD_WINDOW_SECONDS; fall back to session-wide median.
+    def _parse_iso(ts):
+        try:
+            return datetime.fromisoformat(ts)
+        except (ValueError, TypeError):
+            return None
+
+    field_ref = None
+    if all_clean:
+        valid = [(p, s) for p, s in ((_parse_iso(ts), secs) for ts, secs in all_clean) if p is not None]
+        if valid:
+            latest = max(p for p, _ in valid)
+            cutoff = latest - timedelta(seconds=FLEET_FIELD_WINDOW_SECONDS)
+            window_vals = sorted(s for p, s in valid if p >= cutoff)
+            if len(window_vals) >= 3:
+                field_ref = _quantile(window_vals, 0.5)
+        if field_ref is None:
+            field_ref = _quantile(sorted(s for _, s in all_clean), 0.5)
+
+    # 4. Segment stints per team and attribute each stint's residual to the
+    #    physical kart that was assigned for that stint index.
+    amap = _fleet_assignment_map(cur, session_id, user_id)
+    kart_samples = {}  # fleet_kart_id -> {residuals, weights, laps}
+    for team, laps in per_team.items():
+        stints = _segment_stints(laps)
+        team_amap = amap.get(team, {})
+        for idx, st in enumerate(stints):
+            kid = team_amap.get(idx)
+            if kid is None or kid not in registry or field_ref is None:
+                continue
+            residual = st['mean'] - field_ref
+            entry = kart_samples.setdefault(kid, {'residuals': [], 'weights': [], 'laps': 0})
+            entry['residuals'].append(residual)
+            entry['weights'].append(st['lap_count'])
+            entry['laps'] += st['lap_count']
+
+    # 5. Per-kart aggregates: lap-weighted mean residual + simple SE.
+    kart_stats = {}
+    for kid, e in kart_samples.items():
+        total_w = sum(e['weights'])
+        if total_w <= 0:
+            continue
+        mean_residual = sum(r * w for r, w in zip(e['residuals'], e['weights'])) / total_w
+        sd = _stddev(e['residuals'])
+        n_stints = len(e['residuals'])
+        uncertainty = (sd / math.sqrt(n_stints)) if n_stints >= 1 and sd > 0 else None
+        kart_stats[kid] = {
+            'mean_residual': mean_residual,
+            'laps': e['laps'],
+            'n_stints': n_stints,
+            'uncertainty': uncertainty,
+        }
+
+    # 6. Fleet-median residual + robust MAD band for fast/slow classification.
+    qualified = [s['mean_residual'] for s in kart_stats.values() if s['laps'] >= FLEET_MIN_SAMPLE_LAPS]
+    fleet_median_residual = _quantile(sorted(qualified), 0.5) if qualified else None
+    band = FLEET_MIN_BAND_SECONDS
+    if qualified and fleet_median_residual is not None:
+        mad = _quantile(sorted(abs(r - fleet_median_residual) for r in qualified), 0.5)
+        band = max(FLEET_MIN_BAND_SECONDS, mad or 0.0)
+
+    def _classify(stat):
+        if stat['laps'] < FLEET_MIN_SAMPLE_LAPS or fleet_median_residual is None:
+            return 'insufficient', None
+        delta = stat['mean_residual'] - fleet_median_residual
+        if delta < -band:
+            return 'fast', delta
+        if delta > band:
+            return 'slow', delta
+        return 'neutral', delta
+
+    # 7. Current holder of each kart = assignment at the team's highest stint idx.
+    current_holder = {}  # team -> fleet_kart_id
+    for team, sm in amap.items():
+        if sm:
+            current_holder[team] = sm[max(sm.keys())]
+    kart_holder = {kid: team for team, kid in current_holder.items()}
+
+    # 8. Live location/holder layer from the current standings feed.
+    live = {}
+    if standings_df is not None and not standings_df.empty:
+        for rec in standings_df.to_dict('records'):
+            tname = rec.get('Team', '')
+            if not tname:
+                continue
+
+            def _as_int(v):
+                try:
+                    return int(v) if str(v).strip() else None
+                except (ValueError, TypeError):
+                    return None
+            live[tname] = {
+                'status': (rec.get('Status') or '').strip(),
+                'kart_number': _as_int(rec.get('Kart')),
+                'position': _as_int(rec.get('Position')),
+            }
+
+    # 9. Build one row per active registry kart.
+    karts = []
+    for kid, label in registry.items():
+        holder_team = kart_holder.get(kid)
+        live_info = live.get(holder_team) if holder_team else None
+        if holder_team and live_info:
+            location = 'in-pits' if live_info['status'] == 'Pit-in' else (
+                'on-track' if live_info['status'] else 'unknown')
+        elif holder_team:
+            location = 'unknown'
+        else:
+            location = 'available'
+
+        stat = kart_stats.get(kid)
+        if stat:
+            cls, delta = _classify(stat)
+            mean_residual = round(stat['mean_residual'], 3)
+            uncertainty = round(stat['uncertainty'], 3) if stat['uncertainty'] is not None else None
+            sample_laps, n_stints = stat['laps'], stat['n_stints']
+        else:
+            cls, delta = 'insufficient', None
+            mean_residual = uncertainty = None
+            sample_laps = n_stints = 0
+
+        alerts = []
+        if location == 'in-pits' and cls == 'fast':
+            alerts.append('fast_kart_in_pits')
+        elif location == 'in-pits' and cls == 'slow':
+            alerts.append('slow_kart_in_pits')
+
+        karts.append({
+            'fleet_kart_id': kid,
+            'label': label,
+            'holder_team': holder_team,
+            'holder_kart_number': live_info['kart_number'] if live_info else None,
+            'holder_position': live_info['position'] if live_info else None,
+            'location': location,
+            'stint_index': max(amap[holder_team].keys()) if holder_team and amap.get(holder_team) else None,
+            'mean_residual': mean_residual,
+            'pace_delta_vs_fleet': round(delta, 3) if delta is not None else None,
+            'uncertainty': uncertainty,
+            'sample_laps': sample_laps,
+            'n_stints': n_stints,
+            'classification': cls,
+            'rank': None,
+            'alerts': alerts,
+        })
+
+    # 10. Rank karts with a pace estimate (fastest = lowest residual first).
+    for i, k in enumerate(sorted((k for k in karts if k['mean_residual'] is not None),
+                                 key=lambda k: k['mean_residual'])):
+        k['rank'] = i + 1
+
+    return {
+        'field_ref_seconds': round(field_ref, 3) if field_ref is not None else None,
+        'fleet_median_residual': round(fleet_median_residual, 3) if fleet_median_residual is not None else None,
+        'karts': karts,
+        'unassigned_teams': sorted(t for t in per_team if t not in current_holder),
+    }
+
+
+def compute_fleet_payload(track_id, session_id, user_id, standings_df=None, timestamp=None):
+    """Build a user's fleet board payload for a track/session and cache it.
+
+    Returns None for an unknown track or a falsy session_id. Cached per
+    (track_id, user_id) so rapid refetches during a race are cheap.
+    """
+    if not session_id:
+        return None
+    try:
+        conn = get_track_db_connection(track_id)
+    except UnknownTrackError:
+        return None
+    try:
+        body = _compute_live_fleet_pace(conn, session_id, user_id, standings_df=standings_df)
+    finally:
+        conn.close()
+    payload = {
+        'track_id': track_id,
+        'session_id': session_id,
+        'timestamp': timestamp or datetime.now().isoformat(),
+        **body,
+    }
+    _fleet_cache[(track_id, user_id)] = {
+        'session_id': session_id,
+        'computed_at': time.time(),
+        'payload': payload,
+    }
+    return payload
+
+
+# ---- Fleet Tracker REST endpoints (all per-user, login required) ----------
+
+@app.route('/api/track/<int:track_id>/fleet/karts', methods=['GET'])
+@login_required
+def list_fleet_karts(track_id):
+    """List the calling user's physical-kart registry for a track."""
+    try:
+        uid = request.current_user['id']
+        active_only = request.args.get('active', '1') not in ('0', 'false', 'no')
+        conn = get_track_db_connection(track_id)
+        try:
+            cur = conn.cursor()
+            if active_only:
+                cur.execute(
+                    "SELECT id, label, notes, is_active FROM fleet_karts "
+                    "WHERE user_id = ? AND is_active = 1 ORDER BY label", (uid,))
+            else:
+                cur.execute(
+                    "SELECT id, label, notes, is_active FROM fleet_karts "
+                    "WHERE user_id = ? ORDER BY label", (uid,))
+            karts = [
+                {'id': r[0], 'label': r[1], 'notes': r[2], 'is_active': bool(r[3])}
+                for r in cur.fetchall()
+            ]
+        finally:
+            conn.close()
+        return jsonify({'track_id': track_id, 'karts': karts})
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'list_fleet_karts')
+
+
+@app.route('/api/track/<int:track_id>/fleet/karts', methods=['POST'])
+@login_required
+def create_fleet_kart(track_id):
+    """Register a physical kart in the calling user's fleet."""
+    try:
+        uid = request.current_user['id']
+        data = request.get_json(silent=True) or {}
+        label = (data.get('label') or '').strip()
+        if not label:
+            return jsonify({'error': 'label is required'}), 400
+        notes = (data.get('notes') or '').strip() or None
+        now = datetime.now().isoformat()
+        conn = get_track_db_connection(track_id)
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "INSERT INTO fleet_karts (user_id, label, notes, is_active, created_at) "
+                    "VALUES (?, ?, ?, 1, ?)", (uid, label, notes, now))
+            except sqlite3.IntegrityError:
+                return jsonify({'error': 'You already have a kart with that label'}), 409
+            conn.commit()
+            kart_id = cur.lastrowid
+        finally:
+            conn.close()
+        _audit('fleet_kart_create', actor_user_id=uid,
+               target=f'track_{track_id}/kart_{kart_id}', details={'label': label})
+        return jsonify({'kart': {'id': kart_id, 'label': label, 'notes': notes, 'is_active': True}}), 201
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'create_fleet_kart')
+
+
+@app.route('/api/track/<int:track_id>/fleet/karts/<int:kart_id>', methods=['PUT'])
+@login_required
+def update_fleet_kart(track_id, kart_id):
+    """Edit one of the calling user's karts (label/notes/active flag)."""
+    try:
+        uid = request.current_user['id']
+        data = request.get_json(silent=True) or {}
+        sets, params = [], []
+        if 'label' in data:
+            label = (data.get('label') or '').strip()
+            if not label:
+                return jsonify({'error': 'label cannot be empty'}), 400
+            sets.append('label = ?')
+            params.append(label)
+        if 'notes' in data:
+            sets.append('notes = ?')
+            params.append((data.get('notes') or '').strip() or None)
+        if 'is_active' in data:
+            sets.append('is_active = ?')
+            params.append(1 if data.get('is_active') else 0)
+        if not sets:
+            return jsonify({'error': 'no fields to update'}), 400
+        sets.append('updated_at = ?')
+        params.append(datetime.now().isoformat())
+        params.extend([kart_id, uid])
+        conn = get_track_db_connection(track_id)
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    f"UPDATE fleet_karts SET {', '.join(sets)} WHERE id = ? AND user_id = ?", params)
+            except sqlite3.IntegrityError:
+                return jsonify({'error': 'You already have a kart with that label'}), 409
+            if cur.rowcount == 0:
+                return jsonify({'error': 'kart not found'}), 404
+            conn.commit()
+        finally:
+            conn.close()
+        _audit('fleet_kart_update', actor_user_id=uid,
+               target=f'track_{track_id}/kart_{kart_id}', details=data)
+        return jsonify({'ok': True})
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'update_fleet_kart')
+
+
+@app.route('/api/track/<int:track_id>/fleet/karts/<int:kart_id>', methods=['DELETE'])
+@login_required
+def delete_fleet_kart(track_id, kart_id):
+    """Soft-retire one of the calling user's karts. History is preserved."""
+    try:
+        uid = request.current_user['id']
+        conn = get_track_db_connection(track_id)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE fleet_karts SET is_active = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                (datetime.now().isoformat(), kart_id, uid))
+            if cur.rowcount == 0:
+                return jsonify({'error': 'kart not found'}), 404
+            conn.commit()
+        finally:
+            conn.close()
+        _audit('fleet_kart_delete', actor_user_id=uid, target=f'track_{track_id}/kart_{kart_id}')
+        return jsonify({'ok': True})
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'delete_fleet_kart')
+
+
+@app.route('/api/track/<int:track_id>/fleet/state', methods=['GET'])
+@login_required
+def get_fleet_state(track_id):
+    """The calling user's current fleet board for a session. Serves a fresh
+    cached payload (per user) or recomputes, pulling live standings from the
+    parser for location/holder info."""
+    try:
+        uid = request.current_user['id']
+        session_id = request.args.get('session_id', type=int) or _live_session_id(track_id)
+        if not session_id:
+            get_track_db_connection(track_id).close()  # validate -> 404 on unknown
+            return jsonify({
+                'track_id': track_id, 'session_id': None, 'timestamp': datetime.now().isoformat(),
+                'field_ref_seconds': None, 'fleet_median_residual': None,
+                'karts': [], 'unassigned_teams': [],
+            })
+        cached = _fleet_cache.get((track_id, uid))
+        if (cached and cached['session_id'] == session_id
+                and time.time() - cached['computed_at'] < 3.0):
+            return jsonify(cached['payload'])
+        payload = compute_fleet_payload(
+            track_id, session_id, uid, standings_df=_live_standings_df(track_id))
+        if payload is None:
+            raise UnknownTrackError(f'Unknown track_id: {track_id}')
+        return jsonify(payload)
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'get_fleet_state')
+
+
+@app.route('/api/track/<int:track_id>/fleet/assignments', methods=['POST'])
+@login_required
+def record_fleet_assignment(track_id):
+    """Record that a team is now on a given physical kart (per user)."""
+    try:
+        uid = request.current_user['id']
+        data = request.get_json(silent=True) or {}
+        session_id = data.get('session_id') or _live_session_id(track_id)
+        team_name = (data.get('team_name') or '').strip()
+        fleet_kart_id = data.get('fleet_kart_id')
+        if not session_id or not team_name or not fleet_kart_id:
+            return jsonify({'error': 'session_id, team_name and fleet_kart_id are required'}), 400
+        source = data.get('source') if data.get('source') in ('manual', 'inferred') else 'manual'
+        conn = get_track_db_connection(track_id)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM fleet_karts WHERE id = ? AND user_id = ? AND is_active = 1",
+                (fleet_kart_id, uid))
+            if not cur.fetchone():
+                return jsonify({'error': 'unknown or inactive fleet_kart_id'}), 400
+            stint_index = data.get('stint_index')
+            if stint_index is None:
+                stint_index = _infer_stint_index(cur, session_id, team_name)
+            cur.execute(
+                "SELECT kart_number FROM lap_times WHERE session_id = ? AND team_name = ? "
+                "ORDER BY timestamp DESC LIMIT 1", (session_id, team_name))
+            row = cur.fetchone()
+            kart_number = row[0] if row else None
+            cur.execute(
+                """INSERT INTO fleet_assignments
+                   (user_id, session_id, team_name, kart_number, fleet_kart_id, stint_index,
+                    source, created_at, created_by, superseded)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                (uid, session_id, team_name, kart_number, fleet_kart_id, int(stint_index),
+                 source, datetime.now().isoformat(), uid),
+            )
+            conn.commit()
+            assignment_id = cur.lastrowid
+        finally:
+            conn.close()
+        _fleet_cache.pop((track_id, uid), None)
+        _audit('fleet_assignment', actor_user_id=uid,
+               target=f'track_{track_id}/session_{session_id}/{team_name}',
+               details={'fleet_kart_id': fleet_kart_id, 'stint_index': stint_index})
+        return jsonify({'assignment': {
+            'id': assignment_id, 'session_id': session_id, 'team_name': team_name,
+            'fleet_kart_id': fleet_kart_id, 'stint_index': stint_index, 'source': source,
+        }}), 201
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'record_fleet_assignment')
+
+
+@app.route('/api/track/<int:track_id>/fleet/assignments/correct', methods=['POST'])
+@login_required
+def correct_fleet_assignment(track_id):
+    """Correct one of the user's assignments: supersede the old row, insert a
+    corrected one."""
+    try:
+        uid = request.current_user['id']
+        data = request.get_json(silent=True) or {}
+        assignment_id = data.get('assignment_id')
+        fleet_kart_id = data.get('fleet_kart_id')
+        if not assignment_id or not fleet_kart_id:
+            return jsonify({'error': 'assignment_id and fleet_kart_id are required'}), 400
+        conn = get_track_db_connection(track_id)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT session_id, team_name, kart_number, stint_index FROM fleet_assignments "
+                "WHERE id = ? AND user_id = ?", (assignment_id, uid))
+            old = cur.fetchone()
+            if not old:
+                return jsonify({'error': 'assignment not found'}), 404
+            session_id, team_name, kart_number, stint_index = old
+            cur.execute(
+                "SELECT 1 FROM fleet_karts WHERE id = ? AND user_id = ? AND is_active = 1",
+                (fleet_kart_id, uid))
+            if not cur.fetchone():
+                return jsonify({'error': 'unknown or inactive fleet_kart_id'}), 400
+            cur.execute("UPDATE fleet_assignments SET superseded = 1 WHERE id = ?", (assignment_id,))
+            cur.execute(
+                """INSERT INTO fleet_assignments
+                   (user_id, session_id, team_name, kart_number, fleet_kart_id, stint_index,
+                    source, created_at, created_by, superseded)
+                   VALUES (?, ?, ?, ?, ?, ?, 'correction', ?, ?, 0)""",
+                (uid, session_id, team_name, kart_number, fleet_kart_id, stint_index,
+                 datetime.now().isoformat(), uid),
+            )
+            conn.commit()
+            new_id = cur.lastrowid
+        finally:
+            conn.close()
+        _fleet_cache.pop((track_id, uid), None)
+        _audit('fleet_assignment_correct', actor_user_id=uid,
+               target=f'track_{track_id}/session_{session_id}/{team_name}',
+               details={'old_id': assignment_id, 'fleet_kart_id': fleet_kart_id})
+        return jsonify({'assignment': {'id': new_id, 'fleet_kart_id': fleet_kart_id}}), 201
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'correct_fleet_assignment')
+
+
+@app.route('/api/track/<int:track_id>/fleet/assignments', methods=['GET'])
+@login_required
+def list_fleet_assignments(track_id):
+    """The calling user's assignment log for a session incl. superseded rows."""
+    try:
+        uid = request.current_user['id']
+        session_id = request.args.get('session_id', type=int) or _live_session_id(track_id)
+        conn = get_track_db_connection(track_id)
+        try:
+            if not session_id:
+                return jsonify({'track_id': track_id, 'session_id': None, 'assignments': []})
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT id, team_name, kart_number, fleet_kart_id, stint_index,
+                          source, created_at, created_by, superseded
+                     FROM fleet_assignments WHERE session_id = ? AND user_id = ?
+                    ORDER BY created_at ASC, id ASC""", (session_id, uid))
+            assignments = [
+                {'id': r[0], 'team_name': r[1], 'kart_number': r[2], 'fleet_kart_id': r[3],
+                 'stint_index': r[4], 'source': r[5], 'created_at': r[6],
+                 'created_by': r[7], 'superseded': bool(r[8])}
+                for r in cur.fetchall()
+            ]
+        finally:
+            conn.close()
+        return jsonify({'track_id': track_id, 'session_id': session_id, 'assignments': assignments})
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'list_fleet_assignments')
+
+
+@app.route('/api/track/<int:track_id>/fleet/auto-populate', methods=['POST'])
+@login_required
+def auto_populate_fleet(track_id):
+    """Seed the calling user's fleet from the karts currently in a session.
+
+    For each team in the session, ensure a physical kart exists in the user's
+    fleet (labelled with the team's competition number) and record a stint-0
+    assignment. This is EXACT at race start: before the first pit stop the
+    number plate IS the physical machine, so team N is on machine N — and a
+    stint-0 assignment is always historically true regardless of when this is
+    run. Idempotent per user: existing labels are reused and teams that already
+    have an assignment are skipped. Spare pit-lane karts are added separately.
+    """
+    try:
+        uid = request.current_user['id']
+        data = request.get_json(silent=True) or {}
+        session_id = data.get('session_id') or _live_session_id(track_id)
+        if not session_id:
+            return jsonify({'error': 'no active session; pass session_id'}), 400
+        conn = get_track_db_connection(track_id)
+        created_karts, created_assignments, skipped = [], 0, 0
+        try:
+            cur = conn.cursor()
+            # Teams in the session with their (stable) competition number. The
+            # MAX(timestamp) makes SQLite take kart_number from the latest row.
+            cur.execute(
+                """SELECT team_name, kart_number, MAX(timestamp) FROM lap_times
+                    WHERE session_id = ? AND team_name IS NOT NULL AND team_name != ''
+                      AND kart_number IS NOT NULL
+                    GROUP BY team_name""",
+                (session_id,),
+            )
+            teams = [(r[0], r[1]) for r in cur.fetchall()]
+            cur.execute(
+                "SELECT label, id FROM fleet_karts WHERE user_id = ? AND is_active = 1", (uid,))
+            label_to_id = {row[0]: row[1] for row in cur.fetchall()}
+            cur.execute(
+                "SELECT DISTINCT team_name FROM fleet_assignments "
+                "WHERE session_id = ? AND user_id = ? AND superseded = 0", (session_id, uid))
+            assigned_teams = {row[0] for row in cur.fetchall()}
+            now = datetime.now().isoformat()
+            for team_name, kart_number in teams:
+                label = str(kart_number)
+                kid = label_to_id.get(label)
+                if kid is None:
+                    cur.execute(
+                        "INSERT INTO fleet_karts (user_id, label, notes, is_active, created_at) "
+                        "VALUES (?, ?, 'auto from session', 1, ?)", (uid, label, now))
+                    kid = cur.lastrowid
+                    label_to_id[label] = kid
+                    created_karts.append({'id': kid, 'label': label})
+                if team_name not in assigned_teams:
+                    cur.execute(
+                        """INSERT INTO fleet_assignments
+                           (user_id, session_id, team_name, kart_number, fleet_kart_id, stint_index,
+                            source, created_at, created_by, superseded)
+                           VALUES (?, ?, ?, ?, ?, 0, 'auto', ?, ?, 0)""",
+                        (uid, session_id, team_name, kart_number, kid, now, uid))
+                    assigned_teams.add(team_name)
+                    created_assignments += 1
+                else:
+                    skipped += 1
+            conn.commit()
+        finally:
+            conn.close()
+        _fleet_cache.pop((track_id, uid), None)
+        _audit('fleet_auto_populate', actor_user_id=uid,
+               target=f'track_{track_id}/session_{session_id}',
+               details={'karts': len(created_karts), 'assignments': created_assignments})
+        return jsonify({
+            'session_id': session_id,
+            'created_karts': created_karts,
+            'created_assignments': created_assignments,
+            'skipped_teams': skipped,
+        }), 201
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'auto_populate_fleet')
+
+
 @app.route('/api/driver/fairness', methods=['GET'])
 def get_driver_fairness():
     """Per-track kart fairness analysis for a driver.

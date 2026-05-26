@@ -138,6 +138,68 @@ class MultiTrackManager:
                     ON lap_history(team_name, session_id)
                 ''')
 
+                # --- Fleet Tracker (endurance physical-machine tracking) ---
+                # The timing feed only exposes team identity; the physical kart
+                # a team runs each stint is supplied by the user. Fleet data is
+                # PER USER (each user keeps their own roster + mappings), so both
+                # tables carry user_id. fleet_karts is a user's registry of
+                # physical machines; fleet_assignments is an append-only log
+                # mapping a team to a physical kart for a stint of a session.
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS fleet_karts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        label TEXT NOT NULL,
+                        notes TEXT,
+                        is_active INTEGER DEFAULT 1,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT
+                    )
+                ''')
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS fleet_assignments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        session_id INTEGER NOT NULL,
+                        team_name TEXT NOT NULL,
+                        kart_number INTEGER,
+                        fleet_kart_id INTEGER NOT NULL,
+                        stint_index INTEGER NOT NULL,
+                        source TEXT NOT NULL DEFAULT 'manual',
+                        created_at TEXT NOT NULL,
+                        created_by INTEGER,
+                        superseded INTEGER DEFAULT 0,
+                        FOREIGN KEY (session_id) REFERENCES race_sessions(session_id),
+                        FOREIGN KEY (fleet_kart_id) REFERENCES fleet_karts(id)
+                    )
+                ''')
+
+                # Additive migration for DBs created before fleet went per-user.
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(fleet_karts)")
+                if 'user_id' not in [c[1] for c in cursor.fetchall()]:
+                    conn.execute('ALTER TABLE fleet_karts ADD COLUMN user_id INTEGER')
+                cursor.execute("PRAGMA table_info(fleet_assignments)")
+                if 'user_id' not in [c[1] for c in cursor.fetchall()]:
+                    conn.execute('ALTER TABLE fleet_assignments ADD COLUMN user_id INTEGER')
+
+                # A label is unique per user among that user's active karts (so a
+                # retired label can be reused, and two users can both have "K7").
+                # Drop the old global-unique index if it lingers from v1.
+                conn.execute('DROP INDEX IF EXISTS idx_fleet_karts_label')
+                conn.execute('''
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_fleet_karts_user_label
+                    ON fleet_karts(user_id, label) WHERE is_active = 1
+                ''')
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_fleet_assign_user_session
+                    ON fleet_assignments(user_id, session_id, team_name, created_at DESC)
+                ''')
+                conn.execute('''
+                    CREATE INDEX IF NOT EXISTS idx_fleet_assign_session_kart
+                    ON fleet_assignments(session_id, fleet_kart_id, created_at DESC)
+                ''')
+
             self.logger.info(f"Initialized database for track {track_id}: {db_path}")
         except Exception as e:
             self.logger.error(f"Error initializing database for track {track_id}: {e}")

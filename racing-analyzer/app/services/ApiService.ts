@@ -787,6 +787,160 @@ export const ApiService = {
       throw error;
     }
   },
+
+  // --- Fleet Tracker ---------------------------------------------------------
+  // Mutations need the CSRF header (the backend guards all unsafe /api/* calls).
+
+  getFleetState: async (trackId: number, sessionId?: number) => {
+    try {
+      const qs = sessionId != null ? `?session_id=${sessionId}` : '';
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/state${qs}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to load fleet state');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error loading fleet state:', error);
+      throw error;
+    }
+  },
+
+  getFleetKarts: async (trackId: number, includeInactive = false) => {
+    try {
+      const qs = includeInactive ? '?active=0' : '';
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/karts${qs}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to load fleet registry');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error loading fleet registry:', error);
+      throw error;
+    }
+  },
+
+  createFleetKart: async (trackId: number, label: string, notes?: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/karts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ label, notes }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to create kart');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error creating fleet kart:', error);
+      throw error;
+    }
+  },
+
+  updateFleetKart: async (
+    trackId: number,
+    kartId: number,
+    patch: { label?: string; notes?: string; is_active?: boolean },
+  ) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/karts/${kartId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify(patch),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to update kart');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error updating fleet kart:', error);
+      throw error;
+    }
+  },
+
+  deleteFleetKart: async (trackId: number, kartId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/karts/${kartId}`, {
+        method: 'DELETE',
+        headers: { ...(await getCsrfHeaders()) },
+        credentials: 'include',
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to delete kart');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error deleting fleet kart:', error);
+      throw error;
+    }
+  },
+
+  autoPopulateFleet: async (trackId: number, sessionId?: number | null) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/auto-populate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ session_id: sessionId ?? undefined }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to auto-populate fleet');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error auto-populating fleet:', error);
+      throw error;
+    }
+  },
+
+  recordAssignment: async (
+    trackId: number,
+    sessionId: number | null,
+    teamName: string,
+    fleetKartId: number,
+    stintIndex?: number,
+  ) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({
+          session_id: sessionId,
+          team_name: teamName,
+          fleet_kart_id: fleetKartId,
+          stint_index: stintIndex,
+        }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to record assignment');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error recording assignment:', error);
+      throw error;
+    }
+  },
 };
+
+// CSRF header helper for Fleet Tracker mutations (mirrors UserPrefsService).
+async function getCsrfHeaders(): Promise<Record<string, string>> {
+  const resp = await fetch(`${API_BASE_URL}/api/auth/csrf`, { credentials: 'include' });
+  if (!resp.ok) return {};
+  const data = await resp.json().catch(() => ({}));
+  return data?.csrfToken ? { 'X-CSRF-Token': data.csrfToken } : {};
+}
 
 export default ApiService;

@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { API_BASE_URL } from '../../utils/config';
 
 // Import types from RaceDashboard
-interface Team {
+export interface Team {
   Kart: string;
   Team: string;
   Position: string;
@@ -138,6 +138,38 @@ export interface SessionStatus {
   timestamp: string;
 }
 
+// Fleet Tracker (endurance physical-machine tracking)
+export type FleetLocation = 'on-track' | 'in-pits' | 'available' | 'unknown';
+export type FleetClassification = 'fast' | 'slow' | 'neutral' | 'insufficient';
+
+export interface FleetKartState {
+  fleet_kart_id: number;
+  label: string;
+  holder_team: string | null;
+  holder_kart_number: number | null;
+  holder_position: number | null;
+  location: FleetLocation;
+  stint_index: number | null;
+  mean_residual: number | null;
+  pace_delta_vs_fleet: number | null;  // seconds; <0 faster than fleet median
+  uncertainty: number | null;
+  sample_laps: number;
+  n_stints: number;
+  classification: FleetClassification;
+  rank: number | null;
+  alerts: string[];                      // e.g. 'fast_kart_in_pits'
+}
+
+export interface FleetUpdate {
+  track_id: number;
+  session_id: number | null;
+  timestamp: string;
+  field_ref_seconds: number | null;
+  fleet_median_residual: number | null;
+  karts: FleetKartState[];
+  unassigned_teams: string[];
+}
+
 export interface TrackStatus {
   track_id: number;
   track_name: string;
@@ -178,6 +210,7 @@ interface WebSocketCallbacks {
   onSessionStatus?: (data: SessionStatus) => void;
   onAllTracksStatus?: (data: AllTracksStatusUpdate) => void;
   onPrefsUpdated?: (data: PrefsUpdated) => void;
+  onFleetUpdate?: (data: FleetUpdate) => void;
 }
 
 // External listener registry for prefs_updated. Lets multiple consumers
@@ -328,6 +361,11 @@ class WebSocketService {
     this.socket.on('all_tracks_status', (data: AllTracksStatusUpdate) => {
       console.log(`Received status for ${data.tracks.length} tracks`);
       this.callbacks.onAllTracksStatus?.(data);
+    });
+
+    // Fleet Tracker board updates (delivered on the already-joined track room)
+    this.socket.on('fleet_update', (data: FleetUpdate) => {
+      this.callbacks.onFleetUpdate?.(data);
     });
 
     // Phase 2.5 live-sync: re-fetch trigger when another tab/device writes prefs

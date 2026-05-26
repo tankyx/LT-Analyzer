@@ -3,13 +3,15 @@ import { useRouter } from 'next/navigation';
 import TimeDeltaChart from './TimeDeltaChart';
 import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
-import webSocketService, { RaceDataUpdate, TeamsUpdate, SessionUpdate, AllTracksStatusUpdate, TrackStatus } from '../../services/WebSocketService';
+import webSocketService, { RaceDataUpdate, TeamsUpdate, SessionUpdate, AllTracksStatusUpdate, TrackStatus, FleetKartState } from '../../services/WebSocketService';
 import StatusImageIndicator from './StatusImageIndicator';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
 import StintPlanner from './StintPlanner';
 import AdminPanel from './AdminPanel';
 import MultiTrackStatus from './MultiTrackStatus';
+import FleetTracker, { FleetKart } from './FleetTracker';
+import KartAssignmentEntry from './KartAssignmentEntry';
 import { useAuth } from '../../contexts/AuthContext';
 import { saveSelectedTrack, loadSelectedTrack } from '../../utils/persistence';
 import {
@@ -409,6 +411,20 @@ const RaceDashboard = () => {
   const [selectedTrackId, setSelectedTrackId] = useState<number>(1);
   const [sessionStatus, setSessionStatus] = useState<{active: boolean; message: string; trackName: string} | null>(null);
   const [allTracksStatus, setAllTracksStatus] = useState<TrackStatus[]>([]);
+  // Fleet Tracker state (live endurance physical-machine tracking)
+  const [fleetBoard, setFleetBoard] = useState<FleetKartState[]>([]);
+  const [fleetRegistry, setFleetRegistry] = useState<FleetKart[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  const [assignmentEntry, setAssignmentEntry] = useState<{
+    open: boolean;
+    prompt?: { teamNumber: string; teamName: string };
+    defaultKartId?: number;
+  } | null>(null);
+  const [alertedFleetPits, setAlertedFleetPits] = useState<Set<number>>(new Set());
+  const [activeTab, setActiveTab] = useState<string>('standings');
+  // Ref mirror so checkPitStops can read the registry without re-subscribing.
+  const fleetRegistryRef = useRef<FleetKart[]>([]);
+  useEffect(() => { fleetRegistryRef.current = fleetRegistry; }, [fleetRegistry]);
 
   const triggerPitAlert = useCallback(async (kartNum: string, teamName: string) => {
     try {
@@ -577,6 +593,15 @@ const RaceDashboard = () => {
           } catch (e) {
             console.log('Audio not supported', e);
           }
+
+          // Fleet Tracker: a tracked team just pitted — prompt the crew to
+          // record which physical kart they took (only if a fleet is set up).
+          if (fleetRegistryRef.current.length > 0) {
+            setAssignmentEntry({
+              open: true,
+              prompt: { teamNumber: team.Kart, teamName: team.Team },
+            });
+          }
         }
       } else if (team && team.Status !== 'Pit-in') {
         // Team is no longer in pit, remove from alerted set
@@ -601,6 +626,85 @@ const RaceDashboard = () => {
       return () => clearTimeout(timer);
     }
   }, [alerts]);
+
+  // Fleet Tracker: raise a one-shot alert when a fast machine enters the pits
+  // (so the operator can target it) and clear it when the kart leaves.
+  const checkFleetPitAlerts = useCallback((fleet: FleetKartState[]) => {
+    fleet.forEach(kart => {
+      const isFastInPits = kart.location === 'in-pits' && kart.classification === 'fast';
+      if (isFastInPits && !alertedFleetPits.has(kart.fleet_kart_id)) {
+        setAlertedFleetPits(prev => new Set(prev).add(kart.fleet_kart_id));
+        setAlerts(prev => [...prev, {
+          id: Date.now(),
+          message: `⚡ Fast kart ${kart.label} just entered the pits${kart.holder_team ? ` (was ${kart.holder_team})` : ''}`,
+          type: 'warning',
+        }]);
+      } else if (!isFastInPits && alertedFleetPits.has(kart.fleet_kart_id)) {
+        setAlertedFleetPits(prev => {
+          const next = new Set(prev);
+          next.delete(kart.fleet_kart_id);
+          return next;
+        });
+      }
+    });
+  }, [alertedFleetPits]);
+
+  // Fleet data is per-user, so there's no shared broadcast — each client pulls
+  // its own board from /fleet/state. Throttle live refetches so a fast feed
+  // doesn't hammer the endpoint.
+  const lastFleetFetchRef = useRef(0);
+  const refreshFleetState = useCallback(async () => {
+    if (!selectedTrackId) return;
+    try {
+      const state = await ApiService.getFleetState(selectedTrackId);
+      setFleetBoard(state.karts || []);
+      if (state.session_id != null) setCurrentSessionId(state.session_id);
+      checkFleetPitAlerts(state.karts || []);
+    } catch (err) {
+      console.warn('Failed to load fleet state', err);
+    }
+  }, [selectedTrackId, checkFleetPitAlerts]);
+
+  const refreshFleetThrottled = useCallback(() => {
+    const now = Date.now();
+    if (now - lastFleetFetchRef.current < 3000) return;
+    lastFleetFetchRef.current = now;
+    refreshFleetState();
+  }, [refreshFleetState]);
+
+  // Re-fetch the user's fleet registry (after CRUD/auto-populate or track
+  // change) and the board so a new roster shows immediately.
+  const refreshRegistry = useCallback(async () => {
+    if (!selectedTrackId) return;
+    try {
+      const res = await ApiService.getFleetKarts(selectedTrackId);
+      setFleetRegistry(res.karts || []);
+    } catch (err) {
+      console.warn('Failed to load fleet registry', err);
+    }
+    refreshFleetState();
+  }, [selectedTrackId, refreshFleetState]);
+
+  // Record a team -> physical-kart assignment, then refresh this user's board.
+  const recordAssignment = useCallback(async (args: {
+    teamName: string; fleetKartId: number; stintIndex?: number;
+  }) => {
+    try {
+      await ApiService.recordAssignment(
+        selectedTrackId, currentSessionId, args.teamName, args.fleetKartId, args.stintIndex);
+      setAssignmentEntry(null);
+      setAlerts(prev => [...prev, {
+        id: Date.now(), message: `✓ Recorded kart for ${args.teamName}`, type: 'info',
+      }]);
+      refreshFleetState();
+    } catch (err) {
+      setAlerts(prev => [...prev, {
+        id: Date.now(),
+        message: `Failed to record assignment: ${err instanceof Error ? err.message : 'error'}`,
+        type: 'error',
+      }]);
+    }
+  }, [selectedTrackId, currentSessionId, refreshFleetState]);
 
   // Update monitoring via API only when user changes it locally
   const [isUserUpdate, setIsUserUpdate] = useState(false);
@@ -672,8 +776,9 @@ const RaceDashboard = () => {
         if (data.teams && data.teams.length > 0) {
           checkPitStops(data.teams);
         }
+        refreshFleetThrottled();
       },
-      
+
       onTeamsUpdate: (data: TeamsUpdate) => {
         console.log('Received teams update');
         detectChanges(data.teams);
@@ -682,6 +787,7 @@ const RaceDashboard = () => {
         if (data.teams && data.teams.length > 0) {
           checkPitStops(data.teams);
         }
+        refreshFleetThrottled();
       },
       
       // Phase 2: onGapUpdate / onMonitoringUpdate / onPitConfigUpdate are no
@@ -702,6 +808,8 @@ const RaceDashboard = () => {
         setGapHistory({});
         setAlertedPitTeams(new Set());
         setUpdatedRows(new Map());
+        setFleetBoard([]);
+        setAlertedFleetPits(new Set());
         setIsLoading(true);
         setError(null);
         setAlerts(prev => [...prev, {
@@ -740,7 +848,7 @@ const RaceDashboard = () => {
       webSocketService.removeCallbacks();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkPitStops]); // Only run on mount, teams and updatedRows changes are handled internally
+  }, [checkPitStops, refreshFleetThrottled]); // Only run on mount, teams and updatedRows changes are handled internally
 
   // Load available tracks on mount and restore saved selections
   useEffect(() => {
@@ -819,8 +927,24 @@ const RaceDashboard = () => {
       setGapHistory({});
       setUpdatedRows(new Map());
       setAlertedPitTeams(new Set());
+      setFleetBoard([]);
+      setAlertedFleetPits(new Set());
       webSocketService.joinTrack(selectedTrackId);
       saveSelectedTrack(selectedTrackId);
+
+      // Seed the fleet registry + board so the panel isn't empty before the
+      // first fleet_update arrives on the track room.
+      (async () => {
+        try {
+          const reg = await ApiService.getFleetKarts(selectedTrackId);
+          setFleetRegistry(reg.karts || []);
+          const state = await ApiService.getFleetState(selectedTrackId);
+          setFleetBoard(state.karts || []);
+          if (state.session_id != null) setCurrentSessionId(state.session_id);
+        } catch (err) {
+          console.warn('Failed to seed fleet state', err);
+        }
+      })();
 
       // Phase 2: hydrate per-(user, track) prefs from the server. We seed
       // from the localStorage cache immediately so the UI doesn't flash to
@@ -1557,6 +1681,17 @@ const RaceDashboard = () => {
                 </svg>
               )
             },
+            {
+              id: 'fleet',
+              label: 'Fleet Tracker',
+              icon: (
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
+                  <path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 001 1h2m-3-1V8a1 1 0 011-1h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01.052.316V16a1 1 0 01-1 1h-1" />
+                </svg>
+              ),
+              count: fleetBoard.length
+            },
             ...(user?.role === 'admin' ? [{
               id: 'admin',
               label: 'Admin',
@@ -1569,6 +1704,7 @@ const RaceDashboard = () => {
           ]}
           defaultTab="standings"
           isDarkMode={isDarkMode}
+          onTabChange={setActiveTab}
         >
           {StandingsTab}
           {MonitoredTeamsTab}
@@ -1582,11 +1718,35 @@ const RaceDashboard = () => {
             trackId={selectedTrackId}
             trackName={availableTracks.find(t => t.id === selectedTrackId)?.track_name}
           />
+          <FleetTracker
+            isDarkMode={isDarkMode}
+            fleetBoard={fleetBoard}
+            registry={fleetRegistry}
+            trackId={selectedTrackId}
+            sessionId={currentSessionId}
+            isActive={activeTab === 'fleet'}
+            canEditRegistry={!!user}
+            onReassign={(kartId) => setAssignmentEntry({ open: true, defaultKartId: kartId })}
+            onAddAssignment={() => setAssignmentEntry({ open: true })}
+            onRegistryChange={refreshRegistry}
+          />
           {user?.role === 'admin' && (
             <AdminPanel isDarkMode={isDarkMode} />
           )}
         </TabbedInterface>
       </div>
+
+      {assignmentEntry?.open && (
+        <KartAssignmentEntry
+          isDarkMode={isDarkMode}
+          registry={fleetRegistry}
+          teams={teams}
+          prompt={assignmentEntry.prompt}
+          defaultKartId={assignmentEntry.defaultKartId}
+          onSubmit={recordAssignment}
+          onCancel={() => setAssignmentEntry(null)}
+        />
+      )}
     </div>
   );
 };

@@ -13,6 +13,7 @@ interface TabbedInterfaceProps {
   defaultTab?: string;
   children: React.ReactNode[];
   isDarkMode?: boolean;
+  onTabChange?: (tabId: string) => void;
 }
 
 const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
@@ -20,11 +21,13 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
   defaultTab,
   children,
   isDarkMode = false,
+  onTabChange,
 }) => {
   const [activeTab, setActiveTab] = useState<string>(defaultTab || tabs[0]?.id || '');
 
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId);
+    onTabChange?.(tabId);
   };
 
   return (
