@@ -591,14 +591,18 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   }, [stintAssignments, config.numDrivers, driverNames]);
 
   const formatTime = (minutes: number): string => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
+    // Round to whole minutes so float-arithmetic drift (e.g. accumulating
+    // pitDuration=2.5 across stints) doesn't surface as 30.000000000004m.
+    const m = Math.round(minutes);
+    const hours = Math.floor(m / 60);
+    const mins = m % 60;
     return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
   };
 
   const formatSeconds = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+    const total = Math.round(seconds);
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
