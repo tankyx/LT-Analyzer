@@ -1614,6 +1614,10 @@ def _ensure_auth_schema():
                 "UPDATE users SET email_verified = 1 WHERE role = 'admin' AND email_verified = 0"
             )
 
+            # Phase 2.6: cross-device sync of the user's currently-selected track.
+            if 'selected_track_id' not in user_cols:
+                conn.execute('ALTER TABLE users ADD COLUMN selected_track_id INTEGER')
+
             # --- New Phase 1 tables -----------------------------------------
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS invite_codes (
@@ -2578,6 +2582,49 @@ def me_prefs_put(track_id):
         print(f'prefs_updated emit failed: {emit_err}')
 
     return jsonify({'prefs': prefs_json})
+
+
+# --- Selected-track (per-user, cross-track) preference --------------------
+
+@app.route('/api/me/selected-track', methods=['GET'])
+@login_required
+def me_selected_track_get():
+    user = request.current_user
+    with get_db_connection() as conn:
+        row = conn.execute(
+            'SELECT selected_track_id FROM users WHERE id = ?', (user['id'],)
+        ).fetchone()
+    return jsonify({'track_id': row['selected_track_id'] if row else None})
+
+
+@app.route('/api/me/selected-track', methods=['PUT'])
+@login_required
+def me_selected_track_put():
+    user = request.current_user
+    data = request.get_json(silent=True) or {}
+    raw = data.get('track_id')
+    if raw is None:
+        return jsonify({'error': 'track_id_required'}), 400
+    try:
+        track_id = int(raw)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'invalid_track_id'}), 400
+    if not (1 <= track_id <= 100000):
+        return jsonify({'error': 'invalid_track_id'}), 400
+    with get_db_connection() as conn:
+        conn.execute(
+            'UPDATE users SET selected_track_id = ? WHERE id = ?',
+            (track_id, user['id']),
+        )
+        conn.commit()
+    try:
+        socketio.emit('selected_track_updated', {
+            'user_id': user['id'],
+            'track_id': track_id,
+        }, room=f'user_prefs_{user["id"]}')
+    except Exception as emit_err:  # pragma: no cover — defensive
+        print(f'selected_track_updated emit failed: {emit_err}')
+    return jsonify({'track_id': track_id})
 
 
 @app.route('/api/me/prefs/<int:track_id>', methods=['DELETE'])

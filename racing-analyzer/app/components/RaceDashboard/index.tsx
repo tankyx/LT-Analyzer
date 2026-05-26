@@ -20,6 +20,10 @@ import {
   getLastSeenUpdatedAt,
   UserTrackPrefs,
 } from '../../services/UserPrefsService';
+import {
+  getSelectedTrack,
+  putSelectedTrack,
+} from '../../services/SelectedTrackService';
 
 // Types
 interface Team {
@@ -490,6 +494,11 @@ const RaceDashboard = () => {
     setTeamColors(colors);
   };
   
+  // Phase 2.6: track the last server-known selected_track_id so we can tell
+  // user-initiated changes apart from cross-device sync (where we apply a
+  // server-pushed track without writing it back).
+  const lastServerSelectedTrackRef = useRef<number | null>(null);
+
   // Phase 2: per-(user, track) prefs replace the old global update-monitoring
   // and update-pit-config endpoints. A debouncer coalesces rapid edits into
   // one PUT per ~500 ms so typing in a spinner doesn't fire 12 requests.
@@ -753,6 +762,17 @@ const RaceDashboard = () => {
             }
           }
 
+          // Phase 2.6: server-side selected track overrides localStorage if set.
+          try {
+            const serverTrack = await getSelectedTrack();
+            if (serverTrack && result.tracks.some((t: {id: number; track_name: string}) => t.id === serverTrack)) {
+              trackToSelect = serverTrack;
+            }
+          } catch (e) {
+            console.warn('Failed to fetch selected-track preference', e);
+          }
+          lastServerSelectedTrackRef.current = trackToSelect;
+
           // Join the selected track
           if (result.tracks.length > 0) {
             setSelectedTrackId(trackToSelect);
@@ -825,6 +845,28 @@ const RaceDashboard = () => {
         }
       })();
     }
+  }, [selectedTrackId]);
+
+  // Phase 2.6: when selectedTrackId changes locally AND differs from what the
+  // server last told us, PUT it back. The comparison skips the round-trip when
+  // we're applying a server-pushed value (cross-device sync).
+  useEffect(() => {
+    if (!selectedTrackId) return;
+    if (lastServerSelectedTrackRef.current === selectedTrackId) return;
+    lastServerSelectedTrackRef.current = selectedTrackId;
+    putSelectedTrack(selectedTrackId).catch((err) => {
+      console.warn('Failed to persist selected-track', err);
+    });
+  }, [selectedTrackId]);
+
+  // Phase 2.6: listen for selected_track_updated from other tabs/devices.
+  useEffect(() => {
+    const unsubscribe = webSocketService.addSelectedTrackListener((event) => {
+      if (event.track_id === selectedTrackId) return; // already on it
+      lastServerSelectedTrackRef.current = event.track_id;
+      setSelectedTrackId(event.track_id);
+    });
+    return unsubscribe;
   }, [selectedTrackId]);
 
   // Phase 2.5 live-sync: re-fetch prefs when ANOTHER tab/device writes them.

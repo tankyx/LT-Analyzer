@@ -158,6 +158,11 @@ export interface PrefsUpdated {
   updated_at: string | null;
 }
 
+export interface SelectedTrackUpdated {
+  user_id: number;
+  track_id: number;
+}
+
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 interface WebSocketCallbacks {
@@ -179,6 +184,7 @@ interface WebSocketCallbacks {
 // (RaceDashboard + StintPlanner) subscribe without competing over the single
 // callback slot above.
 type PrefsListener = (data: PrefsUpdated) => void;
+type SelectedTrackListener = (data: SelectedTrackUpdated) => void;
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -191,6 +197,7 @@ class WebSocketService {
   private currentTrackId: number | null = null;
   private subscribedUserId: number | null = null;
   private prefsListeners: Set<PrefsListener> = new Set();
+  private selectedTrackListeners: Set<SelectedTrackListener> = new Set();
   // (Previously cached the last race_data_update for late-mounting consumers.
   // That replay caused stale-team flashes when the dashboard re-registered
   // callbacks after monitored-team changes. The refresh-race problem is now
@@ -330,6 +337,18 @@ class WebSocketService {
         try { listener(data); } catch (err) { console.error('prefs listener threw', err); }
       }
     });
+
+    // Phase 2.6: cross-device sync of the user's currently-selected track
+    this.socket.on('selected_track_updated', (data: SelectedTrackUpdated) => {
+      for (const listener of this.selectedTrackListeners) {
+        try { listener(data); } catch (err) { console.error('selected-track listener threw', err); }
+      }
+    });
+  }
+
+  addSelectedTrackListener(listener: SelectedTrackListener): () => void {
+    this.selectedTrackListeners.add(listener);
+    return () => { this.selectedTrackListeners.delete(listener); };
   }
 
   // --- Per-user prefs subscription (Phase 2.5) ----------------------------
