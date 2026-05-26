@@ -1119,13 +1119,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     value={assignment.duration}
                     onChange={(e) => handleStintDurationChange(index, parseInt(e.target.value) || 0)}
                     className={`w-full p-1 rounded border text-center ${
-                      isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+                      isDarkMode ? 'border-gray-600' : 'border-gray-300'
                     } ${
                       assignment.isJoker
                         ? isDarkMode ? 'bg-yellow-900' : 'bg-yellow-100'
                         : assignment.isLong
                         ? isDarkMode ? 'bg-blue-900' : 'bg-blue-100'
-                        : ''
+                        : isDarkMode ? 'bg-gray-700' : 'bg-white'
                     }`}
                   />
                 </td>
