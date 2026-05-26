@@ -316,6 +316,36 @@ def handle_leave_all_tracks():
     leave_room('all_tracks')
     print(f"Client {request.sid} left all_tracks room")
 
+
+@socketio.on('subscribe_user_prefs')
+def handle_subscribe_user_prefs(data):
+    """Phase 2.5: join a per-user room so the client receives prefs_updated
+    notifications when any of their other tabs/devices write new prefs.
+
+    The user_id comes from the client (which already authenticated via HTTP).
+    A spoofed user_id only lets someone receive "you should re-fetch" pings
+    for that user — the actual prefs themselves still require the HTTP session
+    cookie to fetch, so this is informational, not authoritative.
+    """
+    try:
+        user_id = int((data or {}).get('user_id'))
+    except (TypeError, ValueError):
+        return
+    if user_id <= 0:
+        return
+    room = f'user_prefs_{user_id}'
+    join_room(room)
+    print(f"Client {request.sid} joined {room}")
+
+
+@socketio.on('unsubscribe_user_prefs')
+def handle_unsubscribe_user_prefs(data):
+    try:
+        user_id = int((data or {}).get('user_id'))
+    except (TypeError, ValueError):
+        return
+    leave_room(f'user_prefs_{user_id}')
+
 @socketio.on('join_team_room')
 def handle_join_team_room(data):
     """Handle client joining a team-specific room for a track"""
@@ -2523,7 +2553,21 @@ def me_prefs_put(track_id):
 
     _audit('prefs_updated', actor_user_id=user['id'],
            target=f'track_{track_id}', details={'fields': sorted(patch.keys())})
-    return jsonify({'prefs': _prefs_row_to_json(row, track_id)})
+
+    prefs_json = _prefs_row_to_json(row, track_id)
+    # Phase 2.5: broadcast a "go re-fetch" ping to all other live tabs/devices
+    # on the same account. Receivers compare updated_at to skip their own
+    # echo (the value they themselves just wrote).
+    try:
+        socketio.emit('prefs_updated', {
+            'user_id': user['id'],
+            'track_id': track_id,
+            'updated_at': prefs_json.get('updated_at'),
+        }, room=f'user_prefs_{user["id"]}')
+    except Exception as emit_err:  # pragma: no cover — defensive
+        print(f'prefs_updated emit failed: {emit_err}')
+
+    return jsonify({'prefs': prefs_json})
 
 
 @app.route('/api/me/prefs/<int:track_id>', methods=['DELETE'])

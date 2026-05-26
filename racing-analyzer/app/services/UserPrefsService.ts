@@ -72,6 +72,18 @@ export function clearCache(trackId: number): void {
   }
 }
 
+// Phase 2.5 live-sync: track the most recent updated_at we've observed per
+// track so listeners can dedup echoes of their own writes.
+const lastSeenUpdatedAt: Map<number, string> = new Map();
+
+export function getLastSeenUpdatedAt(trackId: number): string | undefined {
+  return lastSeenUpdatedAt.get(trackId);
+}
+
+export function setLastSeenUpdatedAt(trackId: number, updatedAt: string | null): void {
+  if (updatedAt) lastSeenUpdatedAt.set(trackId, updatedAt);
+}
+
 async function csrfHeaders(): Promise<Record<string, string>> {
   // The CSRF token endpoint is anonymous (GET); we always have a token in
   // session (issued on first request after page load). Fetch fresh each call —
@@ -95,6 +107,7 @@ export async function getPrefs(trackId: number): Promise<UserTrackPrefs> {
   const body = await resp.json();
   const prefs: UserTrackPrefs = { ...defaultPrefs(trackId), ...(body.prefs || {}) };
   writeCache(prefs);
+  setLastSeenUpdatedAt(trackId, prefs.updated_at);
   return prefs;
 }
 
@@ -122,6 +135,7 @@ export async function updatePrefs(
   const body = await resp.json();
   const prefs: UserTrackPrefs = { ...defaultPrefs(trackId), ...(body.prefs || {}) };
   writeCache(prefs);
+  setLastSeenUpdatedAt(trackId, prefs.updated_at);
   return prefs;
 }
 

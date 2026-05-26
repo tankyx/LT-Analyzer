@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '../../utils/config';
+import webSocketService from '../services/WebSocketService';
 
 interface User {
   id: number;
@@ -151,6 +152,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await checkAuth();
     })();
   }, [fetchCsrf, checkAuth]);
+
+  // Phase 2.5: subscribe to per-user prefs Socket.IO room so other tabs/devices
+  // can push us "go re-fetch" pings when prefs change elsewhere.
+  useEffect(() => {
+    if (user?.id) {
+      webSocketService.subscribeToUserPrefs(user.id);
+      return () => {
+        webSocketService.unsubscribeFromUserPrefs();
+      };
+    }
+  }, [user?.id]);
 
   return (
     <AuthContext.Provider

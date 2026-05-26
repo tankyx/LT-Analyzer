@@ -152,6 +152,12 @@ export interface AllTracksStatusUpdate {
   timestamp: string;
 }
 
+export interface PrefsUpdated {
+  user_id: number;
+  track_id: number;
+  updated_at: string | null;
+}
+
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 interface WebSocketCallbacks {
@@ -166,7 +172,13 @@ interface WebSocketCallbacks {
   onDeltaChange?: (data: DeltaChangeUpdate) => void;
   onSessionStatus?: (data: SessionStatus) => void;
   onAllTracksStatus?: (data: AllTracksStatusUpdate) => void;
+  onPrefsUpdated?: (data: PrefsUpdated) => void;
 }
+
+// External listener registry for prefs_updated. Lets multiple consumers
+// (RaceDashboard + StintPlanner) subscribe without competing over the single
+// callback slot above.
+type PrefsListener = (data: PrefsUpdated) => void;
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -177,6 +189,8 @@ class WebSocketService {
   private maxReconnectDelay = 30000; // Max 30 seconds
   private connectionStatus: ConnectionStatus = 'disconnected';
   private currentTrackId: number | null = null;
+  private subscribedUserId: number | null = null;
+  private prefsListeners: Set<PrefsListener> = new Set();
   // (Previously cached the last race_data_update for late-mounting consumers.
   // That replay caused stale-team flashes when the dashboard re-registered
   // callbacks after monitored-team changes. The refresh-race problem is now
@@ -234,6 +248,10 @@ class WebSocketService {
         console.log(`Rejoining track ${this.currentTrackId} room after reconnection`);
         this.socket?.emit('join_track', { track_id: this.currentTrackId });
         this.socket?.emit('join_all_tracks');
+      }
+      // Re-subscribe to per-user prefs room if logged in
+      if (this.subscribedUserId !== null) {
+        this.socket?.emit('subscribe_user_prefs', { user_id: this.subscribedUserId });
       }
     });
 
@@ -304,6 +322,35 @@ class WebSocketService {
       console.log(`Received status for ${data.tracks.length} tracks`);
       this.callbacks.onAllTracksStatus?.(data);
     });
+
+    // Phase 2.5 live-sync: re-fetch trigger when another tab/device writes prefs
+    this.socket.on('prefs_updated', (data: PrefsUpdated) => {
+      this.callbacks.onPrefsUpdated?.(data);
+      for (const listener of this.prefsListeners) {
+        try { listener(data); } catch (err) { console.error('prefs listener threw', err); }
+      }
+    });
+  }
+
+  // --- Per-user prefs subscription (Phase 2.5) ----------------------------
+
+  subscribeToUserPrefs(userId: number): void {
+    this.subscribedUserId = userId;
+    if (this.socket?.connected) {
+      this.socket.emit('subscribe_user_prefs', { user_id: userId });
+    }
+  }
+
+  unsubscribeFromUserPrefs(): void {
+    if (this.subscribedUserId !== null && this.socket?.connected) {
+      this.socket.emit('unsubscribe_user_prefs', { user_id: this.subscribedUserId });
+    }
+    this.subscribedUserId = null;
+  }
+
+  addPrefsListener(listener: PrefsListener): () => void {
+    this.prefsListeners.add(listener);
+    return () => { this.prefsListeners.delete(listener); };
   }
 
   private updateConnectionStatus(status: ConnectionStatus): void {

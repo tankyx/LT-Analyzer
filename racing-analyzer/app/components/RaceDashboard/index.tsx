@@ -17,6 +17,7 @@ import {
   makePrefsDebouncer,
   readCache as readPrefsCache,
   defaultPrefs,
+  getLastSeenUpdatedAt,
   UserTrackPrefs,
 } from '../../services/UserPrefsService';
 
@@ -824,6 +825,29 @@ const RaceDashboard = () => {
         }
       })();
     }
+  }, [selectedTrackId]);
+
+  // Phase 2.5 live-sync: re-fetch prefs when ANOTHER tab/device writes them.
+  useEffect(() => {
+    if (!selectedTrackId) return;
+    const unsubscribe = webSocketService.addPrefsListener(async (event) => {
+      if (event.track_id !== selectedTrackId) return;
+      // Echo dedup: skip if this is our own write coming back.
+      if (event.updated_at && event.updated_at === getLastSeenUpdatedAt(selectedTrackId)) {
+        return;
+      }
+      try {
+        const fresh = await fetchPrefs(selectedTrackId);
+        setMyTeam(fresh.my_team || '');
+        setMonitoredTeams(fresh.monitored_teams || []);
+        setPitStopTime(fresh.pit_stop_time);
+        setRequiredPitStops(fresh.required_pit_stops);
+        setDefaultLapTime(fresh.default_lap_time);
+      } catch (err) {
+        console.warn('Live prefs refresh failed', err);
+      }
+    });
+    return unsubscribe;
   }, [selectedTrackId]);
 
   const toggleTeamMonitoring = (kartNum: string) => {
