@@ -189,29 +189,17 @@ def handle_connect(auth=None):
         connected_clients.add(request.sid)
     join_room('race_updates')
     
-    # Convert gap_history deques to lists for JSON serialization
-    serializable_gap_history = {}
-    for kart, history in race_data['gap_history'].items():
-        serializable_gap_history[kart] = {
-            'gaps': list(history['gaps']) if isinstance(history['gaps'], deque) else history['gaps'],
-            'last_update': history.get('last_update')
-        }
-        if 'adjusted_gaps' in history:
-            serializable_gap_history[kart]['adjusted_gaps'] = list(history['adjusted_gaps']) if isinstance(history['adjusted_gaps'], deque) else history['adjusted_gaps']
-    
-    # Send current race data on connect
+    # Send current race data on connect. As of Phase 2 we no longer ship
+    # my_team / monitored_teams / pit_config / delta_times / gap_history in
+    # the broadcast payload — those are per-user and live behind /api/me/prefs.
+    # The frontend hydrates them from there on track change.
     emit('race_data_update', {
         'teams': race_data['teams'],
         'session_info': race_data['session_info'],
         'last_update': race_data['last_update'],
-        'delta_times': race_data['delta_times'],
-        'gap_history': serializable_gap_history,
         'simulation_mode': race_data['simulation_mode'],
         'timing_url': race_data['timing_url'],
         'is_running': race_data['is_running'],
-        'my_team': race_data['my_team'],
-        'monitored_teams': race_data['monitored_teams'],
-        'pit_config': race_data['pit_config']
     })
 
 @socketio.on('disconnect')
@@ -408,49 +396,24 @@ def emit_race_update(update_type='full', data=None):
         emit_standings_update()
         
     if update_type == 'full':
-        # Convert gap_history deques to lists for JSON serialization
-        serializable_gap_history = {}
-        for kart, history in race_data['gap_history'].items():
-            serializable_gap_history[kart] = {
-                'gaps': list(history['gaps']) if isinstance(history['gaps'], deque) else history['gaps'],
-                'last_update': history.get('last_update')
-            }
-            if 'adjusted_gaps' in history:
-                serializable_gap_history[kart]['adjusted_gaps'] = list(history['adjusted_gaps']) if isinstance(history['adjusted_gaps'], deque) else history['adjusted_gaps']
-        
+        # Phase 2: per-user state (my_team / monitored_teams / pit_config /
+        # delta_times / gap_history) is no longer broadcast — it lives behind
+        # /api/me/prefs and the frontend hydrates it on track change.
         socketio.emit('race_data_update', {
             'teams': race_data['teams'],
             'session_info': race_data['session_info'],
             'last_update': race_data['last_update'],
-            'delta_times': race_data['delta_times'],
-            'gap_history': serializable_gap_history,
             'simulation_mode': race_data['simulation_mode'],
             'timing_url': race_data['timing_url'],
             'is_running': race_data['is_running'],
-            'my_team': race_data['my_team'],
-            'monitored_teams': race_data['monitored_teams'],
-            'pit_config': race_data['pit_config']
         }, room='race_updates')
     elif update_type == 'teams' and race_data.get('teams'):
         socketio.emit('teams_update', {
             'teams': race_data['teams'],
             'last_update': race_data['last_update']
         }, room='race_updates')
-    elif update_type == 'gaps' and race_data.get('delta_times'):
-        # Convert gap_history deques to lists for JSON serialization
-        serializable_gap_history = {}
-        for kart, history in race_data['gap_history'].items():
-            serializable_gap_history[kart] = {
-                'gaps': list(history['gaps']) if isinstance(history['gaps'], deque) else history['gaps'],
-                'last_update': history.get('last_update')
-            }
-            if 'adjusted_gaps' in history:
-                serializable_gap_history[kart]['adjusted_gaps'] = list(history['adjusted_gaps']) if isinstance(history['adjusted_gaps'], deque) else history['adjusted_gaps']
-        
-        socketio.emit('gap_update', {
-            'delta_times': race_data['delta_times'],
-            'gap_history': serializable_gap_history
-        }, room='race_updates')
+    # Note: 'gaps' update_type is a no-op after Phase 2. Server no longer
+    # computes deltas; frontend derives them client-side from `teams`.
     elif update_type == 'session' and race_data.get('session_info'):
         socketio.emit('session_update', {
             'session_info': race_data['session_info']
@@ -870,6 +833,10 @@ def emit_standings_update():
     }, room='standings_stream')
 
 # Function to calculate delta times between teams
+# calculate_delta_times is retained for the legacy single-track simulator path
+# only. As of Phase 2 the dashboard computes head-to-head deltas client-side
+# from the per-track `teams` payload, so this function isn't on the production
+# hot path. We keep it to avoid breaking /api/start-simulation.
 def calculate_delta_times(teams, my_team_kart, monitored_karts):
     """Calculate delta times between my team and monitored teams"""
     global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS, previous_deltas
@@ -1625,6 +1592,31 @@ def _ensure_auth_schema():
                 'CREATE INDEX IF NOT EXISTS idx_rate_limit_bucket_key_time '
                 'ON rate_limit_events(bucket, key, occurred_at)'
             )
+
+            # --- Phase 2: per-user track prefs ---------------------------------
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS user_track_prefs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    track_id INTEGER NOT NULL,
+                    my_team TEXT,
+                    monitored_teams TEXT,
+                    pit_stop_time INTEGER,
+                    required_pit_stops INTEGER,
+                    default_lap_time REAL,
+                    stint_planner_config TEXT,
+                    stint_planner_presets TEXT,
+                    driver_names TEXT,
+                    current_driver_index INTEGER,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, track_id),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+            ''')
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS idx_user_track_prefs_user '
+                'ON user_track_prefs(user_id)'
+            )
     except sqlite3.Error as e:
         print(f'Warning: auth schema normalization skipped: {e}')
 
@@ -2334,6 +2326,175 @@ def me_delete():
     return jsonify({'success': True})
 
 
+# --- Per-user, per-track preferences (Phase 2) -----------------------------
+
+_PREFS_DEFAULTS = {
+    'my_team': None,
+    'monitored_teams': [],
+    'pit_stop_time': PIT_STOP_TIME,
+    'required_pit_stops': REQUIRED_PIT_STOPS,
+    'default_lap_time': DEFAULT_LAP_TIME,
+    'stint_planner_config': {},
+    'stint_planner_presets': [],
+    'driver_names': [],
+    'current_driver_index': 0,
+}
+
+# Fields the client may PUT; anything else is silently ignored.
+_PREFS_PUTTABLE = set(_PREFS_DEFAULTS.keys())
+
+# JSON-encoded columns (the rest are scalar).
+_PREFS_JSON_COLS = {
+    'monitored_teams', 'stint_planner_config', 'stint_planner_presets', 'driver_names'
+}
+
+
+def _prefs_row_to_json(row, track_id: int) -> dict:
+    """Convert a sqlite Row (or None) to the public JSON shape, applying defaults."""
+    out = {'track_id': track_id, **_PREFS_DEFAULTS, 'updated_at': None}
+    if row is None:
+        return out
+    for k in _PREFS_DEFAULTS:
+        val = row[k] if k in row.keys() else None
+        if val is None:
+            continue
+        if k in _PREFS_JSON_COLS:
+            try:
+                out[k] = json.loads(val)
+            except (TypeError, ValueError):
+                out[k] = _PREFS_DEFAULTS[k]
+        else:
+            out[k] = val
+    out['updated_at'] = row['updated_at'] if 'updated_at' in row.keys() else None
+    return out
+
+
+def _validate_prefs_patch(patch: dict) -> tuple[bool, str]:
+    """Return (ok, error_code). Reject obviously-bad payloads early."""
+    if not isinstance(patch, dict):
+        return False, 'invalid_payload'
+    if 'my_team' in patch and patch['my_team'] is not None and not isinstance(patch['my_team'], str):
+        return False, 'invalid_my_team'
+    if 'monitored_teams' in patch:
+        v = patch['monitored_teams']
+        if not isinstance(v, list) or not all(isinstance(x, (str, int)) for x in v):
+            return False, 'invalid_monitored_teams'
+        if len(v) > 100:
+            return False, 'invalid_monitored_teams'
+    if 'pit_stop_time' in patch:
+        v = patch['pit_stop_time']
+        if not isinstance(v, int) or not (0 < v <= 3600):
+            return False, 'invalid_pit_stop_time'
+    if 'required_pit_stops' in patch:
+        v = patch['required_pit_stops']
+        if not isinstance(v, int) or not (0 <= v <= 100):
+            return False, 'invalid_required_pit_stops'
+    if 'default_lap_time' in patch:
+        v = patch['default_lap_time']
+        if not isinstance(v, (int, float)) or not (0 < float(v) <= 3600):
+            return False, 'invalid_default_lap_time'
+    if 'stint_planner_config' in patch and not isinstance(patch['stint_planner_config'], dict):
+        return False, 'invalid_stint_planner_config'
+    if 'stint_planner_presets' in patch:
+        v = patch['stint_planner_presets']
+        if not isinstance(v, list) or len(v) > 50:
+            return False, 'invalid_stint_planner_presets'
+    if 'driver_names' in patch:
+        v = patch['driver_names']
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            return False, 'invalid_driver_names'
+        if len(v) > 20:
+            return False, 'invalid_driver_names'
+    if 'current_driver_index' in patch:
+        v = patch['current_driver_index']
+        if not isinstance(v, int) or v < 0 or v > 100:
+            return False, 'invalid_current_driver_index'
+    return True, ''
+
+
+@app.route('/api/me/prefs/<int:track_id>', methods=['GET'])
+@login_required
+def me_prefs_get(track_id):
+    user = request.current_user
+    with get_db_connection() as conn:
+        row = conn.execute(
+            'SELECT * FROM user_track_prefs WHERE user_id = ? AND track_id = ?',
+            (user['id'], track_id),
+        ).fetchone()
+    return jsonify({'prefs': _prefs_row_to_json(row, track_id)})
+
+
+@app.route('/api/me/prefs/<int:track_id>', methods=['PUT'])
+@login_required
+def me_prefs_put(track_id):
+    user = request.current_user
+    patch_raw = request.get_json(silent=True)
+    if patch_raw is None:
+        return jsonify({'error': 'invalid_payload'}), 400
+    # Strip anything not in the whitelist (silently ignore unknown fields).
+    patch = {k: v for k, v in patch_raw.items() if k in _PREFS_PUTTABLE}
+    ok, reason = _validate_prefs_patch(patch)
+    if not ok:
+        return jsonify({'error': reason}), 400
+
+    # Convert JSON columns to strings for storage.
+    storage = {}
+    for k, v in patch.items():
+        if k in _PREFS_JSON_COLS:
+            storage[k] = json.dumps(v)
+        else:
+            storage[k] = v
+
+    with get_db_connection() as conn:
+        # UPSERT — sqlite's "ON CONFLICT" against the unique (user_id, track_id).
+        # We always insert with the patch fields set to their patch values and
+        # NULL for everything else; on conflict we only update the patch fields.
+        cols = list(storage.keys())
+        if cols:
+            placeholders = ', '.join('?' for _ in cols)
+            update_clause = ', '.join(f'{c} = excluded.{c}' for c in cols)
+            sql = (
+                f'INSERT INTO user_track_prefs (user_id, track_id, {", ".join(cols)}, updated_at) '
+                f'VALUES (?, ?, {placeholders}, CURRENT_TIMESTAMP) '
+                f'ON CONFLICT(user_id, track_id) DO UPDATE SET '
+                f'{update_clause}, updated_at = CURRENT_TIMESTAMP'
+            )
+            params = [user['id'], track_id, *storage.values()]
+        else:
+            # Empty patch — just touch updated_at so the row exists.
+            sql = (
+                'INSERT INTO user_track_prefs (user_id, track_id, updated_at) '
+                'VALUES (?, ?, CURRENT_TIMESTAMP) '
+                'ON CONFLICT(user_id, track_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP'
+            )
+            params = [user['id'], track_id]
+        conn.execute(sql, params)
+        conn.commit()
+
+        row = conn.execute(
+            'SELECT * FROM user_track_prefs WHERE user_id = ? AND track_id = ?',
+            (user['id'], track_id),
+        ).fetchone()
+
+    _audit('prefs_updated', actor_user_id=user['id'],
+           target=f'track_{track_id}', details={'fields': sorted(patch.keys())})
+    return jsonify({'prefs': _prefs_row_to_json(row, track_id)})
+
+
+@app.route('/api/me/prefs/<int:track_id>', methods=['DELETE'])
+@login_required
+def me_prefs_delete(track_id):
+    user = request.current_user
+    with get_db_connection() as conn:
+        conn.execute(
+            'DELETE FROM user_track_prefs WHERE user_id = ? AND track_id = ?',
+            (user['id'], track_id),
+        )
+        conn.commit()
+    _audit('prefs_reset', actor_user_id=user['id'], target=f'track_{track_id}')
+    return jsonify({'prefs': _prefs_row_to_json(None, track_id)})
+
+
 # User management routes (admin only)
 @app.route('/api/admin/users', methods=['GET'])
 @admin_required
@@ -2541,36 +2702,8 @@ def get_race_data():
     """Return the current race data as JSON"""
     return jsonify(get_serializable_race_data())
 
-@app.route('/api/update-monitoring', methods=['POST'])
-@login_required
-def update_monitoring():
-    """Update the monitored teams"""
-    global race_data
-    
-    data = request.json
-    app.logger.debug('Received monitoring update: %s', data)
-    
-    race_data['my_team'] = data.get('myTeam')
-    race_data['monitored_teams'] = data.get('monitoredTeams', [])
-    
-    print(f"Updated monitoring: my_team={race_data['my_team']}, monitored_teams={race_data['monitored_teams']}")
-    
-    # Emit monitoring update via WebSocket
-    emit_race_update('custom', {
-        'event': 'monitoring_update',
-        'payload': {
-            'my_team': race_data['my_team'],
-            'monitored_teams': race_data['monitored_teams']
-        }
-    })
-    
-    # If we have teams data, recalculate and emit delta times
-    if race_data.get('teams') and race_data['my_team'] and race_data['monitored_teams']:
-        calculate_delta_times(race_data['teams'], race_data['my_team'], race_data['monitored_teams'])
-        # Emit gap updates
-        emit_race_update('gaps')
-    
-    return jsonify({'status': 'success'})
+# /api/update-monitoring removed in Phase 2 — superseded by PUT /api/me/prefs/<track_id>.
+# /api/update-pit-config removed in Phase 2 — same replacement.
 
 @app.route('/api/start-simulation', methods=['POST'])
 @admin_required
@@ -2669,41 +2802,6 @@ def parser_status():
         'websocket_url': race_data.get('websocket_url', ''),
         'timing_url': race_data.get('timing_url', '')
     })
-
-@app.route('/api/update-pit-config', methods=['POST'])
-@login_required
-def update_pit_config():
-    """Update pit stop configuration"""
-    global race_data, PIT_STOP_TIME, REQUIRED_PIT_STOPS, DEFAULT_LAP_TIME
-    
-    data = request.json
-    app.logger.debug('Received pit config update: %s', data)
-    
-    if data:
-        # Update global variables
-        if 'pitStopTime' in data:
-            PIT_STOP_TIME = data['pitStopTime']
-            race_data['pit_config']['pit_time'] = PIT_STOP_TIME
-            
-        if 'requiredPitStops' in data:
-            REQUIRED_PIT_STOPS = data['requiredPitStops']
-            race_data['pit_config']['required_stops'] = REQUIRED_PIT_STOPS
-            
-        if 'defaultLapTime' in data:
-            DEFAULT_LAP_TIME = data['defaultLapTime']
-            race_data['pit_config']['default_lap_time'] = DEFAULT_LAP_TIME
-            
-        print(f"Updated pit config: time={PIT_STOP_TIME}s, required stops={REQUIRED_PIT_STOPS}, default lap={DEFAULT_LAP_TIME}s")
-        
-        # Emit pit config update via WebSocket
-        emit_race_update('custom', {
-            'event': 'pit_config_update',
-            'payload': race_data['pit_config']
-        })
-        
-        return jsonify({'status': 'success', 'message': 'Pit stop configuration updated'})
-    
-    return jsonify({'status': 'error', 'message': 'Invalid configuration data'})
 
 @app.route('/api/set-parser-mode', methods=['POST'])
 @admin_required

@@ -101,6 +101,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   const [showSavePresetDialog, setShowSavePresetDialog] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
 
+  // TODO(phase-2.5): mirror stint planner state to /api/me/prefs/<track_id>
+  // (columns stint_planner_config / stint_planner_presets / driver_names /
+  // current_driver_index are already in the schema). Today this component
+  // remains localStorage-only — multi-tenant correctness is unaffected,
+  // it's purely a cross-device convenience.
   // Load saved values from localStorage on client-side mount (after SSR)
   useEffect(() => {
     // Only run on client side

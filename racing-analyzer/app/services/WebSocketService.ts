@@ -177,9 +177,11 @@ class WebSocketService {
   private maxReconnectDelay = 30000; // Max 30 seconds
   private connectionStatus: ConnectionStatus = 'disconnected';
   private currentTrackId: number | null = null;
-  // Cache the last race_data_update so a late-mounting consumer (refresh race)
-  // gets the snapshot it missed.
-  private lastRaceDataUpdate: RaceDataUpdate | null = null;
+  // (Previously cached the last race_data_update for late-mounting consumers.
+  // That replay caused stale-team flashes when the dashboard re-registered
+  // callbacks after monitored-team changes. The refresh-race problem is now
+  // handled by the dashboard initialising its connectionStatus directly from
+  // getConnectionStatus(), so the cache is unnecessary.)
 
   constructor() {
     // Only connect on client side
@@ -245,10 +247,7 @@ class WebSocketService {
       this.updateConnectionStatus('error');
     });
 
-    // Race data events — cache the most recent snapshot so late-mounting
-    // consumers (page refresh, slow render) can replay it via setCallbacks.
     this.socket.on('race_data_update', (data: RaceDataUpdate) => {
-      this.lastRaceDataUpdate = data;
       this.callbacks.onRaceDataUpdate?.(data);
     });
 
@@ -322,13 +321,12 @@ class WebSocketService {
 
   setCallbacks(callbacks: WebSocketCallbacks): void {
     this.callbacks = { ...this.callbacks, ...callbacks };
-    // Replay the cached connection status + race-data snapshot so a consumer
-    // that mounts after the socket already connected isn't stuck on the
-    // initial state.
+    // Replay the current connection status so a consumer that mounts after
+    // the socket already connected sees the right initial state. Re-runs of
+    // this method (e.g. when the dashboard's checkPitStops dependency
+    // recreates) are no-ops because setConnectionStatus to the same value
+    // doesn't re-render.
     callbacks.onConnectionStatusChange?.(this.connectionStatus);
-    if (this.lastRaceDataUpdate) {
-      callbacks.onRaceDataUpdate?.(this.lastRaceDataUpdate);
-    }
   }
 
   removeCallbacks(): void {

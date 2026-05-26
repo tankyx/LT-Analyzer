@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback  } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef  } from 'react';
 import { useRouter } from 'next/navigation';
 import TimeDeltaChart from './TimeDeltaChart';
 import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
-import webSocketService, { RaceDataUpdate, TeamsUpdate, GapUpdate, SessionUpdate, MonitoringUpdate, PitConfigUpdate, AllTracksStatusUpdate, TrackStatus } from '../../services/WebSocketService';
+import webSocketService, { RaceDataUpdate, TeamsUpdate, SessionUpdate, AllTracksStatusUpdate, TrackStatus } from '../../services/WebSocketService';
 import StatusImageIndicator from './StatusImageIndicator';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
@@ -11,7 +11,14 @@ import StintPlanner from './StintPlanner';
 import AdminPanel from './AdminPanel';
 import MultiTrackStatus from './MultiTrackStatus';
 import { useAuth } from '../../contexts/AuthContext';
-import { saveSelectedTrack, loadSelectedTrack, saveMyTeam, loadMyTeam } from '../../utils/persistence';
+import { saveSelectedTrack, loadSelectedTrack } from '../../utils/persistence';
+import {
+  getPrefs as fetchPrefs,
+  makePrefsDebouncer,
+  readCache as readPrefsCache,
+  defaultPrefs,
+  UserTrackPrefs,
+} from '../../services/UserPrefsService';
 
 // Types
 interface Team {
@@ -427,29 +434,6 @@ const RaceDashboard = () => {
     }
   }, [selectedTrackId]);
 
-  const updatePitStopConfig = useCallback(async (newPitTime: number, newRequiredStops: number, newDefaultLapTime?: number) => {
-    try {
-      await ApiService.updatePitStopConfig({
-        pitStopTime: newPitTime,
-        requiredPitStops: newRequiredStops,
-        defaultLapTime: newDefaultLapTime ?? defaultLapTime
-      });
-      
-      setAlerts(prev => [...prev, {
-        id: Date.now(),
-        message: 'Pit stop settings updated successfully',
-        type: 'success'
-      }]);
-    } catch (error) {
-      console.error('Error updating pit stop config:', error);
-      setAlerts(prev => [...prev, {
-        id: Date.now(),
-        message: `Failed to update pit stop settings: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        type: 'error'
-      }]);
-    }
-  }, [defaultLapTime]);
-
   const getTeamClass = (teamName: string): string | null => {
     if (teamName.startsWith('1 - ')) return '1';
     if (teamName.startsWith('2 - ')) return '2';
@@ -505,16 +489,37 @@ const RaceDashboard = () => {
     setTeamColors(colors);
   };
   
+  // Phase 2: per-(user, track) prefs replace the old global update-monitoring
+  // and update-pit-config endpoints. A debouncer coalesces rapid edits into
+  // one PUT per ~500 ms so typing in a spinner doesn't fire 12 requests.
+  const prefsDebouncerRef = useRef<ReturnType<typeof makePrefsDebouncer> | null>(null);
+  useEffect(() => {
+    if (!selectedTrackId) return;
+    // Flush any pending PUT for the previous track before swapping.
+    prefsDebouncerRef.current?.flush();
+    prefsDebouncerRef.current = makePrefsDebouncer(selectedTrackId, 500);
+    return () => {
+      prefsDebouncerRef.current?.flush();
+    };
+  }, [selectedTrackId]);
+
+  const schedulePrefs = useCallback((patch: Partial<UserTrackPrefs>) => {
+    prefsDebouncerRef.current?.schedule(patch);
+  }, []);
+
   const updateMonitoring = useCallback(async () => {
-    try {
-      await ApiService.updateMonitoring({
-        myTeam,
-        monitoredTeams,
-      });
-    } catch (error) {
-      console.error('Error updating monitoring:', error);
-    }
-  }, [myTeam, monitoredTeams]);
+    schedulePrefs({ my_team: myTeam || null, monitored_teams: monitoredTeams });
+  }, [myTeam, monitoredTeams, schedulePrefs]);
+
+  // Phase 2: pit-stop config is per-(user, track). The PUT goes through the
+  // debouncer so rapid spinner clicks coalesce into a single round-trip.
+  const updatePitStopConfig = useCallback((newPitTime: number, newRequiredStops: number, newDefaultLapTime?: number) => {
+    schedulePrefs({
+      pit_stop_time: newPitTime,
+      required_pit_stops: newRequiredStops,
+      default_lap_time: newDefaultLapTime ?? defaultLapTime,
+    });
+  }, [defaultLapTime, schedulePrefs]);
 
 
   const toggleDarkMode = () => {
@@ -649,13 +654,9 @@ const RaceDashboard = () => {
         setTeams(data.teams || []);
         setSessionInfo(data.session_info || {});
         setLastUpdate(data.last_update || '');
-        setDeltaData(data.delta_times || {});
-        setGapHistory(data.gap_history || {});
-        setMyTeam(data.my_team || '');
-        setMonitoredTeams(data.monitored_teams || []);
-        setPitStopTime(data.pit_config?.pit_time || 158);
-        setRequiredPitStops(data.pit_config?.required_stops || 7);
-        setDefaultLapTime(data.pit_config?.default_lap_time || 90);
+        // Phase 2: my_team / monitored_teams / pit_config / delta_times /
+        // gap_history are no longer on this payload — they're hydrated from
+        // /api/me/prefs/<track_id> when the track selection changes.
         setIsLoading(false);
         setError(null);
         if (data.teams && data.teams.length > 0) {
@@ -673,30 +674,12 @@ const RaceDashboard = () => {
         }
       },
       
-      onGapUpdate: (data: GapUpdate) => {
-        console.log('Received gap update');
-        setDeltaData(data.delta_times || {});
-        setGapHistory(data.gap_history || {});
-      },
-      
+      // Phase 2: onGapUpdate / onMonitoringUpdate / onPitConfigUpdate are no
+      // longer emitted by the backend. Deltas are computed client-side and
+      // monitoring + pit config live behind /api/me/prefs.
       onSessionUpdate: (data: SessionUpdate) => {
         console.log('Received session update');
         setSessionInfo(data.session_info || {});
-      },
-      
-      onMonitoringUpdate: (data: MonitoringUpdate) => {
-        console.log('Received monitoring update');
-        setMyTeam(data.my_team || '');
-        setMonitoredTeams(data.monitored_teams || []);
-      },
-      
-      onPitConfigUpdate: (data: PitConfigUpdate) => {
-        console.log('Received pit config update');
-        setPitStopTime(data.pit_time || 158);
-        setRequiredPitStops(data.required_stops || 7);
-        if (data.default_lap_time !== undefined) {
-          setDefaultLapTime(data.default_lap_time);
-        }
       },
       
       onRaceDataReset: () => {
@@ -757,20 +740,15 @@ const RaceDashboard = () => {
         if (result && result.tracks) {
           setAvailableTracks(result.tracks);
 
-          // Try to load saved track selection (client-side only)
+          // Try to load saved track selection (client-side only).
+          // Phase 2: per-(user, track) prefs now live on the server; the
+          // track-selection useEffect hydrates them.
           let trackToSelect = result.tracks[0].id; // Default to first track
 
           if (typeof window !== 'undefined') {
             const savedTrackId = loadSelectedTrack();
-            // Validate that saved track ID exists in available tracks
             if (savedTrackId && result.tracks.some((t: {id: number; track_name: string}) => t.id === savedTrackId)) {
               trackToSelect = savedTrackId;
-            }
-
-            // Load saved team selection
-            const savedTeam = loadMyTeam();
-            if (savedTeam) {
-              setMyTeam(savedTeam);
             }
           }
 
@@ -822,15 +800,31 @@ const RaceDashboard = () => {
       setAlertedPitTeams(new Set());
       webSocketService.joinTrack(selectedTrackId);
       saveSelectedTrack(selectedTrackId);
+
+      // Phase 2: hydrate per-(user, track) prefs from the server. We seed
+      // from the localStorage cache immediately so the UI doesn't flash to
+      // defaults, then refresh from the server in the background.
+      const cached = readPrefsCache(selectedTrackId);
+      const seed: UserTrackPrefs = cached || defaultPrefs(selectedTrackId);
+      setMyTeam(seed.my_team || '');
+      setMonitoredTeams(seed.monitored_teams || []);
+      setPitStopTime(seed.pit_stop_time);
+      setRequiredPitStops(seed.required_pit_stops);
+      setDefaultLapTime(seed.default_lap_time);
+      (async () => {
+        try {
+          const fresh = await fetchPrefs(selectedTrackId);
+          setMyTeam(fresh.my_team || '');
+          setMonitoredTeams(fresh.monitored_teams || []);
+          setPitStopTime(fresh.pit_stop_time);
+          setRequiredPitStops(fresh.required_pit_stops);
+          setDefaultLapTime(fresh.default_lap_time);
+        } catch (err) {
+          console.warn('Failed to load prefs for track', selectedTrackId, err);
+        }
+      })();
     }
   }, [selectedTrackId]);
-
-  // Save myTeam to localStorage when it changes
-  useEffect(() => {
-    if (myTeam) {
-      saveMyTeam(myTeam);
-    }
-  }, [myTeam]);
 
   const toggleTeamMonitoring = (kartNum: string) => {
     setIsUserUpdate(true);
