@@ -75,6 +75,12 @@ def migrate(db_path: str) -> dict:
             )
             summary['indexes_created'].append('idx_user_track_prefs_user')
 
+        # stint_assignments column added after the initial migration.
+        cols = {row[1] for row in conn.execute('PRAGMA table_info(user_track_prefs)').fetchall()}
+        if 'stint_assignments' not in cols:
+            conn.execute('ALTER TABLE user_track_prefs ADD COLUMN stint_assignments TEXT')
+            summary['tables_created'].append('user_track_prefs.stint_assignments (column)')
+
         conn.commit()
     finally:
         conn.close()

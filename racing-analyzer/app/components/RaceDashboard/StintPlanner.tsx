@@ -145,6 +145,9 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         if (Array.isArray(prefs.stint_planner_presets) && prefs.stint_planner_presets.length > 0) {
           setAvailablePresets(prefs.stint_planner_presets as unknown as StintPreset[]);
         }
+        if (Array.isArray(prefs.stint_assignments) && prefs.stint_assignments.length > 0) {
+          setStintAssignments(prefs.stint_assignments as unknown as StintAssignment[]);
+        }
       } catch (err) {
         console.warn('StintPlanner: failed to fetch prefs', err);
       } finally {
@@ -187,6 +190,9 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         }
         if (Array.isArray(fresh.stint_planner_presets)) {
           setAvailablePresets(fresh.stint_planner_presets as unknown as StintPreset[]);
+        }
+        if (Array.isArray(fresh.stint_assignments)) {
+          setStintAssignments(fresh.stint_assignments as unknown as StintAssignment[]);
         }
         setTimeout(() => setHasServerPrefsSynced(true), 0);
       } catch (err) {
@@ -535,11 +541,17 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     }
   }, [driverNames, hasServerPrefsSynced]);
 
-  // Persist stint assignments — localStorage only (recalculated from config
-  // on load, so server-side persistence is unnecessary).
+  // Persist stint assignments to localStorage + server. Server-side is needed
+  // because per-stint manual edits (driver swap, duration tweak, joker flag)
+  // would otherwise be lost on a device switch.
   useEffect(() => {
     saveStintAssignments(stintAssignments);
-  }, [stintAssignments]);
+    if (hasServerPrefsSynced) {
+      prefsDebouncerRef.current?.schedule({
+        stint_assignments: stintAssignments as unknown as Array<Record<string, unknown>>,
+      });
+    }
+  }, [stintAssignments, hasServerPrefsSynced]);
 
   // Persist current driver index to localStorage + server
   useEffect(() => {

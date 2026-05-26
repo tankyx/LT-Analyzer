@@ -1688,6 +1688,10 @@ def _ensure_auth_schema():
                 'CREATE INDEX IF NOT EXISTS idx_user_track_prefs_user '
                 'ON user_track_prefs(user_id)'
             )
+            # Add stint_assignments column for tables that pre-date this field.
+            prefs_cols = {row[1] for row in conn.execute('PRAGMA table_info(user_track_prefs)').fetchall()}
+            if 'stint_assignments' not in prefs_cols:
+                conn.execute('ALTER TABLE user_track_prefs ADD COLUMN stint_assignments TEXT')
     except sqlite3.Error as e:
         print(f'Warning: auth schema normalization skipped: {e}')
 
@@ -2411,6 +2415,7 @@ _PREFS_DEFAULTS = {
     'default_lap_time': DEFAULT_LAP_TIME,
     'stint_planner_config': {},
     'stint_planner_presets': [],
+    'stint_assignments': [],
     'driver_names': [],
     'current_driver_index': 0,
 }
@@ -2420,7 +2425,8 @@ _PREFS_PUTTABLE = set(_PREFS_DEFAULTS.keys())
 
 # JSON-encoded columns (the rest are scalar).
 _PREFS_JSON_COLS = {
-    'monitored_teams', 'stint_planner_config', 'stint_planner_presets', 'driver_names'
+    'monitored_teams', 'stint_planner_config', 'stint_planner_presets',
+    'stint_assignments', 'driver_names',
 }
 
 
@@ -2474,6 +2480,10 @@ def _validate_prefs_patch(patch: dict) -> tuple[bool, str]:
         v = patch['stint_planner_presets']
         if not isinstance(v, list) or len(v) > 50:
             return False, 'invalid_stint_planner_presets'
+    if 'stint_assignments' in patch:
+        v = patch['stint_assignments']
+        if not isinstance(v, list) or len(v) > 200:
+            return False, 'invalid_stint_assignments'
     if 'driver_names' in patch:
         v = patch['driver_names']
         if not isinstance(v, list) or not all(isinstance(x, str) for x in v):

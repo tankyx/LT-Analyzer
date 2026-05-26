@@ -16,6 +16,7 @@ export interface UserTrackPrefs {
   default_lap_time: number;
   stint_planner_config: Record<string, unknown>;
   stint_planner_presets: Array<Record<string, unknown>>;
+  stint_assignments: Array<Record<string, unknown>>;
   driver_names: string[];
   current_driver_index: number;
   updated_at: string | null;
@@ -29,6 +30,7 @@ const DEFAULTS: Omit<UserTrackPrefs, 'track_id'> = {
   default_lap_time: 90,
   stint_planner_config: {},
   stint_planner_presets: [],
+  stint_assignments: [],
   driver_names: [],
   current_driver_index: 0,
   updated_at: null,
