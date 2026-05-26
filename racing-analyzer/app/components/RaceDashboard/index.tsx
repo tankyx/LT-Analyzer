@@ -837,6 +837,11 @@ const RaceDashboard = () => {
         return;
       }
       try {
+        // Flush our own pending PUTs first so the server has the latest of
+        // what we know. Without this, an unrelated PUT (e.g. StintPlanner
+        // saving a preset) would emit prefs_updated that causes us to
+        // overwrite locally-staged-but-not-yet-pushed monitored_teams.
+        await prefsDebouncerRef.current?.flush();
         const fresh = await fetchPrefs(selectedTrackId);
         setMyTeam(fresh.my_team || '');
         setMonitoredTeams(fresh.monitored_teams || []);

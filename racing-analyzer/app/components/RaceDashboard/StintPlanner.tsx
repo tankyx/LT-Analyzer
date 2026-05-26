@@ -167,6 +167,12 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         return; // our own write coming back, skip
       }
       try {
+        // Flush any pending PUT we owe to the server BEFORE re-fetching.
+        // Otherwise an unrelated emit (e.g. monitored_teams changing in the
+        // dashboard) would cause us to pull a `stint_planner_config` snapshot
+        // that's older than what we have locally and revert the just-applied
+        // preset.
+        await prefsDebouncerRef.current?.flush();
         const fresh = await fetchUserPrefs(trackId);
         // Skip the state-watching effects from echoing back to the server
         // while we apply the fresh values. The flag bounces false → true
