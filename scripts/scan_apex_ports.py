@@ -27,7 +27,10 @@ DEFAULT_HOST = "www.apex-timing.com"
 _SSL = ssl.create_default_context()
 _SSL.check_hostname = False
 _SSL.verify_mode = ssl.CERT_NONE
-_TITLE_RE = re.compile(r"(?:title1?|grid\|title)\|[^|]*\|([^\r\n]+)")
+# The feed's `track` command carries the layout/length, which often (not always)
+# names the venue, e.g. "CREMONA CIRCUIT - 3.768 km". title1 is the session name.
+_TRACK_RE = re.compile(r"(?:^|\n)track\|\|([^\r\n]+)")
+_TITLE_RE = re.compile(r"(?:^|\n)title1\|\|([^\r\n]+)")
 
 
 async def tcp_open(host, port, timeout):
@@ -45,10 +48,13 @@ async def tcp_open(host, port, timeout):
 
 
 async def ws_probe(host, port, timeout):
-    """Connect to the feed; return (is_apex, title) within `timeout` seconds."""
+    """Connect to the feed; return (is_apex, name_hint) within `timeout` seconds.
+
+    name_hint prefers the `track` layout field (often the venue), else title1.
+    """
     import websockets
     url = f"wss://{host}:{port}/"
-    title = None
+    track = title = None
     try:
         async with websockets.connect(url, ssl=_SSL, open_timeout=timeout,
                                       close_timeout=2, max_size=2**22) as ws:
@@ -60,15 +66,17 @@ async def ws_probe(host, port, timeout):
                 except (asyncio.TimeoutError, Exception):
                     break
                 text = msg if isinstance(msg, str) else msg.decode("utf-8", "replace")
-                # Apex frames are pipe-delimited commands (init|grid|title|css|r..c..)
-                if "|" in text and any(k in text for k in ("grid", "title", "init", "css", "|r")):
+                if "|" in text and any(k in text for k in ("grid", "title", "init", "css", "track", "|r")):
                     saw_apex = True
-                m = _TITLE_RE.search(text)
-                if m and m.group(1).strip():
-                    title = m.group(1).strip()
-                if saw_apex and title:
+                mt = _TRACK_RE.search(text)
+                if mt and mt.group(1).strip():
+                    track = mt.group(1).strip()
+                mi = _TITLE_RE.search(text)
+                if mi and mi.group(1).strip():
+                    title = mi.group(1).strip()
+                if saw_apex and track:
                     break
-            return saw_apex, title
+            return saw_apex, (track or title)
     except Exception:
         return False, None
 
