@@ -178,6 +178,22 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
   - Deletes all laps faster than threshold (useful for removing data errors)
   - Requires admin authentication
 
+### Fleet Tracker (endurance physical-machine tracking)
+All endpoints are **per-user** (scoped to the logged-in user) and require login. Reads + writes are all `@login_required` — there is no admin gate (any logged-in user manages their own fleet).
+- `GET /api/track/<id>/fleet/karts` - List the caller's physical-kart registry (`?active=0` to include retired)
+- `POST /api/track/<id>/fleet/karts` - Register a kart (`{label, notes?}`); 409 on a duplicate active label for that user
+- `PUT /api/track/<id>/fleet/karts/<kart_id>` - Edit a kart (`{label?, notes?, is_active?}`)
+- `DELETE /api/track/<id>/fleet/karts/<kart_id>` - Soft-retire a kart (sets `is_active=0`; history preserved)
+- `GET /api/track/<id>/fleet/state` - The caller's live board for a session (`?session_id`, defaults to the parser's current session). Pulls live standings from the parser for column/location. Cached per `(track, user)` for 3s.
+- `POST /api/track/<id>/fleet/auto-populate` - Seed the fleet from the session's karts: one kart per team (labelled `K-<number>`) + a stint-0 assignment each. Exact at race start (plate == machine pre-first-pit). Idempotent per user.
+- `POST /api/track/<id>/fleet/assignments` - Assign a team to a kart (`{session_id, team_name, fleet_kart_id, stint_index?}`). Advances the stint so the team's previous kart frees back to Available; clears the kart's lane.
+- `POST /api/track/<id>/fleet/assignments/correct` - Supersede an assignment and insert a corrected one (`{assignment_id, fleet_kart_id}`)
+- `GET /api/track/<id>/fleet/assignments` - The caller's full assignment log for a session (incl. superseded)
+- `POST /api/track/<id>/fleet/release` - Dissociate a kart from its team (it was dropped) and place it in a lane (`{session_id, fleet_kart_id, lane?}`)
+- `POST /api/track/<id>/fleet/lane` - Move an Available kart between lanes (`{fleet_kart_id, lane}`)
+
+**Note**: Fleet data is delivered by per-user polling of `/fleet/state` (the frontend refetches on each `track_update`, throttled ~3s, and after mutations) — **not** by a Socket.IO broadcast (a shared broadcast can't carry per-user boards).
+
 ### Testing & Development
 - `POST /api/test/simulate-session/<track_id>` - Simulate active session on a track (for testing)
 - `POST /api/test/stop-session/<track_id>` - Stop simulated session on a track
@@ -253,7 +269,8 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
 
 5. **Database Architecture**: Uses SQLite with per-track databases:
    - `race_data_track_N.db` - One database per track with race data and lap times
-     - Tables: `race_sessions`, `lap_times`, `lap_history`
+     - Tables: `race_sessions`, `lap_times`, `lap_history`, `fleet_karts`, `fleet_assignments`
+     - `fleet_karts` / `fleet_assignments` back the Fleet Tracker; both carry `user_id` (fleet data is per-user). `fleet_karts` has a `lane` column (the kart's Available pit-lane, NULL when held) and a per-`(user_id, label)` unique index on active rows.
      - WAL mode enabled for better concurrent access
      - 7 indexes per database for optimal query performance
      - 5-second busy timeout for lock handling
@@ -464,6 +481,18 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
       - One-click access to team analysis features
       - Positioned below session status indicator
       - Themed styling (adapts to light/dark mode)
+
+21. **Fleet Tracker** (`racing-analyzer/app/components/RaceDashboard/FleetTracker.tsx`, `KartAssignmentEntry.tsx`, `race_ui.py`, `multi_track_manager.py`):
+    - **Problem it solves**: in endurance races a team keeps its competition number but physically swaps karts every stint; the timing feed only ever exposes *team* identity (`no`/`dr`), never the physical machine. Fleet Tracker lets the operator track which physical kart each team is on, rank the fleet by pace, and spot fast/slow machines entering the pits.
+    - **Per-user & login-gated**: each user keeps their own kart registry + assignments and sees only their own board (see DB note in §5). Any logged-in user can use it — there is no admin gate.
+    - **Pit-lane kanban UI** (a tab in the dashboard `TabbedInterface`):
+      - Three columns: **On track** / **In pit** (both timing-driven from the holder team's live status) and **Available**, which is laid out as N horizontal **colored pit lanes** (lane count + colors are per-track, stored in `localStorage`).
+      - **Assign** a kart out of Available to a team; from then its column follows the live timing. **Release** a dropped kart back into a lane (this dissociates the team). Assigning a team its *next* kart auto-frees the previous one to Available.
+      - **Drag-and-drop** via `@dnd-kit/core` (PointerSensor + long-press TouchSensor, so a quick swipe scrolls and a hold drags) **plus tap-to-move** (tap a card → action sheet) for reliable one-handed mobile use. Mobile-first throughout.
+      - **Auto-populate**: opening the tab on an empty fleet with a live session (or the button) creates a kart per team (labelled `K-<number>`) and bootstraps each team's stint-0 assignment — exact because pre-first-pit the plate *is* the machine. Physical IDs format as `K-<n>`; competition numbers display as `#<n>`.
+    - **Pace fingerprint** (`_compute_live_fleet_pace` in `race_ui.py`): reuses `_segment_stints` + the kart-fairness conditions-residualized methodology — each stint's mean minus a rolling field median (cancels track conditions), attributed to the kart mapped for that stint, lap-weighted, classified fast/slow via a robust MAD band; `<5` laps reads `insufficient`. Caveat: cancels conditions but **not driver skill**, so early rankings are noisy.
+    - **Assignment log is append-only**: corrections/releases supersede rows (audit trail), so re-attribution is automatic on recompute.
+    - **Tests**: `tests/test_fleet/` (pytest, incl. `test_e2e_endurance.py` — full lifecycle over HTTP) and `racing-analyzer/__tests__/fleet/` (jest).
 
 ## Multi-Track System Flow
 
