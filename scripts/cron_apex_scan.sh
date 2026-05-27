@@ -1,10 +1,11 @@
 #!/bin/bash
 # Periodic Apex feed-port scan: discover karting circuits that are live right now
-# and add the newly-named ones to tracks.db. Restarts the backend ONLY when new
-# tracks were actually added (so it doesn't disrupt live data collection on every
-# run). Intended to run from cron — see the crontab entry installed alongside it.
+# and add the newly-named ones to tracks.db. Restarts the backend when new tracks
+# were added, but at most once an hour so frequent scans don't thrash live data
+# collection. Intended to run from cron — see the crontab entry alongside it.
 #
-#   crontab:  0 */3 * * * /home/ubuntu/LT-Analyzer/scripts/cron_apex_scan.sh
+#   crontab:  */15 * * * * /home/ubuntu/LT-Analyzer/scripts/cron_apex_scan.sh
+RESTART_MIN_GAP=3300   # don't restart the backend more than once per ~55 min
 set -u
 cd /home/ubuntu/LT-Analyzer || exit 1
 PY=./racing-venv/bin/python
@@ -26,6 +27,12 @@ added=$(( after - before ))
 echo "[$(ts)] scan done (tracks=$after, +$added)" >> "$LOG"
 
 if [ "$added" -gt 0 ]; then
-    echo "[$(ts)] +$added new track(s) — restarting backend to monitor them" >> "$LOG"
-    pm2 restart lt-analyzer-backend >> "$LOG" 2>&1
+    marker=logs/.last_restart
+    if [ -f "$marker" ] && [ $(( $(date +%s) - $(stat -c %Y "$marker") )) -lt "$RESTART_MIN_GAP" ]; then
+        echo "[$(ts)] +$added new, but backend restarted <55m ago — deferring to next window" >> "$LOG"
+    else
+        echo "[$(ts)] +$added new track(s) — restarting backend to monitor them" >> "$LOG"
+        pm2 restart lt-analyzer-backend >> "$LOG" 2>&1
+        touch "$marker"
+    fi
 fi
