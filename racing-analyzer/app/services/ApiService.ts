@@ -174,9 +174,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracks`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+        credentials: 'include',
         body: JSON.stringify(data),
       });
       if (!response.ok) {
@@ -208,9 +207,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracks/${id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+        credentials: 'include',
         body: JSON.stringify(data),
       });
       if (!response.ok) {
@@ -228,6 +226,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/tracks/${id}`, {
         method: 'DELETE',
+        headers: { ...(await getCsrfHeaders()) },
+        credentials: 'include',
       });
       if (!response.ok) {
         const errorData = await response.json();
