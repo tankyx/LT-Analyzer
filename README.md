@@ -22,6 +22,10 @@ deltas, kart-fairness analytics, and stint planning. Deployed at
   every venue.
 - Stint planner with named per-track presets, driver rotation, and live
   in-race timer.
+- Fleet Tracker: a per-user pit-lane kanban for endurance races that tracks
+  which physical kart each team is on (the number plate follows the team, so
+  machine identity is supplied by the operator), ranks the fleet by inferred
+  pace, and flags fast/slow karts entering the pits.
 - Driver-level analytics: variance-deficit fairness test for the kart-draw
   question, per-driver best-pace leaderboard, alias merging for drivers
   who race under multiple team names.
@@ -191,6 +195,7 @@ LT-Analyzer/
 │   ├── test_auth/              # registration, verify, login, CSRF, /me
 │   ├── test_phase2/            # per-user prefs CRUD + isolation
 │   ├── test_phase3/            # query cache + heavy-read rate limit
+│   ├── test_fleet/             # Fleet Tracker: pace, CRUD, auth, E2E lifecycle
 │   └── test_migrations/        # Phase 1 + 2 schema migrations
 ├── racing-analyzer/            # Next.js 15 dashboard
 │   ├── app/
@@ -202,7 +207,7 @@ LT-Analyzer/
 │   │   ├── admin, data, team/[teamName]/
 │   │   └── ...
 │   ├── utils/                          # raceMath, persistence, config
-│   ├── __tests__/                      # Jest tests (auth, phase2, utils)
+│   ├── __tests__/                      # Jest tests (auth, phase2, utils, fleet)
 │   ├── .env.production
 │   └── package.json
 └── docs/

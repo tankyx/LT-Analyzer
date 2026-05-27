@@ -208,6 +208,30 @@ and cached server-side (60s TTL, invalidated by admin writes).
 
 ---
 
+## Fleet Tracker (endurance physical-machine tracking)
+
+All require login and are **per-user** — every endpoint is scoped to the
+calling user's own fleet (no admin gate; any logged-in user manages their own).
+Delivery is by polling `GET .../fleet/state` (the frontend refetches on each
+`track_update`, throttled ~3s, and after mutations) — there is **no** Socket.IO
+broadcast (a shared event can't carry per-user boards).
+
+| Endpoint | Notes |
+|---|---|
+| `GET /api/track/<id>/fleet/karts` | Caller's kart registry (`?active=0` includes retired) |
+| `POST /api/track/<id>/fleet/karts` | `{label, notes?}`; 409 on duplicate active label for that user |
+| `PUT /api/track/<id>/fleet/karts/<kart_id>` | `{label?, notes?, is_active?}` |
+| `DELETE /api/track/<id>/fleet/karts/<kart_id>` | Soft-retire (`is_active=0`; history kept) |
+| `GET /api/track/<id>/fleet/state?session_id=` | Caller's live board; pulls parser standings for columns; cached per `(track,user)` 3s |
+| `POST /api/track/<id>/fleet/auto-populate` | `{session_id?}` — one `K-<n>` kart + stint-0 assignment per team; idempotent |
+| `POST /api/track/<id>/fleet/assignments` | `{session_id, team_name, fleet_kart_id, stint_index?}`; advances stint to free the team's prior kart |
+| `POST /api/track/<id>/fleet/assignments/correct` | `{assignment_id, fleet_kart_id}` — supersede + re-insert |
+| `GET /api/track/<id>/fleet/assignments?session_id=` | Caller's assignment log (incl. superseded) |
+| `POST /api/track/<id>/fleet/release` | `{session_id, fleet_kart_id, lane?}` — dissociate a dropped kart into a lane |
+| `POST /api/track/<id>/fleet/lane` | `{fleet_kart_id, lane}` — move an Available kart between lanes |
+
+---
+
 ## Test endpoints (production: disabled)
 
 When `ENABLE_TEST_ENDPOINTS=true` (dev only):

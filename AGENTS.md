@@ -11,6 +11,7 @@ LT-Analyzer is a comprehensive racing telemetry analysis system that collects, p
 - Android overlay API for live position tracking
 - Historical data analysis and session management
 - WebSocket-based live updates with Socket.IO
+- Fleet Tracker: per-user endurance pit-lane kanban that tracks each team's physical kart, ranks the fleet by pace, and flags fast/slow karts entering the pits
 
 ## Technology Stack
 

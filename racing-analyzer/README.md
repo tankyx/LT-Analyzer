@@ -34,7 +34,7 @@ rebuild + pm2 restart.
 ## Tests
 
 ```bash
-npm test                                       # all 57 tests
+npm test                                       # all 77 tests
 npm test -- --testPathPatterns=auth            # subset
 npm run test:coverage                          # with coverage report
 ```
@@ -46,7 +46,7 @@ See [`../TESTING.md`](../TESTING.md) for the full guide.
 | Path | Purpose |
 |---|---|
 | `app/` | App Router pages + components |
-| `app/components/RaceDashboard/` | Main live view (track switcher, standings, deltas, stint planner) |
+| `app/components/RaceDashboard/` | Main live view (track switcher, standings, deltas, stint planner, Fleet Tracker kanban) |
 | `app/contexts/AuthContext.tsx` | Auth state, CSRF token, `apiFetch` wrapper, Socket.IO user-prefs subscription |
 | `app/services/` | `ApiService`, `WebSocketService`, `UserPrefsService`, `SelectedTrackService` |
 | `app/login`, `app/register`, `app/verify-email`, `app/forgot-password`, `app/reset-password`, `app/privacy`, `app/terms` | Auth + GDPR pages |
@@ -56,5 +56,5 @@ See [`../TESTING.md`](../TESTING.md) for the full guide.
 | `utils/raceMath.ts` | Client-side delta math (Phase 2) |
 | `utils/persistence.ts` | localStorage helpers (legacy + active) |
 | `utils/config.ts` | Env-var-driven config (`API_BASE_URL`, `TURNSTILE_SITE_KEY`, etc.) |
-| `__tests__/` | Jest tests (auth, phase2, utils) |
+| `__tests__/` | Jest tests (auth, phase2, utils, fleet) |
 | `.env.production` | Build-time public env vars |

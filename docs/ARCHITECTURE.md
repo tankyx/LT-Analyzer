@@ -88,6 +88,25 @@ CREATE TABLE lap_history (
     position_after_lap INTEGER,
     pit_this_lap INTEGER
 );
+
+-- Fleet Tracker (per-user). fleet_karts is a user's physical-kart registry;
+-- fleet_assignments is an append-only team->kart log (corrections/releases
+-- supersede rows). Both carry user_id; fleet_karts.lane is the kart's Available
+-- pit-lane (NULL when held). Unique active label is per (user_id, label).
+CREATE TABLE fleet_karts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER, label TEXT NOT NULL, notes TEXT,
+    is_active INTEGER DEFAULT 1, lane INTEGER,
+    created_at TEXT NOT NULL, updated_at TEXT
+);
+
+CREATE TABLE fleet_assignments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER, session_id INTEGER NOT NULL, team_name TEXT NOT NULL,
+    kart_number INTEGER, fleet_kart_id INTEGER NOT NULL, stint_index INTEGER NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual', created_at TEXT NOT NULL,
+    created_by INTEGER, superseded INTEGER DEFAULT 0
+);
 ```
 
 **Indexes on `lap_times`** (post-2026-05-26 cleanup):
@@ -223,6 +242,29 @@ Deferred:
 
 - **gunicorn migration** — risky because of the asyncio scraper. Needs
   its own session with a staging test of eventlet vs gthread workers.
+
+## Fleet Tracker
+
+Endurance-race tool. The timing feed only ever exposes a team's competition
+number (the plate follows the team across kart swaps), so the *physical*
+machine each team runs is supplied by the operator. Data is **per-user**: each
+user has their own `fleet_karts` registry + `fleet_assignments` log (see schema
+above) and sees only their own board.
+
+- **Pace fingerprint** (`_compute_live_fleet_pace`, `race_ui.py`): reuses
+  `_segment_stints` and the kart-fairness conditions-residualized approach —
+  each stint's mean minus a rolling field median, attributed to the kart mapped
+  for that stint, lap-weighted, classified fast/slow via a robust MAD band
+  (`<5` laps → `insufficient`). Cancels track conditions, **not** driver skill.
+- **Columns** (On track / In pit) are derived from the holder team's live
+  status; **Available** karts sit in operator-assigned pit lanes. `auto-populate`
+  seeds one `K-<n>` kart + a stint-0 assignment per team (exact pre-first-pit).
+- **Delivery is per-user polling**, not a broadcast: the frontend refetches
+  `/fleet/state` on each `track_update` (throttled ~3s) and after mutations.
+  `compute_fleet_payload` caches per `(track_id, user_id)` for 3s.
+- **Frontend** `FleetTracker.tsx` is a pit-lane kanban (`@dnd-kit/core` drag +
+  tap-to-move action sheet; mobile-first). Lane count/colors are per-track in
+  `localStorage`.
 
 ## Frontend architecture
 

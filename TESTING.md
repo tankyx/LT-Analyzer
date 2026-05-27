@@ -27,6 +27,7 @@ npm test -- --testPathPatterns=auth   # subset
 | `tests/test_auth/` | Phase 1 — registration, email verification, password reset, login, CSRF guard, audit log, rate limits, gated reads, `/api/auth/me`, ProxyFix, admin invite + audit endpoints | 82 |
 | `tests/test_phase2/` | Per-user-per-track prefs CRUD + auth isolation + validation, legacy endpoint removal | 32 |
 | `tests/test_phase3/` | TTL query cache + heavy-read rate limit | 8 |
+| `tests/test_fleet/` | Fleet Tracker — pace fingerprint, stint reuse, registry/assignment CRUD, per-user auth + isolation, payload shape, and a full end-to-end endurance lifecycle over HTTP (`test_e2e_endurance.py`) | 39 |
 | `tests/test_migrations/` | Phase 1 + 2 schema migration idempotency + duplicate-email guard + FK cascade | 9 |
 
 The shared fixture `tests/test_auth/conftest.py` stands up a real
@@ -45,6 +46,7 @@ Markers:
 |---|---|---|
 | `__tests__/auth/` | Phase 1 — Turnstile widget, AuthContext (CSRF + login result codes), register / verify-email / forgot-password / reset-password pages | 21 |
 | `__tests__/phase2/` | UserPrefsService (CSRF header injection, debouncer coalescing with fake timers), raceMath (parse, head-to-head gap, adjusted gap, trend arrows) | 32 |
+| `__tests__/fleet/` | Fleet Tracker — kanban column/lane placement, tap-to-assign, release-to-lane, lane recolor, `#`/`K-` formatting, auto-populate guards, ApiService fleet calls | 20 |
 | `__tests__/utils/` | Existing config helper test | 4 |
 
 Jest config is in `racing-analyzer/jest.config.js` with `next/jest` so
