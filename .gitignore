@@ -41,3 +41,6 @@ race_data.db
 
 # TypeScript build info
 **/tsconfig.tsbuildinfo
+
+# Runtime logs (apex scan, etc.)
+logs/
