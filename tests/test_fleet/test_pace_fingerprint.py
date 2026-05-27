@@ -3,6 +3,7 @@ attribution, and re-attribution when an assignment changes."""
 
 from datetime import datetime, timedelta
 
+import pandas as pd
 import pytest
 
 from .conftest import seed_session, seed_fleet_kart, seed_laps, seed_assignment, TRACK_ID, SEED_USER_ID
@@ -73,6 +74,25 @@ def test_unassigned_team_listed_and_available_kart(fleet_app, track_conn):
     payload = fleet_app._compute_live_fleet_pace(track_conn, 102, SEED_USER_ID)
     assert "Ghost" in payload["unassigned_teams"]
     assert _by_label(payload, "Empty")["location"] == "available"
+
+
+def test_columns_and_lane_in_payload(fleet_app, track_conn):
+    """Available karts carry their lane + column; held karts derive column from
+    live status."""
+    seed_session(track_conn, 105)
+    # Available kart placed in lane 2.
+    kid = seed_fleet_kart(track_conn, "Avail")
+    track_conn.execute("UPDATE fleet_karts SET lane = 2 WHERE id = ?", (kid,))
+    track_conn.commit()
+    # Held kart whose team is in the pits.
+    held = seed_fleet_kart(track_conn, "Held")
+    seed_laps(track_conn, 105, "Pitting", [60.0] * 6, [0] * 6, kart_number=5)
+    seed_assignment(track_conn, 105, "Pitting", held, 0)
+    standings = pd.DataFrame([{"Team": "Pitting", "Status": "Pit-in", "Kart": "5", "Position": "1"}])
+    payload = fleet_app._compute_live_fleet_pace(track_conn, 105, SEED_USER_ID, standings_df=standings)
+    avail = _by_label(payload, "Avail")
+    assert avail["column"] == "available" and avail["lane"] == 2
+    assert _by_label(payload, "Held")["column"] == "in_pit"
 
 
 def test_reattribution_follows_assignment_change(fleet_app, track_conn):

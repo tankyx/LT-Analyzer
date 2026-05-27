@@ -15,8 +15,8 @@ TOP_LEVEL_KEYS = {
 }
 KART_KEYS = {
     "fleet_kart_id", "label", "holder_team", "holder_kart_number", "holder_position",
-    "location", "stint_index", "mean_residual", "pace_delta_vs_fleet", "uncertainty",
-    "sample_laps", "n_stints", "classification", "rank", "alerts",
+    "location", "column", "lane", "stint_index", "mean_residual", "pace_delta_vs_fleet",
+    "uncertainty", "sample_laps", "n_stints", "classification", "rank", "alerts",
 }
 
 

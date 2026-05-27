@@ -6355,11 +6355,15 @@ def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None):
     """
     cur = conn.cursor()
 
-    # 1. This user's active registry: id -> label
+    # 1. This user's active registry: id -> (label, lane)
     cur.execute(
-        "SELECT id, label FROM fleet_karts WHERE is_active = 1 AND user_id = ? ORDER BY label",
+        "SELECT id, label, lane FROM fleet_karts WHERE is_active = 1 AND user_id = ? ORDER BY label",
         (user_id,))
-    registry = {row[0]: row[1] for row in cur.fetchall()}
+    registry = {}
+    kart_lane = {}
+    for kid, label, lane in cur.fetchall():
+        registry[kid] = label
+        kart_lane[kid] = lane
 
     # 2. Per-team clean lap series (reuse the dedup/parse/clamp of the endurance
     #    analyzer) and a flat field list for the rolling reference.
@@ -6511,6 +6515,15 @@ def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None):
         elif location == 'in-pits' and cls == 'slow':
             alerts.append('slow_kart_in_pits')
 
+        # Kanban column derived from location (on track / in pit are timing-
+        # driven for held karts; unheld karts sit Available in a lane).
+        if location == 'available':
+            column = 'available'
+        elif location == 'in-pits':
+            column = 'in_pit'
+        else:  # on-track or unknown
+            column = 'on_track'
+
         karts.append({
             'fleet_kart_id': kid,
             'label': label,
@@ -6518,6 +6531,8 @@ def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None):
             'holder_kart_number': live_info['kart_number'] if live_info else None,
             'holder_position': live_info['position'] if live_info else None,
             'location': location,
+            'column': column,
+            'lane': kart_lane.get(kid) if column == 'available' else None,
             'stint_index': max(amap[holder_team].keys()) if holder_team and amap.get(holder_team) else None,
             'mean_residual': mean_residual,
             'pace_delta_vs_fleet': round(delta, 3) if delta is not None else None,
@@ -6765,7 +6780,15 @@ def record_fleet_assignment(track_id):
                 return jsonify({'error': 'unknown or inactive fleet_kart_id'}), 400
             stint_index = data.get('stint_index')
             if stint_index is None:
-                stint_index = _infer_stint_index(cur, session_id, team_name)
+                # Advance past the team's current stint so this kart becomes the
+                # holder and the team's previous kart frees back to Available.
+                cur.execute(
+                    "SELECT MAX(stint_index) FROM fleet_assignments "
+                    "WHERE session_id = ? AND user_id = ? AND team_name = ? AND superseded = 0",
+                    (session_id, uid, team_name))
+                row = cur.fetchone()
+                team_max = row[0] if row and row[0] is not None else -1
+                stint_index = max(_infer_stint_index(cur, session_id, team_name), team_max + 1)
             cur.execute(
                 "SELECT kart_number FROM lap_times WHERE session_id = ? AND team_name = ? "
                 "ORDER BY timestamp DESC LIMIT 1", (session_id, team_name))
@@ -6779,6 +6802,9 @@ def record_fleet_assignment(track_id):
                 (uid, session_id, team_name, kart_number, fleet_kart_id, int(stint_index),
                  source, datetime.now().isoformat(), uid),
             )
+            # The kart is now held by a team, so it leaves its Available lane.
+            cur.execute("UPDATE fleet_karts SET lane = NULL WHERE id = ? AND user_id = ?",
+                        (fleet_kart_id, uid))
             conn.commit()
             assignment_id = cur.lastrowid
         finally:
@@ -6846,6 +6872,76 @@ def correct_fleet_assignment(track_id):
         raise
     except Exception as e:
         return _internal_error(e, 'correct_fleet_assignment')
+
+
+@app.route('/api/track/<int:track_id>/fleet/release', methods=['POST'])
+@login_required
+def release_fleet_kart(track_id):
+    """Dissociate a kart from its team (it was dropped) and place it in an
+    Available lane. Supersedes the kart's current assignment for this user."""
+    try:
+        uid = request.current_user['id']
+        data = request.get_json(silent=True) or {}
+        fleet_kart_id = data.get('fleet_kart_id')
+        session_id = data.get('session_id') or _live_session_id(track_id)
+        lane = data.get('lane')
+        if not fleet_kart_id or not session_id:
+            return jsonify({'error': 'fleet_kart_id and session_id are required'}), 400
+        conn = get_track_db_connection(track_id)
+        try:
+            cur = conn.cursor()
+            # End every live assignment of this kart for the user in the session.
+            cur.execute(
+                "UPDATE fleet_assignments SET superseded = 1 "
+                "WHERE user_id = ? AND session_id = ? AND fleet_kart_id = ? AND superseded = 0",
+                (uid, session_id, fleet_kart_id))
+            cur.execute(
+                "UPDATE fleet_karts SET lane = ? WHERE id = ? AND user_id = ?",
+                (int(lane) if lane is not None else None, fleet_kart_id, uid))
+            if cur.rowcount == 0:
+                return jsonify({'error': 'kart not found'}), 404
+            conn.commit()
+        finally:
+            conn.close()
+        _fleet_cache.pop((track_id, uid), None)
+        _audit('fleet_release', actor_user_id=uid,
+               target=f'track_{track_id}/session_{session_id}/kart_{fleet_kart_id}',
+               details={'lane': lane})
+        return jsonify({'ok': True})
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'release_fleet_kart')
+
+
+@app.route('/api/track/<int:track_id>/fleet/lane', methods=['POST'])
+@login_required
+def set_fleet_kart_lane(track_id):
+    """Move an Available kart between lanes (sets fleet_karts.lane)."""
+    try:
+        uid = request.current_user['id']
+        data = request.get_json(silent=True) or {}
+        fleet_kart_id = data.get('fleet_kart_id')
+        if not fleet_kart_id:
+            return jsonify({'error': 'fleet_kart_id is required'}), 400
+        lane = data.get('lane')
+        conn = get_track_db_connection(track_id)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE fleet_karts SET lane = ? WHERE id = ? AND user_id = ?",
+                (int(lane) if lane is not None else None, fleet_kart_id, uid))
+            if cur.rowcount == 0:
+                return jsonify({'error': 'kart not found'}), 404
+            conn.commit()
+        finally:
+            conn.close()
+        _fleet_cache.pop((track_id, uid), None)
+        return jsonify({'ok': True})
+    except UnknownTrackError:
+        raise
+    except Exception as e:
+        return _internal_error(e, 'set_fleet_kart_lane')
 
 
 @app.route('/api/track/<int:track_id>/fleet/assignments', methods=['GET'])

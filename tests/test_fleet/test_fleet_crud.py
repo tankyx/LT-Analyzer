@@ -164,6 +164,50 @@ def test_fleet_karts_are_per_user(client, admin_user, normal_user):
     assert r.status_code == 201
 
 
+def test_release_dissociates_and_sets_lane(client, admin_user):
+    token = login(client, admin_user["username"], admin_user["password"])
+    kid = client.post(f"{BASE}/karts", json={"label": "R"}, headers=_hdr(token)).get_json()["kart"]["id"]
+    client.post(f"{BASE}/assignments",
+                json={"session_id": 800, "team_name": "TeamR", "fleet_kart_id": kid},
+                headers=_hdr(token))
+    r = client.post(f"{BASE}/release",
+                    json={"session_id": 800, "fleet_kart_id": kid, "lane": 3}, headers=_hdr(token))
+    assert r.status_code == 200
+    # The team's live assignment is now superseded (kart dissociated).
+    rows = client.get(f"{BASE}/assignments?session_id=800").get_json()["assignments"]
+    assert all(row["superseded"] for row in rows if row["fleet_kart_id"] == kid)
+    # And the lane is persisted on the kart.
+    with _track_db() as conn:
+        lane = conn.execute("SELECT lane FROM fleet_karts WHERE id = ?", (kid,)).fetchone()[0]
+    assert lane == 3
+
+
+def test_set_lane(client, admin_user):
+    token = login(client, admin_user["username"], admin_user["password"])
+    kid = client.post(f"{BASE}/karts", json={"label": "L"}, headers=_hdr(token)).get_json()["kart"]["id"]
+    r = client.post(f"{BASE}/lane", json={"fleet_kart_id": kid, "lane": 2}, headers=_hdr(token))
+    assert r.status_code == 200
+    with _track_db() as conn:
+        lane = conn.execute("SELECT lane FROM fleet_karts WHERE id = ?", (kid,)).fetchone()[0]
+    assert lane == 2
+
+
+def test_assigning_new_kart_frees_the_previous_one(client, admin_user):
+    """Giving a team its next kart should make the old kart the team's
+    non-holder (a later stint), so the old kart frees back to Available."""
+    token = login(client, admin_user["username"], admin_user["password"])
+    k1 = client.post(f"{BASE}/karts", json={"label": "first"}, headers=_hdr(token)).get_json()["kart"]["id"]
+    k2 = client.post(f"{BASE}/karts", json={"label": "second"}, headers=_hdr(token)).get_json()["kart"]["id"]
+    a1 = client.post(f"{BASE}/assignments",
+                     json={"session_id": 801, "team_name": "Swappy", "fleet_kart_id": k1},
+                     headers=_hdr(token)).get_json()["assignment"]
+    a2 = client.post(f"{BASE}/assignments",
+                     json={"session_id": 801, "team_name": "Swappy", "fleet_kart_id": k2},
+                     headers=_hdr(token)).get_json()["assignment"]
+    # The second assignment must sit at a higher stint so k2 is the holder.
+    assert a2["stint_index"] > a1["stint_index"]
+
+
 def test_audit_logged_on_create(client, admin_user):
     token = login(client, admin_user["username"], admin_user["password"])
     client.post(f"{BASE}/karts", json={"label": "Audited"}, headers=_hdr(token))

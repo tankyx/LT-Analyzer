@@ -177,8 +177,14 @@ class MultiTrackManager:
                 # Additive migration for DBs created before fleet went per-user.
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA table_info(fleet_karts)")
-                if 'user_id' not in [c[1] for c in cursor.fetchall()]:
+                kart_cols = [c[1] for c in cursor.fetchall()]
+                if 'user_id' not in kart_cols:
                     conn.execute('ALTER TABLE fleet_karts ADD COLUMN user_id INTEGER')
+                # lane: which pit-lane the kart sits in while Available (NULL when
+                # held by a team or not yet placed). Drives the colored lanes in
+                # the kanban board.
+                if 'lane' not in kart_cols:
+                    conn.execute('ALTER TABLE fleet_karts ADD COLUMN lane INTEGER')
                 cursor.execute("PRAGMA table_info(fleet_assignments)")
                 if 'user_id' not in [c[1] for c in cursor.fetchall()]:
                     conn.execute('ALTER TABLE fleet_assignments ADD COLUMN user_id INTEGER')

@@ -904,6 +904,46 @@ export const ApiService = {
     }
   },
 
+  releaseFleetKart: async (
+    trackId: number, fleetKartId: number, lane: number | null, sessionId?: number | null,
+  ) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/release`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ fleet_kart_id: fleetKartId, lane, session_id: sessionId ?? undefined }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to release kart');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error releasing kart:', error);
+      throw error;
+    }
+  },
+
+  setFleetKartLane: async (trackId: number, fleetKartId: number, lane: number | null) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/track/${trackId}/fleet/lane`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+        credentials: 'include',
+        body: JSON.stringify({ fleet_kart_id: fleetKartId, lane }),
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to move kart');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error moving kart lane:', error);
+      throw error;
+    }
+  },
+
   recordAssignment: async (
     trackId: number,
     sessionId: number | null,

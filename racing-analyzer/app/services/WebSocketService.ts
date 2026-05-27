@@ -140,6 +140,7 @@ export interface SessionStatus {
 
 // Fleet Tracker (endurance physical-machine tracking)
 export type FleetLocation = 'on-track' | 'in-pits' | 'available' | 'unknown';
+export type FleetColumn = 'on_track' | 'in_pit' | 'available';
 export type FleetClassification = 'fast' | 'slow' | 'neutral' | 'insufficient';
 
 export interface FleetKartState {
@@ -149,6 +150,8 @@ export interface FleetKartState {
   holder_kart_number: number | null;
   holder_position: number | null;
   location: FleetLocation;
+  column: FleetColumn;          // kanban column
+  lane: number | null;          // pit lane when Available
   stint_index: number | null;
   mean_residual: number | null;
   pace_delta_vs_fleet: number | null;  // seconds; <0 faster than fleet median
