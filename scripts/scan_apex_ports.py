@@ -131,6 +131,8 @@ def main():
     ap.add_argument("--names-from", help="discover_apex_tracks.py --json for nice names")
     ap.add_argument("--json", help="write results JSON")
     ap.add_argument("--apply", action="store_true", help="insert NEW tracks into tracks.db")
+    ap.add_argument("--named-only", action="store_true",
+                    help="with --apply, skip feeds that have no name yet (idle circuits)")
     args = ap.parse_args()
 
     if args.all_ports:
@@ -153,7 +155,9 @@ def main():
         json.dump(found, open(args.json, "w"), indent=2, ensure_ascii=False)
         print(f"Wrote {args.json}", file=sys.stderr)
     if args.apply:
-        _apply(found, args.host)
+        to_apply = [r for r in found if not r["track_name"].startswith("Apex circuit :")] \
+            if args.named_only else found
+        _apply(to_apply, args.host)
     else:
         for r in found:
             print(f"{r['track_name']}\t{r['websocket_url']}")
