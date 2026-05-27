@@ -33,7 +33,7 @@ interface AdminPanelProps {
 }
 
 export default function AdminPanel({ isDarkMode }: AdminPanelProps) {
-  const { user } = useAuth();
+  const { user, apiFetch } = useAuth();
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'tracks'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -103,12 +103,8 @@ export default function AdminPanel({ isDarkMode }: AdminPanelProps) {
 
   const handleCreateUser = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/users`, {
+      const response = await apiFetch('/api/admin/users', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
         body: JSON.stringify(userForm),
       });
 
@@ -131,12 +127,8 @@ export default function AdminPanel({ isDarkMode }: AdminPanelProps) {
     if (userForm.password) updates.password = userForm.password;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/users/${editingUser.id}`, {
+      const response = await apiFetch(`/api/admin/users/${editingUser.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
         body: JSON.stringify(updates),
       });
 
@@ -155,9 +147,8 @@ export default function AdminPanel({ isDarkMode }: AdminPanelProps) {
     if (!confirm('Are you sure you want to delete this user?')) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/users/${userId}`, {
+      const response = await apiFetch(`/api/admin/users/${userId}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
 
       if (response.ok) {
@@ -170,12 +161,8 @@ export default function AdminPanel({ isDarkMode }: AdminPanelProps) {
 
   const handleCreateTrack = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/tracks`, {
+      const response = await apiFetch('/api/admin/tracks', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
         body: JSON.stringify({
           ...trackForm,
           length_meters: trackForm.length_meters ? parseInt(trackForm.length_meters) : null,
@@ -204,12 +191,8 @@ export default function AdminPanel({ isDarkMode }: AdminPanelProps) {
     if (!editingTrack) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/tracks/${editingTrack.id}`, {
+      const response = await apiFetch(`/api/admin/tracks/${editingTrack.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
         body: JSON.stringify({
           ...trackForm,
           length_meters: trackForm.length_meters ? parseInt(trackForm.length_meters) : null,
@@ -239,9 +222,8 @@ export default function AdminPanel({ isDarkMode }: AdminPanelProps) {
     if (!confirm('Are you sure you want to delete this track?')) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/admin/tracks/${trackId}`, {
+      const response = await apiFetch(`/api/admin/tracks/${trackId}`, {
         method: 'DELETE',
-        credentials: 'include',
       });
 
       if (response.ok) {
