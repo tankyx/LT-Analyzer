@@ -1,0 +1,378 @@
+[
+  {
+    "slug": "karting-mariembourg",
+    "track_name": "Karting des Fagnes",
+    "timing_url": "https://www.apex-timing.com/live-timing/karting-mariembourg/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8313/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "spa-francorchamps-karting",
+    "track_name": "Spa Francorchamps Karting",
+    "timing_url": "https://www.apex-timing.com/live-timing/spa-francorchamps-karting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9723/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "rkc",
+    "track_name": "RKC",
+    "timing_url": "https://www.apex-timing.com/live-timing/rkc/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7913/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "kartland",
+    "track_name": "Kartland",
+    "timing_url": "https://www.apex-timing.com/live-timing/kartland/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7733/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "kll-loisirs-douvrin",
+    "track_name": "KLL Loisirs Douvrin",
+    "timing_url": "https://www.apex-timing.com/live-timing/kll-loisirs-douvrin/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8903/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "metz-kart-indoor",
+    "track_name": "Metz Kart Indoor",
+    "timing_url": "https://www.apex-timing.com/live-timing/metz-kart-indoor/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9273/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "solokart",
+    "track_name": "SoloKart",
+    "timing_url": "https://www.apex-timing.com/live-timing/solokart/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8033/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "karting-genk",
+    "track_name": "Karting Genk",
+    "timing_url": "https://www.apex-timing.com/live-timing/karting-genk/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8243/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "korridas",
+    "track_name": "Korridas",
+    "timing_url": "https://www.apex-timing.com/live-timing/korridas/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7633/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "worldkarts",
+    "track_name": "Worldkarts",
+    "timing_url": "https://www.apex-timing.com/live-timing/worldkarts/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8143/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "mkracing",
+    "track_name": "MK Racing",
+    "timing_url": "https://www.apex-timing.com/live-timing/mkracing/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9063/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "shenington",
+    "track_name": "SKRC",
+    "timing_url": "https://www.apex-timing.com/live-timing/shenington/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7783/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "circuit-de-lenclos",
+    "track_name": "Circuit de l'Enclos",
+    "timing_url": "https://www.apex-timing.com/live-timing/circuit-de-lenclos/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8493/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "dunois-kart",
+    "track_name": "Dunois Kart",
+    "timing_url": "https://www.apex-timing.com/live-timing/dunois-kart/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8543/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "passionkarting16",
+    "track_name": "Passion Karting 16",
+    "timing_url": "https://www.apex-timing.com/live-timing/passionkarting16/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9303/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "rgmmc",
+    "track_name": "Rgmmc",
+    "timing_url": "https://www.apex-timing.com/live-timing/rgmmc/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7683/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "rgmmc2",
+    "track_name": "Rgmmc2",
+    "timing_url": "https://www.apex-timing.com/live-timing/rgmmc2/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7063/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "whiltonmill",
+    "track_name": "Whilton Mill",
+    "timing_url": "https://www.apex-timing.com/live-timing/whiltonmill/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7773/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "dutchracingseries",
+    "track_name": "Dutch Racing Series",
+    "timing_url": "https://www.apex-timing.com/live-timing/dutchracingseries/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9463/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "fiakarting",
+    "track_name": "Fiakarting",
+    "timing_url": "https://www.apex-timing.com/live-timing/fiakarting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7813/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "rushhour-karting",
+    "track_name": "Rush Hour Karting",
+    "timing_url": "https://www.apex-timing.com/live-timing/rushhour-karting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8693/",
+    "gmt": -4,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "circuit-europe",
+    "track_name": "Circuit de l Europe Karting",
+    "timing_url": "https://www.apex-timing.com/live-timing/circuit-europe/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8203/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "capkarting",
+    "track_name": "Capkarting",
+    "timing_url": "https://www.apex-timing.com/live-timing/capkarting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7953/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "sportkarting",
+    "track_name": "Sport karting",
+    "timing_url": "https://www.apex-timing.com/live-timing/sportkarting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8163/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "fastlane-indoor-racing",
+    "track_name": "Fastlane indoor Racing",
+    "timing_url": "https://www.apex-timing.com/live-timing/fastlane-indoor-racing/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8673/",
+    "gmt": -4,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "wsk",
+    "track_name": "WSK",
+    "timing_url": "https://www.apex-timing.com/live-timing/wsk/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7433/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "ligue-karting-idf",
+    "track_name": "Ligue Karting IDF",
+    "timing_url": "https://www.apex-timing.com/live-timing/ligue-karting-idf/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7363/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "grand-circuit-du-roussillon",
+    "track_name": "Karting Roussillon",
+    "timing_url": "https://www.apex-timing.com/live-timing/grand-circuit-du-roussillon/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8413/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "kartbaanoldenzaal",
+    "track_name": "Kartbaanoldenzaal",
+    "timing_url": "https://www.apex-timing.com/live-timing/kartbaanoldenzaal/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9513/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "kartodromodeviana",
+    "track_name": "Kartodromodeviana",
+    "timing_url": "https://www.apex-timing.com/live-timing/kartodromodeviana/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8983/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "cabodomundokarting",
+    "track_name": "Cabo Do Mundo Karting",
+    "timing_url": "https://www.apex-timing.com/live-timing/cabodomundokarting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8193/",
+    "gmt": 0,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "sportstimingsystems2",
+    "track_name": "Sports Timing Systems",
+    "timing_url": "https://www.apex-timing.com/live-timing/sportstimingsystems2/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7503/",
+    "gmt": 0,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "raktrack",
+    "track_name": "Raktrack",
+    "timing_url": "https://www.apex-timing.com/live-timing/raktrack/index.html",
+    "websocket_url": "wss://www.apex-timing.com:6993/",
+    "gmt": 4,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "mk-circuit",
+    "track_name": "MK Circuit",
+    "timing_url": "https://www.apex-timing.com/live-timing/mk-circuit/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8083/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "circuitpaulricardkarting",
+    "track_name": "Circuit Paul Ricard",
+    "timing_url": "https://www.apex-timing.com/live-timing/circuitpaulricardkarting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7923/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "pks-loisirs",
+    "track_name": "Circuit du Val d'Argenton",
+    "timing_url": "https://www.apex-timing.com/live-timing/pks-loisirs/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9253/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "karttiming",
+    "track_name": "Apex Timing Kart Timing",
+    "timing_url": "https://www.apex-timing.com/live-timing/karttiming/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9583/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "sports-timing-uk",
+    "track_name": "Sports Timing Uk",
+    "timing_url": "https://www.apex-timing.com/live-timing/sports-timing-uk/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7563/",
+    "gmt": 0,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "cronosystem2",
+    "track_name": "Live Timing Cronosystem",
+    "timing_url": "https://www.apex-timing.com/live-timing/cronosystem2/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8803/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "kartodromo-lucas-guerrero",
+    "track_name": "10 Aniversario - Kartodromo Lucas Guerrero",
+    "timing_url": "https://www.apex-timing.com/live-timing/kartodromo-lucas-guerrero/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9953/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "elk-motorsport",
+    "track_name": "ELK Motorsport - karting center live timing",
+    "timing_url": "https://www.apex-timing.com/live-timing/elk-motorsport/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8263/",
+    "gmt": 1,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "ligue-karting-op",
+    "track_name": "Ligue Karting Op",
+    "timing_url": "https://www.apex-timing.com/live-timing/ligue-karting-op/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7223/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "evokart",
+    "track_name": "Evokart",
+    "timing_url": "https://www.apex-timing.com/live-timing/evokart/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7693/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "lemans-karting",
+    "track_name": "Le Mans Karting",
+    "timing_url": "https://www.apex-timing.com/live-timing/lemans-karting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7963/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "lavalloisirskart",
+    "track_name": "Laval Loisirs Kart",
+    "timing_url": "https://www.apex-timing.com/live-timing/lavalloisirskart/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8123/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "kart-escale",
+    "track_name": "Kart Escale",
+    "timing_url": "https://www.apex-timing.com/live-timing/kart-escale/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8323/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "lemans-karting2",
+    "track_name": "Le Mans Karting",
+    "timing_url": "https://www.apex-timing.com/live-timing/lemans-karting2/index.html",
+    "websocket_url": "wss://www.apex-timing.com:8013/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  }
+]

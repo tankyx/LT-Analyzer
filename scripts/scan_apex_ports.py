@@ -133,6 +133,9 @@ def main():
     ap.add_argument("--apply", action="store_true", help="insert NEW tracks into tracks.db")
     ap.add_argument("--named-only", action="store_true",
                     help="with --apply, skip feeds that have no name yet (idle circuits)")
+    ap.add_argument("--known-only", action="store_true",
+                    help="with --apply + --names-from, only import feeds that resolve to a "
+                         "real venue name from the names map (skip generic layout-only feeds)")
     args = ap.parse_args()
 
     if args.all_ports:
@@ -155,8 +158,13 @@ def main():
         json.dump(found, open(args.json, "w"), indent=2, ensure_ascii=False)
         print(f"Wrote {args.json}", file=sys.stderr)
     if args.apply:
-        to_apply = [r for r in found if not r["track_name"].startswith("Apex circuit :")] \
-            if args.named_only else found
+        to_apply = found
+        if args.named_only:
+            to_apply = [r for r in to_apply if not r["track_name"].startswith("Apex circuit :")]
+        if args.known_only:
+            # Only feeds we have a real config venue name for (by port). Skips
+            # generic layout-only names so they don't keep reappearing.
+            to_apply = [r for r in to_apply if r["port"] in names]
         _apply(to_apply, args.host)
     else:
         for r in found:
