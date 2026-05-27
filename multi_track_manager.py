@@ -286,9 +286,11 @@ class MultiTrackManager:
 
         self.logger.info(f"Started {len(self.tasks)} track parser(s)")
 
-        # Wait for all tasks (they run indefinitely until stopped)
+        # Wait for all tasks (they run indefinitely until stopped). return_exceptions
+        # keeps the gather alive when a single task is cancelled (e.g. one track
+        # torn down via stop_track_parser) instead of unwinding the whole manager.
         try:
-            await asyncio.gather(*self.tasks.values())
+            await asyncio.gather(*self.tasks.values(), return_exceptions=True)
         except asyncio.CancelledError:
             self.logger.info("Parser tasks cancelled")
 
@@ -312,6 +314,29 @@ class MultiTrackManager:
         self.parsers.clear()
         self.tasks.clear()
         self.logger.info("All parsers stopped")
+
+    async def stop_track_parser(self, track_id: int) -> bool:
+        """Stop and remove the parser for a single track (e.g. after deletion),
+        without disturbing the other tracks. Cancels its task, closes its
+        websocket, and stops its monitor thread. Returns True if anything was
+        torn down. Run on the manager's event loop (run_coroutine_threadsafe)."""
+        task = self.tasks.pop(track_id, None)
+        parser = self.parsers.pop(track_id, None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if parser:
+            try:
+                await parser.cleanup()
+            except Exception as e:
+                self.logger.warning(f"Track {track_id}: cleanup error during teardown: {e}")
+        if task or parser:
+            self.logger.info(f"Track {track_id}: parser torn down")
+            return True
+        return False
 
     def get_active_tracks(self) -> List[Dict]:
         """Get list of currently active tracks"""
@@ -672,11 +697,20 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
         return await super().connect_websocket(ws_url)
 
     async def cleanup(self):
-        """Override cleanup to stop monitoring thread"""
+        """Override cleanup to stop monitoring thread + close the websocket"""
         # Stop monitoring thread
         if self.monitor_thread and self.monitor_thread.is_alive():
             self.monitor_stop_event.set()
             self.monitor_thread.join(timeout=5)
+
+        # Close the websocket explicitly — the base parser assigns self.websocket
+        # rather than using an `async with`, so a cancelled task won't close it.
+        if getattr(self, 'websocket', None):
+            try:
+                await self.websocket.close()
+            except Exception:
+                pass
+            self.websocket = None
 
         # Call parent cleanup if it exists
         if hasattr(super(), 'cleanup'):

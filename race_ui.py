@@ -3146,6 +3146,22 @@ def admin_update_track(track_id):
 
     return jsonify({'success': True})
 
+def _teardown_track_parser(track_id):
+    """Best-effort: stop + remove the live parser for a track on the manager's
+    event loop, so a deleted track stops being scraped immediately instead of
+    lingering until the next backend restart."""
+    global multi_track_manager, multi_track_loop
+    if not (multi_track_manager and multi_track_loop):
+        return False
+    try:
+        fut = asyncio.run_coroutine_threadsafe(
+            multi_track_manager.stop_track_parser(track_id), multi_track_loop)
+        return bool(fut.result(timeout=10))
+    except Exception as e:
+        app.logger.warning(f"Track {track_id}: parser teardown failed: {e}")
+        return False
+
+
 @app.route('/api/admin/tracks/<int:track_id>', methods=['DELETE'])
 @admin_required
 def admin_delete_track(track_id):
@@ -3155,6 +3171,7 @@ def admin_delete_track(track_id):
     if 'error' in result:
         return jsonify({'error': result['error']}), 404
 
+    _teardown_track_parser(track_id)
     return jsonify({'success': True})
 
 
@@ -3545,9 +3562,10 @@ def update_track(track_id):
 def delete_track(track_id):
     """Delete a track from the database"""
     result = track_db.delete_track(track_id)
-    
+
     if 'error' in result:
         return jsonify(result), 404
+    _teardown_track_parser(track_id)
     return jsonify(result)
 
 @app.route('/api/reset-race-data', methods=['POST'])
