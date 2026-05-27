@@ -55,7 +55,13 @@ SEED_SLUGS = [
     "pks-loisirs", "karttiming", "sports-timing-uk", "cumbria", "cronosystem2",
     "kartodromo-lucas-guerrero", "elk-motorsport", "ligue-karting-op", "evokart",
     "lemans-karting", "lavalloisirskart", "kart-escale", "lemans-karting2",
+    "cremona-circuit", "ask-puma-forez",
 ]
+
+# Clean display names for circuits whose config.js title/logo is weak or missing.
+NAME_OVERRIDES = {
+    "ask-puma-forez": "ASK Puma Forez (Bicêtre)",
+}
 
 _CFG_RE = {
     "port": re.compile(r"var\s+configPort\s*=\s*(\d+)"),
@@ -98,8 +104,8 @@ def probe(slug):
         m_gmt = _CFG_RE["gmt"].search(body)
         return {
             "slug": slug,
-            "track_name": _clean_name(slug, m_logo.group(1) if m_logo else "",
-                                      m_title.group(1) if m_title else ""),
+            "track_name": NAME_OVERRIDES.get(slug) or _clean_name(
+                slug, m_logo.group(1) if m_logo else "", m_title.group(1) if m_title else ""),
             "timing_url": base + "index.html",
             # Apex's client JS builds the feed URL as wss://<host>:(configPort+3)/
             # over https (see commonv2/javascript_live_timing.min.js). Matches the

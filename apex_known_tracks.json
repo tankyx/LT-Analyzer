@@ -374,5 +374,21 @@
     "websocket_url": "wss://www.apex-timing.com:8013/",
     "gmt": 2,
     "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "cremona-circuit",
+    "track_name": "Cremona Circuit",
+    "timing_url": "https://www.apex-timing.com/live-timing/cremona-circuit/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7203/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "ask-puma-forez",
+    "track_name": "ASK Puma Forez (Bicêtre)",
+    "timing_url": "https://www.apex-timing.com/live-timing/ask-puma-forez/index.html",
+    "websocket_url": "wss://www.apex-timing.com:7083/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
   }
 ]
