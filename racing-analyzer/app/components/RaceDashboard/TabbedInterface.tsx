@@ -32,14 +32,14 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
 
   return (
     <div className="rounded-lg shadow overflow-hidden">
-      {/* Tab Navigation */}
-      <div className={`flex border-b ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
+      {/* Tab Navigation — horizontally scrollable so all tabs are reachable on mobile */}
+      <div className={`flex border-b overflow-x-auto ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => handleTabChange(tab.id)}
             className={`
-              flex items-center gap-2 px-4 py-3 transition-colors font-medium
+              flex items-center gap-2 px-4 py-3 transition-colors font-medium flex-shrink-0 whitespace-nowrap
               ${activeTab === tab.id 
                 ? (isDarkMode 
                     ? 'text-white border-b-2 border-blue-500' 

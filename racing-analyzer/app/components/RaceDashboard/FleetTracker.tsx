@@ -96,7 +96,9 @@ const KartCard: React.FC<{ kart: FleetKartState; isDarkMode: boolean; onSelect: 
         {...listeners} {...attributes}
         data-testid="fleet-kart-card"
         onClick={() => onSelect(kart)}
-        className={`rounded-lg border p-2 mb-2 cursor-grab active:cursor-grabbing touch-none ${cardBase} ${isDragging ? 'opacity-40' : ''}`}
+        // No touch-action:none here — the TouchSensor uses a long-press delay,
+        // so a quick swipe still scrolls the lanes/page and a hold starts a drag.
+        className={`rounded-lg border p-2 mb-2 cursor-grab active:cursor-grabbing ${cardBase} ${isDragging ? 'opacity-40' : ''}`}
       >
         <CardBody kart={kart} isDarkMode={isDarkMode} />
       </div>
