@@ -341,45 +341,54 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter}
           onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* On track (also a drop target: assign an Available kart) */}
-            <Droppable id="col-on-track" testId="col-on-track" className={`rounded-lg p-2 ${columnWrap}`}>
-              <h3 className={`font-semibold mb-2 ${colHeader}`}>On track <span className={subtle}>({onTrack.length})</span></h3>
-              {onTrack.map(k => <KartCard key={k.fleet_kart_id} kart={k} isDarkMode={isDarkMode} onSelect={setSelected} />)}
-              {onTrack.length === 0 && <p className={`text-xs ${subtle}`}>Drag an Available kart here to assign it.</p>}
-            </Droppable>
+          <div className="flex flex-col gap-3">
+            {/* Top row: On track + In pit side by side */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* On track (also a drop target: assign an Available kart) */}
+              <Droppable id="col-on-track" testId="col-on-track" className={`rounded-lg p-2 ${columnWrap}`}>
+                <h3 className={`font-semibold mb-2 ${colHeader}`}>On track <span className={subtle}>({onTrack.length})</span></h3>
+                {onTrack.map(k => <KartCard key={k.fleet_kart_id} kart={k} isDarkMode={isDarkMode} onSelect={setSelected} />)}
+                {onTrack.length === 0 && <p className={`text-xs ${subtle}`}>Drag an Available kart here to assign it.</p>}
+              </Droppable>
 
-            {/* In pit (timing-driven; not a drop target) */}
-            <div className={`rounded-lg p-2 ${columnWrap}`} data-testid="col-in-pit">
-              <h3 className={`font-semibold mb-2 ${colHeader}`}>In pit <span className={subtle}>({inPit.length})</span></h3>
-              {inPit.map(k => <KartCard key={k.fleet_kart_id} kart={k} isDarkMode={isDarkMode} onSelect={setSelected} />)}
-              {inPit.length === 0 && <p className={`text-xs ${subtle}`}>Teams currently in the pits appear here.</p>}
+              {/* In pit (timing-driven; not a drop target) */}
+              <div className={`rounded-lg p-2 ${columnWrap}`} data-testid="col-in-pit">
+                <h3 className={`font-semibold mb-2 ${colHeader}`}>In pit <span className={subtle}>({inPit.length})</span></h3>
+                {inPit.map(k => <KartCard key={k.fleet_kart_id} kart={k} isDarkMode={isDarkMode} onSelect={setSelected} />)}
+                {inPit.length === 0 && <p className={`text-xs ${subtle}`}>Teams currently in the pits appear here.</p>}
+              </div>
             </div>
 
-            {/* Available, split into colored lanes */}
+            {/* Available: full width, lanes laid out horizontally (parallel) */}
             <div className={`rounded-lg p-2 ${columnWrap}`} data-testid="col-available">
               <h3 className={`font-semibold mb-2 ${colHeader}`}>Available <span className={subtle}>({available.length})</span></h3>
-              {lanes.map(lane => {
-                const st = laneStyleFor(lane);
-                const karts = available.filter(k => k.lane === lane);
-                return (
-                  <Droppable key={lane} id={`lane-${lane}`} testId={`lane-${lane}`}
-                    className={`rounded-lg border p-2 mb-2 ${isDarkMode ? st.dark : st.light}`}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`w-3 h-3 rounded-full ${st.dot}`} />
-                      <span className={`text-xs font-medium ${colHeader}`}>Lane {lane}</span>
-                    </div>
-                    {karts.map(k => <KartCard key={k.fleet_kart_id} kart={k} isDarkMode={isDarkMode} onSelect={setSelected} />)}
-                    {karts.length === 0 && <p className={`text-xs ${subtle}`}>empty</p>}
-                  </Droppable>
-                );
-              })}
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {lanes.map(lane => {
+                  const st = laneStyleFor(lane);
+                  const karts = available.filter(k => k.lane === lane);
+                  return (
+                    <Droppable key={lane} id={`lane-${lane}`} testId={`lane-${lane}`}
+                      className={`rounded-lg border p-2 flex-1 min-w-[9rem] self-start ${isDarkMode ? st.dark : st.light}`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`w-3 h-3 rounded-full ${st.dot}`} />
+                        <span className={`text-xs font-medium ${colHeader}`}>Lane {lane}</span>
+                      </div>
+                      {karts.map(k => <KartCard key={k.fleet_kart_id} kart={k} isDarkMode={isDarkMode} onSelect={setSelected} />)}
+                      {karts.length === 0 && <p className={`text-xs ${subtle}`}>empty</p>}
+                    </Droppable>
+                  );
+                })}
+              </div>
               {unlaned.length > 0 && (
                 <div data-testid="lane-unsorted"
-                  className={`rounded-lg border border-dashed p-2 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                  className={`rounded-lg border border-dashed p-2 mt-2 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
                   <span className={`text-xs font-medium ${colHeader}`}>Just dropped — place in a lane</span>
-                  <div className="mt-1">
-                    {unlaned.map(k => <KartCard key={k.fleet_kart_id} kart={k} isDarkMode={isDarkMode} onSelect={setSelected} />)}
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {unlaned.map(k => (
+                      <div key={k.fleet_kart_id} className="min-w-[9rem]">
+                        <KartCard kart={k} isDarkMode={isDarkMode} onSelect={setSelected} />
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
