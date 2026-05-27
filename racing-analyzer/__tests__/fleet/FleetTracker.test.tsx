@@ -106,6 +106,23 @@ describe('FleetTracker kanban', () => {
     await waitFor(() => expect(ApiService.setFleetKartLane).toHaveBeenCalledWith(1, 4, 2));
   });
 
+  test('shows the holder competition number with a # prefix', () => {
+    render(<FleetTracker {...baseProps}
+      fleetBoard={[kart({ label: 'K-7', column: 'on_track', holder_team: 'Alpha', holder_kart_number: 7, holder_position: 2 })]} />);
+    expect(screen.getByText(/#7/)).toBeInTheDocument();
+  });
+
+  test('lane color editor lets you recolor a lane', () => {
+    render(<FleetTracker {...baseProps} fleetBoard={[]} canEditRegistry />);
+    fireEvent.click(screen.getByText(/Manage fleet/i));
+    const editor = screen.getByTestId('lane-color-editor');
+    // Recolor lane 1 to rose; the chosen swatch gets the selected ring.
+    const rose = within(editor).getByLabelText('Lane 1 rose');
+    fireEvent.click(rose);
+    expect(rose.className).toMatch(/ring-2/);
+    expect(within(editor).getByLabelText('Lane 1 blue').className).not.toMatch(/ring-2/);
+  });
+
   test('empty registry shows the auto-add prompt', () => {
     render(<FleetTracker {...baseProps} fleetBoard={[]} registry={[]} canEditRegistry />);
     expect(screen.getByText(/No physical karts registered/i)).toBeInTheDocument();

@@ -7018,7 +7018,7 @@ def auto_populate_fleet(track_id):
             assigned_teams = {row[0] for row in cur.fetchall()}
             now = datetime.now().isoformat()
             for team_name, kart_number in teams:
-                label = str(kart_number)
+                label = f"K-{kart_number}"   # physical-ID convention
                 kid = label_to_id.get(label)
                 if kid is None:
                     cur.execute(

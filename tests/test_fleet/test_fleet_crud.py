@@ -131,9 +131,9 @@ def test_auto_populate_creates_karts_and_stint0_assignments(client, admin_user):
     body = r.get_json()
     assert len(body["created_karts"]) == 2
     assert body["created_assignments"] == 2
-    # Karts labelled with the competition numbers.
+    # Karts labelled K-<number> from the competition numbers.
     labels = sorted(k["label"] for k in client.get(f"{BASE}/karts").get_json()["karts"])
-    assert labels == ["12", "7"]
+    assert labels == ["K-12", "K-7"]
     # Each team got a stint-0 assignment.
     rows = client.get(f"{BASE}/assignments?session_id={sid}").get_json()["assignments"]
     assert {row["team_name"] for row in rows} == {"Alpha", "Bravo"}
