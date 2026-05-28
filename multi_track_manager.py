@@ -13,6 +13,15 @@ import json
 import pandas as pd
 from apex_timing_websocket import ApexTimingWebSocketParser
 
+import re as _re
+
+def _slug_from_url(url: str) -> str:
+    """Extract the venue slug from an AlphaHub live-page URL
+    (https://www.alpharacehub.com/<slug>/live). Falls back to '' if the URL
+    doesn't match — caller will fail loudly downstream."""
+    m = _re.search(r'/([a-z0-9_-]+)/live', url or '')
+    return m.group(1) if m else ''
+
 
 class MultiTrackManager:
     """Manages multiple track parsers running concurrently"""
@@ -23,6 +32,11 @@ class MultiTrackManager:
         self.active = False
         self.logger = logging.getLogger(__name__)
         self.socketio = socketio
+        # Shared driver for all alphahub tracks. Lazily created on the first
+        # provider=alphahub track so deployments with zero alphahub tracks
+        # don't import alphahub_hub at all.
+        self._alphahub_hub = None
+        self._alphahub_hub_task = None
 
     def get_database_path(self, track_id: int) -> str:
         """Get the database file path for a track"""
@@ -257,24 +271,30 @@ class MultiTrackManager:
             self.initialize_track_database(track_id)
 
             if provider == 'alphahub':
-                # Local import keeps the Apex-only deployment from paying the
-                # `requests` import cost when no AlphaHub tracks are configured.
-                from alphahub_parser import AlphaHubParser
-                # Seed the parser with any previously-cached Pusher config so it
-                # can skip the live-page scrape on this start (the big win when
-                # restarting many alphahub parsers at once).
-                seed = None
-                if track.get('pusher_key') and track.get('pusher_site'):
-                    seed = {
-                        'pusher_key': track['pusher_key'],
-                        'pusher_cluster': track.get('pusher_cluster') or 'eu',
-                        'pusher_site': track['pusher_site'],
-                        'pusher_channel_suffix': track.get('pusher_channel_suffix') or 'live',
-                    }
-                parser = AlphaHubParser(
+                # Hub-mode AlphaHub: one shared Pusher WebSocket + one shared
+                # alpharacehub.com HTTP session for all alphahub tracks.
+                # Eliminates the per-IP Cloudflare rate limit (each track
+                # used to spawn its own page scrape + Pusher connection,
+                # which trivially trips bot detection at N=29).
+                from alphahub_hub import AlphaHubHub, AlphaHubChannel
+                if self._alphahub_hub is None:
+                    self._alphahub_hub = AlphaHubHub(self.socketio, manager=self)
+                    self.logger.info("MultiTrackManager: lazily created AlphaHubHub")
+                # Derive channel name from cached site + suffix (or fall back
+                # to URL slug if uncached — fresh installs).
+                site = track.get('pusher_site') or _slug_from_url(websocket_url)
+                suffix = track.get('pusher_channel_suffix') or 'live'
+                channel_name = f"private-{site}{suffix}"
+                parser = AlphaHubChannel(
                     track_id, track_name, self.get_database_path(track_id),
-                    self.socketio, manager=self, pusher_config_seed=seed,
+                    channel_name=channel_name, page_url=websocket_url,
+                    socketio=self.socketio, manager=self,
                 )
+                self._alphahub_hub.register(parser)
+                # Start the hub's shared loop exactly once.
+                if self._alphahub_hub_task is None or self._alphahub_hub_task.done():
+                    self._alphahub_hub_task = asyncio.create_task(self._alphahub_hub.run())
+                    self.logger.info("MultiTrackManager: started AlphaHubHub task")
             else:
                 parser = TrackSpecificParser(
                     track_id, track_name, self.get_database_path(track_id),
@@ -362,6 +382,22 @@ class MultiTrackManager:
 
         self.parsers.clear()
         self.tasks.clear()
+
+        # Tear down the shared AlphaHub hub if we spawned one.
+        if self._alphahub_hub_task is not None:
+            self._alphahub_hub_task.cancel()
+            try:
+                await self._alphahub_hub_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._alphahub_hub_task = None
+        if self._alphahub_hub is not None:
+            try:
+                await self._alphahub_hub.cleanup()
+            except Exception as e:
+                self.logger.warning(f"AlphaHubHub cleanup error: {e}")
+            self._alphahub_hub = None
+
         self.logger.info("All parsers stopped")
 
     async def stop_track_parser(self, track_id: int) -> bool:
