@@ -83,6 +83,17 @@ class TrackDatabase:
                 ):
                     if col not in columns:
                         conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} TEXT")
+                # pusher_cookies: JSON-encoded {name: value} of the cookies
+                # alpharacehub.com set on the page scrape — specifically
+                # `<site>-pst`, `.AspNetCore.Culture`, `__cf_bm`. Pusher auth
+                # validates `<site>-pst` server-side, so if we persist it we
+                # can skip the page scrape on the next process start entirely
+                # (where the 20-req-per-IP Cloudflare cap was tripping us).
+                # Refreshed whenever a new scrape succeeds; left alone on
+                # restart so cold starts hit ZERO alpharacehub HTTP for
+                # already-warmed venues.
+                if 'pusher_cookies' not in columns:
+                    conn.execute("ALTER TABLE tracks ADD COLUMN pusher_cookies TEXT")
 
                 # Physical-layout definitions per track. A single karting venue
                 # often runs multiple configs whose lap times differ 10%+; the
@@ -201,6 +212,7 @@ class TrackDatabase:
                     SELECT id, track_name, timing_url, websocket_url, column_mappings,
                            location, length_meters, description, is_active, provider,
                            pusher_key, pusher_cluster, pusher_site, pusher_channel_suffix,
+                           pusher_cookies,
                            created_at, updated_at
                     FROM tracks
                     ORDER BY track_name
@@ -233,6 +245,7 @@ class TrackDatabase:
                         'pusher_cluster': row['pusher_cluster'],
                         'pusher_site': row['pusher_site'],
                         'pusher_channel_suffix': row['pusher_channel_suffix'],
+                        'pusher_cookies': row['pusher_cookies'],
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at']
                     })
@@ -364,21 +377,28 @@ class TrackDatabase:
     def update_pusher_config(self, track_id: int, *, pusher_key: Optional[str] = None,
                              pusher_cluster: Optional[str] = None,
                              pusher_site: Optional[str] = None,
-                             pusher_channel_suffix: Optional[str] = None) -> bool:
+                             pusher_channel_suffix: Optional[str] = None,
+                             pusher_cookies: Optional[str] = None) -> bool:
         """Persist (or clear, by passing None) the discovered Pusher config for
         an AlphaHub track so reconnects + restarts can skip the live-page
-        scrape. Used by AlphaHubParser after a successful first discovery and
-        also to invalidate on Pusher auth 401."""
+        scrape. Used by AlphaHubHub after a successful first discovery and
+        also to invalidate on Pusher auth 401.
+
+        `pusher_cookies` is a JSON-encoded dict of cookie name → value
+        captured from the scrape. The next process start can hydrate the
+        site's requests.Session from this and skip the page scrape entirely
+        — the big win that gets us under Cloudflare's per-IP cap."""
         self.ensure_table_exists()
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''
                     UPDATE tracks
                        SET pusher_key = ?, pusher_cluster = ?,
-                           pusher_site = ?, pusher_channel_suffix = ?
+                           pusher_site = ?, pusher_channel_suffix = ?,
+                           pusher_cookies = ?
                      WHERE id = ?
                 ''', (pusher_key, pusher_cluster, pusher_site,
-                      pusher_channel_suffix, track_id))
+                      pusher_channel_suffix, pusher_cookies, track_id))
                 conn.commit()
                 return True
         except Exception as e:

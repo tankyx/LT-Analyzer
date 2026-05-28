@@ -102,11 +102,49 @@ class AlphaHubHub:
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
-    def register(self, channel: 'AlphaHubChannel') -> None:
-        """Add a track's channel to the hub. Idempotent on the channel name."""
+    def register(self, channel: 'AlphaHubChannel',
+                 cached_cookies: Optional[Dict[str, str]] = None,
+                 pusher_key: Optional[str] = None,
+                 pusher_cluster: Optional[str] = None) -> None:
+        """Add a track's channel to the hub. Idempotent on the channel name.
+
+        If `cached_cookies` AND `pusher_key`/`pusher_cluster` are supplied
+        (loaded from tracks.db on process startup), pre-seed the site's
+        requests.Session with them so the FIRST auth attempt works without
+        a page scrape. Critical for staying under Cloudflare's 20-page-GETs-
+        per-IP threshold when many tracks restart at once."""
         self.tracks[channel.track_id] = channel
         self.channels[channel.channel_name] = channel
         channel.hub = self
+        if cached_cookies and pusher_key:
+            site = self._site_from_channel(channel.channel_name)
+            if site not in self._site_state:
+                sess = requests.Session()
+                sess.headers.update(_DEFAULT_HEADERS)
+                for name, value in cached_cookies.items():
+                    sess.cookies.set(name, value)
+                cfg = AlphaHubConfig(
+                    page_url=channel.page_url,
+                    pusher_key=pusher_key,
+                    pusher_cluster=(pusher_cluster or 'eu'),
+                    site=site, channel_suffix='live', at_pst=None,
+                    cookies=dict(cached_cookies),
+                    referer=channel.page_url,
+                )
+                self._site_state[site] = {
+                    'session': sess, 'cfg': cfg,
+                    'from_cache': True,
+                }
+                # Adopt platform constants from the cached cfg if this is the
+                # first site we've seen — saves a scrape on cold start with
+                # everything cached.
+                if self._ws_url is None:
+                    self._ws_url = cfg.ws_url
+                    self._origin = cfg.origin
+                self.logger.info(
+                    f"AlphaHubHub: pre-seeded {site} from cache "
+                    f"({len(cached_cookies)} cookies, key={pusher_key[:8]}…) — skipping scrape"
+                )
         self.logger.info(
             f"AlphaHubHub: registered track {channel.track_id} "
             f"({channel.track_name}, channel={channel.channel_name})"
@@ -136,7 +174,12 @@ class AlphaHubHub:
         """Initialize per-site state if missing — does ONE page scrape to
         harvest the site's cookies + at-pst. Subsequent /pusher/auth POSTs
         for this site reuse the persistent session so we never re-scrape
-        the same venue within a process lifetime."""
+        the same venue within a process lifetime.
+
+        Pre-seeded states (from cached cookies on register()) are returned
+        as-is — those skip the scrape entirely. Real freshly-scraped states
+        also get their cookies persisted back to tracks.db so the NEXT
+        process restart skips the scrape too."""
         if site in self._site_state:
             return self._site_state[site]
         sess = requests.Session()
@@ -153,7 +196,39 @@ class AlphaHubHub:
             self.logger.info(
                 f"AlphaHubHub: platform WS={cfg.ws_url} key={cfg.pusher_key[:8]}…"
             )
+        # Persist the freshly-harvested cookies + pusher app config back to
+        # tracks.db for every channel on this site, so the next process
+        # restart skips the scrape entirely. This is the lever that gets us
+        # under Cloudflare's 20-page-GETs-per-IP cap.
+        self._persist_site_cookies(site, sess, cfg)
         return state
+
+    def _persist_site_cookies(self, site: str, sess: requests.Session,
+                              cfg: AlphaHubConfig) -> None:
+        """Write cookies + pusher_key/cluster/site/suffix to every track in
+        tracks.db whose channel belongs to this site. Best-effort; failures
+        are logged but don't propagate."""
+        try:
+            cookies_json = json.dumps(dict(sess.cookies.get_dict()))
+            from database_manager import TrackDatabase
+            db = TrackDatabase()
+            for ch_name, channel in self.channels.items():
+                if self._site_from_channel(ch_name) != site:
+                    continue
+                db.update_pusher_config(
+                    channel.track_id,
+                    pusher_key=cfg.pusher_key,
+                    pusher_cluster=cfg.pusher_cluster,
+                    pusher_site=cfg.site,
+                    pusher_channel_suffix=cfg.channel_suffix,
+                    pusher_cookies=cookies_json,
+                )
+            self.logger.info(
+                f"AlphaHubHub: persisted {site} cookies to tracks.db "
+                f"({len(dict(sess.cookies.get_dict()))} cookies)"
+            )
+        except Exception as e:
+            self.logger.warning(f"AlphaHubHub: persist failed for {site}: {e}")
 
     def _auth_subscribe(self, channel_name: str, socket_id: str) -> Dict[str, str]:
         """POST /pusher/auth for one channel through the channel's

@@ -241,7 +241,8 @@ class MultiTrackManager:
                 cursor.execute('''
                     SELECT id, track_name, websocket_url, column_mappings,
                            COALESCE(provider, 'apex') AS provider,
-                           pusher_key, pusher_cluster, pusher_site, pusher_channel_suffix
+                           pusher_key, pusher_cluster, pusher_site, pusher_channel_suffix,
+                           pusher_cookies
                     FROM tracks
                     WHERE websocket_url IS NOT NULL AND websocket_url != ''
                 ''')
@@ -271,8 +272,8 @@ class MultiTrackManager:
             self.initialize_track_database(track_id)
 
             if provider == 'alphahub':
-                # Hub-mode AlphaHub: one shared Pusher WebSocket + one shared
-                # alpharacehub.com HTTP session for all alphahub tracks.
+                # Hub-mode AlphaHub: one shared Pusher WebSocket + one
+                # per-site requests.Session for all alphahub tracks.
                 # Eliminates the per-IP Cloudflare rate limit (each track
                 # used to spawn its own page scrape + Pusher connection,
                 # which trivially trips bot detection at N=29).
@@ -280,8 +281,6 @@ class MultiTrackManager:
                 if self._alphahub_hub is None:
                     self._alphahub_hub = AlphaHubHub(self.socketio, manager=self)
                     self.logger.info("MultiTrackManager: lazily created AlphaHubHub")
-                # Derive channel name from cached site + suffix (or fall back
-                # to URL slug if uncached — fresh installs).
                 site = track.get('pusher_site') or _slug_from_url(websocket_url)
                 suffix = track.get('pusher_channel_suffix') or 'live'
                 channel_name = f"private-{site}{suffix}"
@@ -290,7 +289,22 @@ class MultiTrackManager:
                     channel_name=channel_name, page_url=websocket_url,
                     socketio=self.socketio, manager=self,
                 )
-                self._alphahub_hub.register(parser)
+                # Hydrate the hub's per-site session from any persisted cookies
+                # so cold starts skip the page scrape — that's the big win
+                # against Cloudflare's per-IP page-GET threshold.
+                cached_cookies = None
+                raw_cookies = track.get('pusher_cookies')
+                if raw_cookies:
+                    try:
+                        cached_cookies = json.loads(raw_cookies)
+                    except (TypeError, ValueError):
+                        cached_cookies = None
+                self._alphahub_hub.register(
+                    parser,
+                    cached_cookies=cached_cookies,
+                    pusher_key=track.get('pusher_key'),
+                    pusher_cluster=track.get('pusher_cluster'),
+                )
                 # Start the hub's shared loop exactly once.
                 if self._alphahub_hub_task is None or self._alphahub_hub_task.done():
                     self._alphahub_hub_task = asyncio.create_task(self._alphahub_hub.run())
