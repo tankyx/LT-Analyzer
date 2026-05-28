@@ -89,30 +89,50 @@ class TestRegistration:
 # ---------------------------------------------------------------------------
 
 class TestDiscovery:
-    def test_ensure_app_cfg_scrapes_once_then_caches(self, fresh_db_paths):
+    def test_ensure_site_scrapes_once_per_venue(self, fresh_db_paths):
+        # Each alpharacehub venue has its own per-site cookies (`<site>-pst`,
+        # __cf_bm) that Pusher auth validates — so one cookie jar PER SITE,
+        # not one global jar. _ensure_site scrapes the page exactly once
+        # per venue per process; later calls for the same site reuse the
+        # cached session.
         hub = AlphaHubHub()
         for tid, site in ((701, 'buckmore'), (702, 'whiltonmill'), (703, 'rye')):
             hub.register(_make_channel(fresh_db_paths, tid, site))
 
-        fake_cfg = AlphaHubConfig(
-            page_url='https://www.alpharacehub.com/buckmore/live',
-            pusher_key='k', pusher_cluster='eu', site='buckmore',
-            channel_suffix='live', at_pst=None,
-        )
+        def fake_discover(page_url, session=None, logger=None):
+            # Site is the slug before /live in the URL
+            import re
+            site = re.search(r'/([^/]+)/live', page_url).group(1)
+            return AlphaHubConfig(
+                page_url=page_url, pusher_key='k', pusher_cluster='eu',
+                site=site, channel_suffix='live', at_pst=None,
+            )
 
-        with patch('alphahub_hub.discover_config', return_value=fake_cfg) as m:
-            hub._ensure_app_cfg()
-            hub._ensure_app_cfg()
-            hub._ensure_app_cfg()
-        # Three channels registered, three _ensure calls — but only ONE actual
-        # scrape. That's the whole point of the refactor.
-        assert m.call_count == 1
-        assert hub._app_cfg is fake_cfg
+        with patch('alphahub_hub.discover_config', side_effect=fake_discover) as m:
+            hub._ensure_site('buckmore', 'https://x/buckmore/live')
+            hub._ensure_site('buckmore', 'https://x/buckmore/live')   # cached
+            hub._ensure_site('whiltonmill', 'https://x/whiltonmill/live')
+            hub._ensure_site('rye', 'https://x/rye/live')
+            hub._ensure_site('whiltonmill', 'https://x/whiltonmill/live')   # cached
+        # Three distinct venues, six calls — but only three scrapes.
+        assert m.call_count == 3
+        assert set(hub._site_state.keys()) == {'buckmore', 'whiltonmill', 'rye'}
+        # Each site has its OWN requests.Session (separate cookie jars).
+        sessions = [hub._site_state[s]['session'] for s in hub._site_state]
+        assert len(set(id(s) for s in sessions)) == len(sessions), 'sessions must be distinct objects'
 
-    def test_ensure_app_cfg_raises_when_no_channels(self):
+    def test_first_scrape_seeds_platform_ws_url(self, fresh_db_paths):
         hub = AlphaHubHub()
-        with pytest.raises(RuntimeError, match='no channels'):
-            hub._ensure_app_cfg()
+        hub.register(_make_channel(fresh_db_paths, 701, 'buckmore'))
+        cfg = AlphaHubConfig(
+            page_url='https://www.alpharacehub.com/buckmore/live',
+            pusher_key='3aaffebc8193ea83cb2f', pusher_cluster='eu',
+            site='buckmore', channel_suffix='live', at_pst=None,
+        )
+        with patch('alphahub_hub.discover_config', return_value=cfg):
+            hub._ensure_site('buckmore', 'https://www.alpharacehub.com/buckmore/live')
+        assert hub._ws_url == cfg.ws_url
+        assert hub._origin == 'https://www.alpharacehub.com'
 
 
 # ---------------------------------------------------------------------------
@@ -271,15 +291,21 @@ class TestPartialAuthFailure:
         for tid, site in ((701, 'buckmore'), (702, 'whiltonmill'),
                           (703, 'rye')):
             hub.register(_make_channel(fresh_db_paths, tid, site))
-        hub._app_cfg = AlphaHubConfig(
-            page_url='https://x/y/live',
-            pusher_key='k', pusher_cluster='eu', site='buckmore',
-            channel_suffix='live', at_pst=None,
-        )
         sent = []
         class _FakeWS:
             async def send(self, payload): sent.append(payload)
         hub._ws = _FakeWS()
+
+        # Pre-seed site state so _ensure_site_gated is a no-op (avoids HTTP).
+        for site in ('buckmore', 'whiltonmill', 'rye'):
+            hub._site_state[site] = {
+                'session': MagicMock(),
+                'cfg': AlphaHubConfig(
+                    page_url=f'https://x/{site}/live',
+                    pusher_key='k', pusher_cluster='eu', site=site,
+                    channel_suffix='live', at_pst=None,
+                ),
+            }
 
         import requests
         def fake_auth(ch_name, sid):

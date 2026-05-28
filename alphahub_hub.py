@@ -76,16 +76,24 @@ class AlphaHubHub:
         self.logger = _module_logger
         self.channels: Dict[str, 'AlphaHubChannel'] = {}   # channel_name -> channel
         self.tracks: Dict[int, 'AlphaHubChannel'] = {}     # track_id     -> channel
-        self._http = requests.Session()
-        self._http.headers.update(_DEFAULT_HEADERS)
         self._ssl_ctx = ssl.create_default_context()
         self._lock = asyncio.Lock()
         self._ws = None
         self._socket_id: Optional[str] = None
-        # Pusher app config (key + cluster) is identical across every
-        # alpharacehub venue we've inspected (Buckmore, Whilton, etc.).
-        # Discover once per process from any registered channel's page URL.
-        self._app_cfg: Optional[AlphaHubConfig] = None
+        # Per-site state — each alpharacehub venue serves its own session
+        # cookies (`<site>-pst`, .AspNetCore.Culture, __cf_bm) which Pusher
+        # auth validates. We can't reuse one cookie jar across sites — found
+        # out the hard way (auth for buckmore with whiltonmill's cookies →
+        # 401). Each site gets its own requests.Session populated by ONE
+        # page scrape on first use; subsequent /pusher/auth POSTs for that
+        # site reuse the same session (cookies persist) so there's only
+        # ever one page hit per venue per process lifetime.
+        # Structure: site -> {'session': requests.Session, 'cfg': AlphaHubConfig}
+        self._site_state: Dict[str, Dict[str, Any]] = {}
+        # WebSocket endpoint (wss://ws-<cluster>.pusher.com/app/<key>) — set
+        # after the first site scrape; identical across all venues.
+        self._ws_url: Optional[str] = None
+        self._origin: Optional[str] = None  # https://www.alpharacehub.com
         self._run_task: Optional[asyncio.Task] = None
         # Per-channel subscription state — set true after Pusher sends
         # subscription_succeeded; cleared on reconnect.
@@ -112,42 +120,52 @@ class AlphaHubHub:
             self.logger.info(f"AlphaHubHub: unregistered track {track_id}")
 
     # ------------------------------------------------------------------
-    # Discovery (one page scrape per process)
+    # Discovery (one page scrape per VENUE per process)
     # ------------------------------------------------------------------
-    def _ensure_app_cfg(self) -> AlphaHubConfig:
-        """Block until self._app_cfg is populated. Uses the first registered
-        channel's page URL — every alpharacehub venue serves the same Pusher
-        app config, so any page works."""
-        if self._app_cfg is not None:
-            return self._app_cfg
-        if not self.channels:
-            raise RuntimeError("AlphaHubHub: no channels registered; nothing to scrape")
-        seed_channel = next(iter(self.channels.values()))
-        self.logger.info(
-            f"AlphaHubHub: scraping {seed_channel.page_url} to seed shared "
-            f"Pusher config + cookies"
-        )
-        cfg = discover_config(seed_channel.page_url, session=self._http,
-                              logger=self.logger)
-        self._app_cfg = cfg
-        self.logger.info(
-            f"AlphaHubHub: shared Pusher app config — key={cfg.pusher_key[:8]}… "
-            f"cluster={cfg.pusher_cluster} cookies={sorted(self._http.cookies.get_dict().keys())}"
-        )
-        return cfg
-
-    def _auth_subscribe(self, channel_name: str, socket_id: str) -> Dict[str, str]:
-        """POST /pusher/auth for one channel through the shared HTTP session.
-        Caller has already acquired the HTTP gate."""
-        cfg = self._app_cfg
-        assert cfg is not None
-        # Some venues require an `at-site` header that matches the channel's
-        # site slug. Derive from the channel name (private-<site><suffix>).
+    @staticmethod
+    def _site_from_channel(channel_name: str) -> str:
+        """`private-<site>live` → `<site>`. Strip the well-known suffixes."""
         site = channel_name.removeprefix('private-')
         for suffix in ('live', 'rooms'):
             if site.endswith(suffix):
                 site = site[: -len(suffix)]
                 break
+        return site
+
+    def _ensure_site(self, site: str, page_url: str) -> Dict[str, Any]:
+        """Initialize per-site state if missing — does ONE page scrape to
+        harvest the site's cookies + at-pst. Subsequent /pusher/auth POSTs
+        for this site reuse the persistent session so we never re-scrape
+        the same venue within a process lifetime."""
+        if site in self._site_state:
+            return self._site_state[site]
+        sess = requests.Session()
+        sess.headers.update(_DEFAULT_HEADERS)
+        self.logger.info(f"AlphaHubHub: scraping {page_url} (site={site})")
+        cfg = discover_config(page_url, session=sess, logger=self.logger)
+        state = {'session': sess, 'cfg': cfg}
+        self._site_state[site] = state
+        # The Pusher WebSocket URL + origin are platform-wide constants;
+        # capture them from the first site we see and never change them.
+        if self._ws_url is None:
+            self._ws_url = cfg.ws_url
+            self._origin = cfg.origin
+            self.logger.info(
+                f"AlphaHubHub: platform WS={cfg.ws_url} key={cfg.pusher_key[:8]}…"
+            )
+        return state
+
+    def _auth_subscribe(self, channel_name: str, socket_id: str) -> Dict[str, str]:
+        """POST /pusher/auth for one channel through the channel's
+        site-specific HTTP session. Caller is responsible for gate pacing
+        (the auth POST itself is the gated HTTP call here — site init
+        happens separately via _ensure_site_gated)."""
+        site = self._site_from_channel(channel_name)
+        state = self._site_state.get(site)
+        if state is None:
+            raise RuntimeError(f"site {site!r} not initialized; call _ensure_site_gated first")
+        cfg: AlphaHubConfig = state['cfg']
+        sess: requests.Session = state['session']
         headers = {
             'Origin': cfg.origin,
             'Referer': cfg.referer,
@@ -156,7 +174,7 @@ class AlphaHubHub:
         }
         if cfg.at_pst:
             headers['at-pst'] = cfg.at_pst
-        resp = self._http.post(
+        resp = sess.post(
             cfg.auth_url,
             data={'socket_id': socket_id, 'channel_name': channel_name},
             headers=headers, timeout=15,
@@ -169,18 +187,29 @@ class AlphaHubHub:
     # ------------------------------------------------------------------
     async def _pusher_loop(self) -> None:
         """One full lifecycle of the shared Pusher WebSocket. Reconnects are
-        handled by run()."""
-        cfg = await asyncio.to_thread(self._ensure_app_cfg)
-        self.logger.info(f"AlphaHubHub: connecting to Pusher {cfg.ws_url}")
+        handled by run().
+
+        Bootstraps self._ws_url + self._origin on first call by scraping the
+        first registered channel's page; per-channel sites get scraped
+        lazily as their auths fire."""
+        if self._ws_url is None:
+            if not self.channels:
+                raise RuntimeError("AlphaHubHub: no channels registered")
+            seed = next(iter(self.channels.values()))
+            seed_site = self._site_from_channel(seed.channel_name)
+            await asyncio.to_thread(
+                self._ensure_site_gated, seed_site, seed.page_url
+            )
+        self.logger.info(f"AlphaHubHub: connecting to Pusher {self._ws_url}")
         async with websockets.connect(
-            cfg.ws_url,
+            self._ws_url,
             ssl=self._ssl_ctx,
             open_timeout=15,
             close_timeout=5,
             ping_interval=120,
             ping_timeout=30,
             max_size=2 ** 22,
-            origin=cfg.origin,
+            origin=self._origin,
         ) as ws:
             self._ws = ws
             self._subscribed.clear()
@@ -217,10 +246,19 @@ class AlphaHubHub:
 
     async def _subscribe_all(self, socket_id: str) -> None:
         """Walk every registered channel and subscribe one by one. Each
-        auth POST acquires the HTTP gate (3s min spacing) so even at N=29
-        we send roughly 1 auth/3s — well under Cloudflare's threshold."""
+        HTTP call (site scrape if first time, then auth POST) acquires the
+        shared HTTP gate independently — so worst case per channel is two
+        gate slots (~6s), and a venue already-scraped reuses cookies and
+        only needs one slot."""
         for ch_name, channel in list(self.channels.items()):
+            site = self._site_from_channel(ch_name)
             try:
+                # 1) Per-site scrape (gated). No-op if this venue has already
+                # been initialized in this process.
+                await asyncio.to_thread(
+                    self._ensure_site_gated, site, channel.page_url
+                )
+                # 2) Auth (gated). Reuses the site session's cookies.
                 auth = await asyncio.to_thread(
                     self._auth_with_gate, ch_name, socket_id
                 )
@@ -237,7 +275,7 @@ class AlphaHubHub:
             except requests.exceptions.HTTPError as e:
                 code = getattr(e.response, 'status_code', None)
                 self.logger.warning(
-                    f"AlphaHubHub: auth failed for {ch_name} (status {code}); "
+                    f"AlphaHubHub: auth/scrape failed for {ch_name} (status {code}); "
                     f"will retry on next reconnect"
                 )
                 # Don't abort the loop — other channels may still succeed.
@@ -249,6 +287,13 @@ class AlphaHubHub:
     def _auth_with_gate(self, ch_name: str, socket_id: str):
         _gate_acquire()
         return self._auth_subscribe(ch_name, socket_id)
+
+    def _ensure_site_gated(self, site: str, page_url: str) -> Dict[str, Any]:
+        """Gate-protected wrapper for first-scrape of a new venue."""
+        if site in self._site_state:
+            return self._site_state[site]
+        _gate_acquire()
+        return self._ensure_site(site, page_url)
 
     async def _handle_envelope(self, env: Dict[str, Any]) -> None:
         ev = env.get('event')

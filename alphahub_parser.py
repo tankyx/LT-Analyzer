@@ -75,7 +75,12 @@ from multi_track_manager import TrackSpecificParser
 # worker pools, not the event loop.
 _HTTP_GATE_LOCK = threading.Lock()
 _HTTP_GATE_LAST_TS = 0.0
-_HTTP_GATE_MIN_INTERVAL = 3.0  # seconds between any two HTTP requests to alphahub
+# Empirically calibrated against Cloudflare's per-IP threshold for
+# alpharacehub.com page GETs: 20 requests per minute trips the limiter and
+# wedges us in a multi-hour block. At 5s spacing, 29 scrapes take 145s
+# (average 12 req/min) and the burst within Cloudflare's window stays
+# under the threshold. Earlier values (3s) tripped at the 21st scrape.
+_HTTP_GATE_MIN_INTERVAL = 5.0  # seconds between any two HTTP requests to alphahub
 
 
 def _gate_acquire():
