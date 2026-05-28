@@ -18,6 +18,11 @@ class TrackDatabase:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Create tracks table
+                # Fresh-install schema. Historically location/length_meters/
+                # description/is_active/provider were added by external
+                # migrations, which left fresh installs missing them. Now part
+                # of the CREATE so a clean DB has everything; ALTER-adds below
+                # still handle in-place migration of older DBs.
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS tracks (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -25,17 +30,35 @@ class TrackDatabase:
                         timing_url TEXT NOT NULL,
                         websocket_url TEXT,
                         column_mappings TEXT DEFAULT '{}',
+                        location TEXT,
+                        length_meters INTEGER,
+                        description TEXT,
+                        is_active BOOLEAN DEFAULT 1,
+                        provider TEXT NOT NULL DEFAULT 'apex',
+                        pusher_key TEXT,
+                        pusher_cluster TEXT,
+                        pusher_site TEXT,
+                        pusher_channel_suffix TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
 
-                # Add column_mappings column if it doesn't exist (for existing databases)
+                # Migration ALTERs for older DBs that pre-date some columns.
+                # Each ALTER guarded by a PRAGMA check so re-running is safe.
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA table_info(tracks)")
                 columns = [col[1] for col in cursor.fetchall()]
                 if 'column_mappings' not in columns:
                     conn.execute("ALTER TABLE tracks ADD COLUMN column_mappings TEXT DEFAULT '{}'")
+                if 'location' not in columns:
+                    conn.execute("ALTER TABLE tracks ADD COLUMN location TEXT")
+                if 'length_meters' not in columns:
+                    conn.execute("ALTER TABLE tracks ADD COLUMN length_meters INTEGER")
+                if 'description' not in columns:
+                    conn.execute("ALTER TABLE tracks ADD COLUMN description TEXT")
+                if 'is_active' not in columns:
+                    conn.execute("ALTER TABLE tracks ADD COLUMN is_active BOOLEAN DEFAULT 1")
                 # provider: which live-timing backend feeds this track.
                 # 'apex' (default, existing behaviour) — Apex Timing pipe-delimited
                 # websocket, websocket_url is the wss://host:port/ feed.
@@ -45,6 +68,21 @@ class TrackDatabase:
                 # private channel suffix needed to subscribe.
                 if 'provider' not in columns:
                     conn.execute("ALTER TABLE tracks ADD COLUMN provider TEXT NOT NULL DEFAULT 'apex'")
+                # Cached Pusher config for provider=alphahub tracks. Populated
+                # by AlphaHubParser the first time it successfully scrapes the
+                # live page. Subsequent reconnects (and even fresh process
+                # starts) build the AlphaHubConfig directly from these columns
+                # instead of re-poking alpharacehub.com — which previously
+                # tripped its per-IP rate limiter whenever many parsers
+                # restarted in sync. Cleared (set NULL) on Pusher auth 401 so
+                # the next attempt re-scrapes and refreshes. Doesn't store the
+                # at-pst per-session token (kept in-memory; see AlphaHubParser).
+                for col in (
+                    'pusher_key', 'pusher_cluster',
+                    'pusher_site', 'pusher_channel_suffix',
+                ):
+                    if col not in columns:
+                        conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} TEXT")
 
                 # Physical-layout definitions per track. A single karting venue
                 # often runs multiple configs whose lap times differ 10%+; the
@@ -162,6 +200,7 @@ class TrackDatabase:
                 cursor.execute('''
                     SELECT id, track_name, timing_url, websocket_url, column_mappings,
                            location, length_meters, description, is_active, provider,
+                           pusher_key, pusher_cluster, pusher_site, pusher_channel_suffix,
                            created_at, updated_at
                     FROM tracks
                     ORDER BY track_name
@@ -190,6 +229,10 @@ class TrackDatabase:
                         'description': row['description'],
                         'is_active': row['is_active'],
                         'provider': (row['provider'] or 'apex'),
+                        'pusher_key': row['pusher_key'],
+                        'pusher_cluster': row['pusher_cluster'],
+                        'pusher_site': row['pusher_site'],
+                        'pusher_channel_suffix': row['pusher_channel_suffix'],
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at']
                     })
@@ -318,6 +361,30 @@ class TrackDatabase:
             self.logger.error(f"Error updating track: {e}")
             return {'error': str(e)}
     
+    def update_pusher_config(self, track_id: int, *, pusher_key: Optional[str] = None,
+                             pusher_cluster: Optional[str] = None,
+                             pusher_site: Optional[str] = None,
+                             pusher_channel_suffix: Optional[str] = None) -> bool:
+        """Persist (or clear, by passing None) the discovered Pusher config for
+        an AlphaHub track so reconnects + restarts can skip the live-page
+        scrape. Used by AlphaHubParser after a successful first discovery and
+        also to invalidate on Pusher auth 401."""
+        self.ensure_table_exists()
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    UPDATE tracks
+                       SET pusher_key = ?, pusher_cluster = ?,
+                           pusher_site = ?, pusher_channel_suffix = ?
+                     WHERE id = ?
+                ''', (pusher_key, pusher_cluster, pusher_site,
+                      pusher_channel_suffix, track_id))
+                conn.commit()
+                return True
+        except Exception as e:
+            self.logger.warning(f"Track {track_id}: pusher_config update failed: {e}")
+            return False
+
     def delete_track(self, track_id: int) -> Dict:
         """Delete a track from the database"""
         self.ensure_table_exists()  # Ensure table exists before operation

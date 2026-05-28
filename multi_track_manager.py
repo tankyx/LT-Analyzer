@@ -226,7 +226,8 @@ class MultiTrackManager:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT id, track_name, websocket_url, column_mappings,
-                           COALESCE(provider, 'apex') AS provider
+                           COALESCE(provider, 'apex') AS provider,
+                           pusher_key, pusher_cluster, pusher_site, pusher_channel_suffix
                     FROM tracks
                     WHERE websocket_url IS NOT NULL AND websocket_url != ''
                 ''')
@@ -259,9 +260,20 @@ class MultiTrackManager:
                 # Local import keeps the Apex-only deployment from paying the
                 # `requests` import cost when no AlphaHub tracks are configured.
                 from alphahub_parser import AlphaHubParser
+                # Seed the parser with any previously-cached Pusher config so it
+                # can skip the live-page scrape on this start (the big win when
+                # restarting many alphahub parsers at once).
+                seed = None
+                if track.get('pusher_key') and track.get('pusher_site'):
+                    seed = {
+                        'pusher_key': track['pusher_key'],
+                        'pusher_cluster': track.get('pusher_cluster') or 'eu',
+                        'pusher_site': track['pusher_site'],
+                        'pusher_channel_suffix': track.get('pusher_channel_suffix') or 'live',
+                    }
                 parser = AlphaHubParser(
                     track_id, track_name, self.get_database_path(track_id),
-                    self.socketio, manager=self,
+                    self.socketio, manager=self, pusher_config_seed=seed,
                 )
             else:
                 parser = TrackSpecificParser(

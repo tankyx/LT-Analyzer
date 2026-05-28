@@ -346,7 +346,8 @@ class AlphaHubParser(TrackSpecificParser):
     _START_STAGGER_SECONDS = 1.5
 
     def __init__(self, track_id: int, track_name: str, db_path: str,
-                 socketio=None, manager=None):
+                 socketio=None, manager=None,
+                 pusher_config_seed: Optional[Dict[str, Any]] = None):
         super().__init__(track_id, track_name, db_path, socketio=socketio, manager=manager)
         # `competitors` is the latest snapshot keyed by CompetitorNumber.
         # We rebuild self.grid_data from it on every tick, then call the parent's
@@ -356,11 +357,86 @@ class AlphaHubParser(TrackSpecificParser):
         self._http = requests.Session()
         self._http.headers.update(_DEFAULT_HEADERS)
         self._cfg: Optional[AlphaHubConfig] = None
+        # Cached Pusher config carried across the parser's lifetime. Seeded
+        # from tracks.db on construction so we can skip the live-page scrape
+        # entirely if discovery has run before. Cleared (None) only when
+        # Pusher auth returns 401 — then the next attempt re-scrapes.
+        self._pusher_seed = pusher_config_seed
+        # Set to True after an auth-401 to make the NEXT cycle bypass the
+        # seed and scrape the page fresh (to refresh the at-pst token /
+        # cookies). Reset to False after one successful connect.
+        self._force_rescrape = False
         self.is_connected = False
         self._ssl_ctx = ssl.create_default_context()
         with AlphaHubParser._startup_lock:
             self._startup_index = AlphaHubParser._startup_counter
             AlphaHubParser._startup_counter += 1
+
+    def _config_from_seed(self, page_url: str) -> Optional['AlphaHubConfig']:
+        """Build an AlphaHubConfig from the seeded cache (no HTTP). Returns
+        None if the seed is missing/incomplete and a real scrape is needed."""
+        s = self._pusher_seed
+        if not s or not s.get('pusher_key') or not s.get('pusher_site'):
+            return None
+        return AlphaHubConfig(
+            page_url=page_url,
+            pusher_key=s['pusher_key'],
+            pusher_cluster=s.get('pusher_cluster') or 'eu',
+            site=s['pusher_site'],
+            channel_suffix=s.get('pusher_channel_suffix') or 'live',
+            at_pst=None,                                          # rotates; harvest if needed
+            cookies={},
+            referer=page_url,
+        )
+
+    def _persist_cfg_to_db(self) -> None:
+        """Push the freshly-scraped Pusher config back to tracks.db so the
+        next start can skip discovery. Best-effort; logs but doesn't raise."""
+        if self._cfg is None or self.manager is None:
+            return
+        try:
+            from database_manager import TrackDatabase
+            TrackDatabase().update_pusher_config(
+                self.track_id,
+                pusher_key=self._cfg.pusher_key,
+                pusher_cluster=self._cfg.pusher_cluster,
+                pusher_site=self._cfg.site,
+                pusher_channel_suffix=self._cfg.channel_suffix,
+            )
+            # Refresh in-memory seed so subsequent reconnects use it too.
+            self._pusher_seed = {
+                'pusher_key': self._cfg.pusher_key,
+                'pusher_cluster': self._cfg.pusher_cluster,
+                'pusher_site': self._cfg.site,
+                'pusher_channel_suffix': self._cfg.channel_suffix,
+            }
+            self.logger.info(
+                f"Track {self.track_id}: cached Pusher config to tracks.db "
+                f"(site={self._cfg.site}, channel={self._cfg.channel})"
+            )
+        except Exception as e:
+            self.logger.warning(f"Track {self.track_id}: pusher config cache write failed: {e}")
+
+    def _invalidate_cached_cfg(self) -> None:
+        """Force a re-scrape of the live page on the NEXT cycle by clearing
+        the in-memory cfg, but **keep** the DB cache untouched.
+
+        Why we don't clear the DB: the pusher_key / cluster / site /
+        channel_suffix are stable per venue (verified across Buckmore and
+        Whilton — same key for both). A 401 from /pusher/auth means the
+        per-session at-pst token has rotated or our cookies expired, not
+        that the platform's identifiers changed. Clearing the DB on every
+        401 caused every reconnect to re-scrape, blowing through the page
+        rate limit and getting stuck in a 429 loop. The DB seed lets future
+        process restarts skip the page hit even when this process is
+        temporarily auth-failing."""
+        self._cfg = None
+        self._force_rescrape = True   # makes the next cycle bypass the seed
+        # Note: self._pusher_seed AND the DB row are preserved on purpose.
+        self.logger.info(
+            f"Track {self.track_id}: in-memory Pusher cfg invalidated; "
+            f"DB cache preserved (will re-scrape to refresh at-pst only)"
+        )
 
     # ---- snapshot / delta plumbing ------------------------------------------------
     def _fetch_snapshot(self) -> None:
@@ -658,29 +734,72 @@ class AlphaHubParser(TrackSpecificParser):
         # transient websocket drop. The 5s default is fine after a successful
         # connect; we reset it below.
         reconnect_delay = 15
+        scraped_this_cycle = False
         while True:
-            try:
-                # Re-discover the config every time we reconnect — the at-pst
-                # token is per-session and rotates on the page; refreshing here
-                # is what avoids the "401 after a few hours" failure mode.
-                self._cfg = await asyncio.to_thread(
-                    lambda: discover_config(ws_url, session=self._http, logger=self.logger)
+            # Prefer the cached config: skips the live-page scrape entirely on
+            # both reconnects (same process) AND fresh process starts (seed
+            # loaded from tracks.db at construction). Only when there's no
+            # cache, or _force_rescrape is set (post-401 to refresh at-pst),
+            # do we hit HTTP.
+            if self._cfg is None:
+                seeded = (
+                    self._config_from_seed(ws_url)
+                    if not self._force_rescrape else None
                 )
-            except Exception as e:
-                self.logger.error(
-                    f"Track {self.track_id}: AlphaHub config discovery failed: {e}"
-                )
-                self.is_connected = False
-                await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 300)
-                continue
+                if seeded is not None:
+                    self._cfg = seeded
+                    scraped_this_cycle = False
+                    self.logger.info(
+                        f"Track {self.track_id}: using cached Pusher config "
+                        f"(site={seeded.site}, channel={seeded.channel}) — skipping scrape"
+                    )
+                else:
+                    if self._force_rescrape:
+                        self.logger.info(
+                            f"Track {self.track_id}: rescrape requested (refresh at-pst)"
+                        )
+                    try:
+                        self._cfg = await asyncio.to_thread(
+                            lambda: discover_config(ws_url, session=self._http, logger=self.logger)
+                        )
+                        scraped_this_cycle = True
+                        self._force_rescrape = False  # consumed
+                    except Exception as e:
+                        self.logger.error(
+                            f"Track {self.track_id}: AlphaHub config discovery failed: {e}"
+                        )
+                        self.is_connected = False
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 2, 300)
+                        continue
 
             try:
                 await self._pusher_loop()
                 reconnect_delay = 15  # reset to the cautious default
+                # First successful connect of a freshly-scraped config →
+                # persist back to tracks.db so future starts skip discovery.
+                if scraped_this_cycle:
+                    self._persist_cfg_to_db()
+                    scraped_this_cycle = False
             except asyncio.CancelledError:
                 self.logger.info(f"Track {self.track_id}: AlphaHub parser cancelled")
                 raise
+            except requests.exceptions.HTTPError as e:
+                # Pusher auth surfaced as an HTTPError from /pusher/auth.
+                # 401/403 mean our cached at-pst is stale or the platform
+                # key rotated — invalidate the cache so the next cycle
+                # re-scrapes. Other HTTP errors (5xx, timeouts) keep the
+                # cache; they're likely transient.
+                code = getattr(e.response, 'status_code', None)
+                if code in (401, 403):
+                    self.logger.warning(
+                        f"Track {self.track_id}: Pusher auth {code} — invalidating cached config"
+                    )
+                    self._invalidate_cached_cfg()
+                else:
+                    self.logger.warning(
+                        f"Track {self.track_id}: Pusher loop HTTP error {code}: {e}"
+                    )
             except Exception as e:
                 self.logger.warning(f"Track {self.track_id}: Pusher loop ended: {e}")
             finally:

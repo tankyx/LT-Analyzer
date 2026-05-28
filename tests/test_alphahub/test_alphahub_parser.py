@@ -478,6 +478,84 @@ class TestStandingsBuild:
         assert row['Pit Stops'] == '1'
 
 
+class TestPusherConfigCache:
+    """The seeded Pusher config (from tracks.db) lets the parser skip the
+    live-page scrape on reconnects AND fresh process starts. Critical for
+    surviving alpharacehub.com's rate limiter when many parsers spin up."""
+
+    def _make_parser(self, tmp_path, seed=None):
+        from multi_track_manager import MultiTrackManager
+        mgr = MultiTrackManager(socketio=None)
+        mgr.get_database_path = lambda _id: str(tmp_path / f'race_data_track_{_id}.db')
+        mgr.initialize_track_database(701)
+        return AlphaHubParser(
+            701, 'Test Track', mgr.get_database_path(701),
+            socketio=None, manager=mgr, pusher_config_seed=seed,
+        )
+
+    def test_config_from_seed_returns_complete_config(self, tmp_path: Path):
+        seed = {
+            'pusher_key': 'k123', 'pusher_cluster': 'eu',
+            'pusher_site': 'buckmore', 'pusher_channel_suffix': 'live',
+        }
+        p = self._make_parser(tmp_path, seed=seed)
+        cfg = p._config_from_seed('https://www.alpharacehub.com/buckmore/live')
+        assert cfg is not None
+        assert cfg.pusher_key == 'k123'
+        assert cfg.site == 'buckmore'
+        assert cfg.channel == 'private-buckmorelive'
+        assert cfg.at_pst is None  # rotates; not seeded
+
+    def test_config_from_seed_returns_none_when_seed_missing(self, tmp_path: Path):
+        p = self._make_parser(tmp_path, seed=None)
+        assert p._config_from_seed('https://www.alpharacehub.com/buckmore/live') is None
+
+    def test_config_from_seed_returns_none_when_seed_incomplete(self, tmp_path: Path):
+        # Missing pusher_key -> can't subscribe -> caller must rescrape
+        p = self._make_parser(tmp_path, seed={'pusher_site': 'buckmore'})
+        assert p._config_from_seed('https://x/y/live') is None
+        # Missing pusher_site -> same
+        p2 = self._make_parser(tmp_path, seed={'pusher_key': 'k'})
+        assert p2._config_from_seed('https://x/y/live') is None
+
+    def test_config_from_seed_defaults_cluster_and_suffix(self, tmp_path: Path):
+        # Only the two required fields supplied; cluster/suffix fall back to
+        # platform defaults (eu / live) — verified against live Buckmore.
+        p = self._make_parser(tmp_path, seed={
+            'pusher_key': 'k', 'pusher_site': 'buckmore',
+        })
+        cfg = p._config_from_seed('https://x/y/live')
+        assert cfg is not None
+        assert cfg.pusher_cluster == 'eu'
+        assert cfg.channel_suffix == 'live'
+
+    def test_invalidate_clears_in_memory_only_and_arms_rescrape(self, tmp_path: Path):
+        # On Pusher auth 401 we DON'T clear the DB/seed cache (key+cluster+
+        # site+suffix are stable per venue — only at-pst rotates). Instead we
+        # arm _force_rescrape so the next cycle bypasses the seed and hits
+        # the page to refresh at-pst.
+        from alphahub_parser import AlphaHubConfig
+        seed = {
+            'pusher_key': 'k', 'pusher_cluster': 'eu',
+            'pusher_site': 'buckmore', 'pusher_channel_suffix': 'live',
+        }
+        p = self._make_parser(tmp_path, seed=seed)
+        p._cfg = AlphaHubConfig(
+            page_url='https://x/y/live', pusher_key='k', pusher_cluster='eu',
+            site='buckmore', channel_suffix='live', at_pst=None,
+        )
+        p._invalidate_cached_cfg()
+        assert p._cfg is None
+        # Critically: the seed AND the DB-row are preserved.
+        assert p._pusher_seed == seed
+        # _force_rescrape is armed so the next loop iteration bypasses the
+        # seed (otherwise we'd loop forever rebuilding the same broken cfg).
+        assert p._force_rescrape is True
+        # The seed itself can still build a config — used only when
+        # _force_rescrape is False on the next cycle.
+        assert p._config_from_seed('https://x/y/live') is not None
+
+
 class TestHttpGate:
     """The module-level HTTP gate prevents ALL alphahub HTTP requests across
     parsers from exceeding 1 / _HTTP_GATE_MIN_INTERVAL seconds combined.
