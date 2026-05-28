@@ -764,11 +764,17 @@ export const ApiService = {
     }
   },
 
-  // Trigger pit alert for a specific team
+  // Trigger pit alert for a specific team.
+  // DEPRECATED for new callers — use apiFetch from useAuth() directly so the
+  // CSRF token + session cookie flow correctly (this raw-fetch path returns
+  // 403 in production because credentials and CSRF aren't sent). Kept for
+  // backward compat with non-component code paths, but those should be
+  // migrated.
   triggerPitAlert: async (data: { track_id: number; team_name: string; alert_message?: string }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/trigger-pit-alert`, {
         method: 'POST',
+        credentials: 'include',  // at least send the cookie; CSRF still missing
         headers: {
           'Content-Type': 'application/json',
         },

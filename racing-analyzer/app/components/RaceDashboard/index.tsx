@@ -377,7 +377,7 @@ const PitAlertButton = ({ kartNum, teamName, trackId, onTriggerAlert }: {
 
 
 const RaceDashboard = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, apiFetch } = useAuth();
   const router = useRouter();
   const [teams, setTeams] = useState<Team[]>([]);
   const [sessionInfo, setSessionInfo] = useState<SessionInfo>({});
@@ -428,12 +428,23 @@ const RaceDashboard = () => {
 
   const triggerPitAlert = useCallback(async (kartNum: string, teamName: string) => {
     try {
-      const response = await ApiService.triggerPitAlert({
-        track_id: selectedTrackId,
-        team_name: teamName,
-        alert_message: `PIT NOW! - ${teamName}`
+      // Use apiFetch (not raw fetch / not ApiService) so the CSRF token and
+      // session cookie are sent — the endpoint is @login_required + CSRF-
+      // protected; without these headers it returns 403. The per-user pit
+      // alert routing on the server uses the session to figure out which
+      // user_{id} room to emit on, so cookies must flow.
+      const resp = await apiFetch('/api/trigger-pit-alert', {
+        method: 'POST',
+        body: JSON.stringify({
+          track_id: selectedTrackId,
+          team_name: teamName,
+          alert_message: `PIT NOW! - ${teamName}`,
+        }),
       });
-      
+      if (!resp.ok) {
+        throw new Error(`pit alert HTTP ${resp.status}`);
+      }
+      const response = await resp.json();
       if (response.status === 'success') {
         setAlerts(prev => [...prev, {
           id: Date.now(),
@@ -453,7 +464,7 @@ const RaceDashboard = () => {
         teamKart: kartNum
       }]);
     }
-  }, [selectedTrackId]);
+  }, [selectedTrackId, apiFetch]);
 
   const getTeamClass = (teamName: string): string | null => {
     if (teamName.startsWith('1 - ')) return '1';
