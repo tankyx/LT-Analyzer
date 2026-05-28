@@ -17,14 +17,16 @@ export const ApiService = {
     }
   },
 
-  // Update monitoring settings
+  // Update monitoring settings.
+  // CSRF-protected + credentialed — without these the backend's CSRF
+  // middleware 403s the request (same class of bug we fixed for
+  // triggerPitAlert; audit flagged this whole cluster).
   updateMonitoring: async (data: { myTeam: string; monitoredTeams: string[] }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/update-monitoring`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify(data),
       });
       if (!response.ok) {
@@ -40,7 +42,6 @@ export const ApiService = {
   // Start simulation
   startSimulation: async (isSimulationMode: boolean = false, timingUrl?: string, websocketUrl?: string, trackId?: number) => {
     try {
-      console.log(`Calling ${API_BASE_URL}/api/start-simulation with mode:`, isSimulationMode, 'URL:', timingUrl, 'WS URL:', websocketUrl, 'Track ID:', trackId);
       const payload: { simulation: boolean; timingUrl?: string; websocketUrl?: string; trackId?: number } = { simulation: isSimulationMode };
       if (timingUrl) {
         payload.timingUrl = timingUrl;
@@ -51,24 +52,21 @@ export const ApiService = {
       if (trackId) {
         payload.trackId = trackId;
       }
-      
+
       const response = await fetch(`${API_BASE_URL}/api/start-simulation`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify(payload),
       });
-      
+
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Response not OK:', response.status, errorText);
         throw new Error(`Failed to start simulation: ${response.status} ${errorText}`);
       }
-      
-      const result = await response.json();
-      console.log('Start simulation response:', result);
-      return result;
+
+      return await response.json();
     } catch (error) {
       console.error('Error starting simulation:', error);
       if (error instanceof TypeError && error.message.includes('fetch')) {
@@ -83,9 +81,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/stop-simulation`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
       });
       if (!response.ok) {
         throw new Error('Failed to stop simulation');
@@ -101,9 +98,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/update-pit-config`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify(data),
       });
       if (!response.ok) {
@@ -244,9 +240,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/reset-race-data`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
       });
       if (!response.ok) {
         throw new Error('Failed to reset race data');
@@ -765,19 +760,16 @@ export const ApiService = {
   },
 
   // Trigger pit alert for a specific team.
-  // DEPRECATED for new callers — use apiFetch from useAuth() directly so the
-  // CSRF token + session cookie flow correctly (this raw-fetch path returns
-  // 403 in production because credentials and CSRF aren't sent). Kept for
-  // backward compat with non-component code paths, but those should be
-  // migrated.
+  // Preferred path is apiFetch from useAuth() (React components have it), but
+  // this fallback is CSRF-safe too: cookies + X-CSRF-Token both flow. Backend
+  // routes the alert to the triggering user's user_{id} room so only that
+  // user's Android devices buzz.
   triggerPitAlert: async (data: { track_id: number; team_name: string; alert_message?: string }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/trigger-pit-alert`, {
         method: 'POST',
-        credentials: 'include',  // at least send the cookie; CSRF still missing
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify({
           track_id: data.track_id,
           team_name: data.team_name,
