@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from alphahub_parser import (
     AlphaHubConfig,
     AlphaHubParser,
+    _derive_status,
     _looks_in_pit,
     _ms_to_gap,
     _ms_to_laptime,
@@ -94,6 +95,45 @@ class TestFormatHelpers:
         assert _safe_int('17') == 17
         assert _safe_int(None) is None
         assert _safe_int('abc') is None
+
+
+class TestDeriveStatus:
+    """Per-competitor flag → Status string mapping (must match the values the
+    frontend StatusImageIndicator recognizes: Pit-in / Pit-out / Finished /
+    On Track / Retired)."""
+
+    def test_default_on_track(self):
+        assert _derive_status({}) == 'On Track'
+
+    def test_chequered_flag_wins(self):
+        # Buckmore post-race state: every competitor has TakenChequered=True.
+        assert _derive_status({'TakenChequered': True}) == 'Finished'
+        # Alt key name (just in case some sites use it)
+        assert _derive_status({'Chequered': True}) == 'Finished'
+
+    def test_chequered_outranks_pit(self):
+        # A competitor pitting on their cool-down lap after taking the flag
+        # should still read 'Finished', not 'Pit-in'.
+        assert _derive_status({'TakenChequered': True, 'InPit': True}) == 'Finished'
+
+    def test_retired_wins_over_pit(self):
+        # Retired teams may have InPit=True (parked); flag retirement first.
+        assert _derive_status({'Retired': True, 'InPit': True}) == 'Retired'
+
+    def test_in_pit(self):
+        assert _derive_status({'InPit': True}) == 'Pit-in'
+        assert _derive_status({'IsInPit': True}) == 'Pit-in'
+
+    def test_explicit_status_string_used_when_no_flags(self):
+        # Some venues may include an explicit Status string — honour it.
+        assert _derive_status({'Status': 'Pit-out'}) == 'Pit-out'
+        assert _derive_status({'Status': 'On Track'}) == 'On Track'
+
+    def test_explicit_status_takes_precedence_over_inpit_flag(self):
+        # Real case: a snapshot with both Status='Pit-out' and InPit=False
+        # must NOT route to Pit-in (would happen if we ran the
+        # _looks_in_pit substring check before the explicit-Status check).
+        assert _derive_status({'Status': 'Pit-out'}) == 'Pit-out'
 
 
 class TestNormalizeKart:
@@ -370,6 +410,42 @@ class TestStandingsBuild:
         df = parser.get_current_standings()
         assert df.iloc[0]['Team'] == 'Team Alpha'
         assert df.iloc[0]['Kart'] == '17'
+
+    def test_finished_competitors_get_finished_status(self, parser: AlphaHubParser):
+        # The exact failure mode the user hit: a post-race Buckmore snapshot
+        # has every competitor with TakenChequered=True. They must all read
+        # 'Finished' in the standings DF, not 'On Track'.
+        parser.competitors = {
+            '6': {'CompetitorNumber': 6, 'Position': 1, 'CompetitorName': 'A',
+                  'NumberOfLaps': 12, 'TakenChequered': True, 'InPit': False},
+            '12': {'CompetitorNumber': 12, 'Position': 2, 'CompetitorName': 'B',
+                   'NumberOfLaps': 12, 'TakenChequered': True, 'InPit': False},
+        }
+        df = parser.get_current_standings()
+        assert list(df['Status']) == ['Finished', 'Finished']
+
+    def test_retired_competitor_status(self, parser: AlphaHubParser):
+        parser.competitors = {
+            '1': {'CompetitorNumber': 1, 'Position': 1, 'CompetitorName': 'A',
+                  'Retired': True},
+        }
+        df = parser.get_current_standings()
+        assert df.iloc[0]['Status'] == 'Retired'
+
+    def test_mixed_status_within_session(self, parser: AlphaHubParser):
+        # Realistic mid-race mix: one finished, one retired, one in pits,
+        # one racing, ordered by position.
+        parser.competitors = {
+            '1': {'CompetitorNumber': 1, 'Position': 1, 'CompetitorName': 'Leader',
+                  'TakenChequered': True},
+            '2': {'CompetitorNumber': 2, 'Position': 2, 'CompetitorName': 'In pits',
+                  'InPit': True},
+            '3': {'CompetitorNumber': 3, 'Position': 3, 'CompetitorName': 'Racing'},
+            '4': {'CompetitorNumber': 4, 'Position': 4, 'CompetitorName': 'DNF',
+                  'Retired': True},
+        }
+        df = parser.get_current_standings()
+        assert list(df['Status']) == ['Finished', 'Pit-in', 'On Track', 'Retired']
 
     def test_alpha_kart_without_team_name(self, parser: AlphaHubParser):
         # Edge case: alpha ID + missing team — Team falls back to bare ID.

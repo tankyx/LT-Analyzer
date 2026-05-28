@@ -154,6 +154,37 @@ def _looks_in_pit(comp: Dict[str, Any]) -> bool:
     return 'pit' in status
 
 
+def _derive_status(comp: Dict[str, Any]) -> str:
+    """Map AlphaHub per-competitor flags to the Status strings the frontend
+    knows ('On Track' | 'Pit-in' | 'Pit-out' | 'Finished' | 'Retired').
+
+    Priority — the highest-priority signal wins:
+      1. TakenChequered  → 'Finished'   (took the chequered flag; the race is
+                                          over for this competitor)
+      2. Retired         → 'Retired'    (DNF without taking the flag)
+      3. explicit Status string (e.g. 'Pit-out') is preferred over inferring
+         from a boolean — important because 'Pit-out' contains the substring
+         'pit' and would otherwise route to 'Pit-in' via the fallback below.
+      4. InPit / IsInPit → 'Pit-in'     (currently in the pit lane)
+      5. (fallback)      → 'On Track'
+
+    Without this mapping every finished competitor at a closed session reads
+    'On Track' (the snapshot's per-competitor `Status` field is usually empty).
+    """
+    for k in ('TakenChequered', 'Chequered'):
+        if comp.get(k):
+            return 'Finished'
+    if comp.get('Retired'):
+        return 'Retired'
+    explicit = str(comp.get('Status', '') or '').strip()
+    if explicit:
+        return explicit
+    for k in ('InPit', 'IsInPit', 'PitIn', 'InPits'):
+        if comp.get(k):
+            return 'Pit-in'
+    return 'On Track'
+
+
 class AlphaHubConfig:
     """Page-scraped settings needed to subscribe."""
 
@@ -355,8 +386,7 @@ class AlphaHubParser(TrackSpecificParser):
                 gap_str = f"Tour {laps_to_first}"
             elif gap_ms:
                 gap_str = _ms_to_gap(gap_ms)
-            in_pit = _looks_in_pit(c)
-            status = 'Pit-in' if in_pit else (c.get('Status') or 'On Track')
+            status = _derive_status(c)
             raw_team = str(c.get('CompetitorName') or c.get('TeamName')
                            or c.get('Name') or c.get('Team') or '').strip()
             raw_num = str(num).strip()
