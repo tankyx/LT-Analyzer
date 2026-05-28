@@ -478,6 +478,30 @@ class TestStandingsBuild:
         assert row['Pit Stops'] == '1'
 
 
+class TestStartupStagger:
+    """Sequential startup index spreads parser first-connects so we don't
+    slam alpharacehub.com with N simultaneous discovery GETs and trip its
+    rate limiter (the failure mode hit when we added 27 tracks at once)."""
+
+    def test_each_instance_gets_distinct_increasing_index(self, tmp_path: Path):
+        from multi_track_manager import MultiTrackManager
+        mgr = MultiTrackManager(socketio=None)
+        mgr.get_database_path = lambda _id: str(tmp_path / f'race_data_track_{_id}.db')
+        # Reset counter so this test is hermetic regardless of import order.
+        AlphaHubParser._startup_counter = 0
+        parsers = []
+        for tid in (501, 502, 503):
+            mgr.initialize_track_database(tid)
+            parsers.append(AlphaHubParser(
+                tid, f't{tid}', mgr.get_database_path(tid),
+                socketio=None, manager=mgr,
+            ))
+        indices = [p._startup_index for p in parsers]
+        assert indices == [0, 1, 2]
+        # Stagger constant is positive so index>0 actually delays the connect.
+        assert AlphaHubParser._START_STAGGER_SECONDS > 0
+
+
 class TestDeltaMerge:
     def test_apply_first_delta_when_no_prior_sequence(self, parser: AlphaHubParser):
         parser.competitors = {

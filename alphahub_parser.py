@@ -297,6 +297,19 @@ class AlphaHubParser(TrackSpecificParser):
     AlphaHub-specific.
     """
 
+    # Class-level counter assigning each new instance a sequential "startup
+    # index" so we can stagger initial connects when many AlphaHub tracks are
+    # configured. Without this, every parser hits discover_config in the same
+    # millisecond on backend startup and trips alpharacehub.com's per-IP rate
+    # limiter, leaving most parsers in a 429 retry loop. See
+    # _START_STAGGER_SECONDS for the gap.
+    _startup_counter = 0
+    _startup_lock = __import__('threading').Lock()
+    # ~1.5s between successive parser first-connects. Matches the rate at
+    # which the discovery probe could safely hit the snapshot endpoint
+    # serially without 429s.
+    _START_STAGGER_SECONDS = 1.5
+
     def __init__(self, track_id: int, track_name: str, db_path: str,
                  socketio=None, manager=None):
         super().__init__(track_id, track_name, db_path, socketio=socketio, manager=manager)
@@ -310,6 +323,9 @@ class AlphaHubParser(TrackSpecificParser):
         self._cfg: Optional[AlphaHubConfig] = None
         self.is_connected = False
         self._ssl_ctx = ssl.create_default_context()
+        with AlphaHubParser._startup_lock:
+            self._startup_index = AlphaHubParser._startup_counter
+            AlphaHubParser._startup_counter += 1
 
     # ---- snapshot / delta plumbing ------------------------------------------------
     def _fetch_snapshot(self) -> None:
@@ -590,7 +606,21 @@ class AlphaHubParser(TrackSpecificParser):
                 f"({self.track_name}) [AlphaHub]"
             )
 
-        reconnect_delay = 5
+        # Stagger first connect across all AlphaHub parsers so we don't slam
+        # alpharacehub.com with N simultaneous discovery GETs on startup
+        # (every instance got a sequential index in __init__).
+        if self._startup_index > 0:
+            stagger = self._startup_index * self._START_STAGGER_SECONDS
+            self.logger.info(
+                f"Track {self.track_id}: AlphaHub startup stagger {stagger:.1f}s "
+                f"(index {self._startup_index})"
+            )
+            await asyncio.sleep(stagger)
+
+        # Start at 15s, not 5s — a 429 storm needs more breathing room than a
+        # transient websocket drop. The 5s default is fine after a successful
+        # connect; we reset it below.
+        reconnect_delay = 15
         while True:
             try:
                 # Re-discover the config every time we reconnect — the at-pst
@@ -605,12 +635,12 @@ class AlphaHubParser(TrackSpecificParser):
                 )
                 self.is_connected = False
                 await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 120)
+                reconnect_delay = min(reconnect_delay * 2, 300)
                 continue
 
             try:
                 await self._pusher_loop()
-                reconnect_delay = 5
+                reconnect_delay = 15  # reset to the cautious default
             except asyncio.CancelledError:
                 self.logger.info(f"Track {self.track_id}: AlphaHub parser cancelled")
                 raise
@@ -621,4 +651,4 @@ class AlphaHubParser(TrackSpecificParser):
                 self.websocket = None
 
             await asyncio.sleep(reconnect_delay)
-            reconnect_delay = min(reconnect_delay * 2, 60)
+            reconnect_delay = min(reconnect_delay * 2, 300)

@@ -55,7 +55,7 @@ SEED_SLUGS = [
     "pks-loisirs", "karttiming", "sports-timing-uk", "cumbria", "cronosystem2",
     "kartodromo-lucas-guerrero", "elk-motorsport", "ligue-karting-op", "evokart",
     "lemans-karting", "lavalloisirskart", "kart-escale", "lemans-karting2",
-    "cremona-circuit", "ask-puma-forez",
+    "cremona-circuit", "ask-puma-forez", "ardenneskarting",
 ]
 
 # Clean display names for circuits whose config.js title/logo is weak or missing.

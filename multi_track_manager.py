@@ -371,20 +371,32 @@ class MultiTrackManager:
         return False
 
     def get_active_tracks(self) -> List[Dict]:
-        """Get list of currently active tracks"""
-        return [
-            {
-                'track_id': track_id,
-                'is_connected': parser.is_connected,
-                'track_name': parser.track_name
-            }
-            for track_id, parser in self.parsers.items()
-        ]
+        """Get list of currently active tracks, sorted alphabetically by name
+        (case-insensitive) so the multi-track UI is stable regardless of the
+        order tracks were added to tracks.db."""
+        return sorted(
+            (
+                {
+                    'track_id': track_id,
+                    'is_connected': parser.is_connected,
+                    'track_name': parser.track_name,
+                }
+                for track_id, parser in self.parsers.items()
+            ),
+            key=lambda r: (r['track_name'] or '').lower(),
+        )
 
     def get_all_tracks_status(self) -> List[Dict]:
-        """Get session status for all tracks"""
+        """Get session status for all tracks (sorted alphabetically by
+        track_name, case-insensitive)."""
         tracks_status = []
-        for track_id, parser in self.parsers.items():
+        # Iterate in alphabetical order so the resulting list is stable for
+        # both the REST endpoint and the all_tracks Socket.IO broadcast.
+        ordered = sorted(
+            self.parsers.items(),
+            key=lambda kv: (kv[1].track_name or '').lower(),
+        )
+        for track_id, parser in ordered:
             status = {
                 'track_id': track_id,
                 'track_name': parser.track_name,

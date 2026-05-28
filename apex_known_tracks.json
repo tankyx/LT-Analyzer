@@ -390,5 +390,13 @@
     "websocket_url": "wss://www.apex-timing.com:7083/",
     "gmt": 2,
     "host": "www.apex-timing.com"
+  },
+  {
+    "slug": "ardenneskarting",
+    "track_name": "Ardennes Karting",
+    "timing_url": "https://www.apex-timing.com/live-timing/ardenneskarting/index.html",
+    "websocket_url": "wss://www.apex-timing.com:9403/",
+    "gmt": 2,
+    "host": "www.apex-timing.com"
   }
 ]
