@@ -44,6 +44,7 @@ import json
 import logging
 import re
 import ssl
+import threading
 import time
 import urllib.parse
 from datetime import datetime
@@ -54,6 +55,39 @@ import requests
 import websockets
 
 from multi_track_manager import TrackSpecificParser
+
+
+# Process-wide rate limiter for alpharacehub.com HTTP requests.
+#
+# Why: AlphaHub's per-IP rate limiter trips when more than a few requests/sec
+# come from the same source, and once tripped it stays sticky for many minutes
+# (each new request prolongs the block). We hit this twice on the day we
+# scaled to 29 alphahub tracks: once during discovery scraping, once when 29
+# parsers all fired their first discover_config in the same millisecond.
+#
+# The per-parser startup stagger helps the first attempt but doesn't help
+# reconnects after a network hiccup (all parsers retry on similar backoffs).
+# A module-level gate serializes ALL alphahub HTTP — discovery page fetches
+# AND snapshot fetches — at a safe rate regardless of how many parsers exist.
+#
+# 3.0s is empirically what serial probing tolerated without 429s. The gate is
+# thread-safe (threading.Lock) because parsers call HTTP from asyncio.to_thread
+# worker pools, not the event loop.
+_HTTP_GATE_LOCK = threading.Lock()
+_HTTP_GATE_LAST_TS = 0.0
+_HTTP_GATE_MIN_INTERVAL = 3.0  # seconds between any two HTTP requests to alphahub
+
+
+def _gate_acquire():
+    """Block until the next HTTP slot is available. Must be called from a
+    worker thread (asyncio.to_thread), never on the event loop directly."""
+    global _HTTP_GATE_LAST_TS
+    with _HTTP_GATE_LOCK:
+        now = time.monotonic()
+        wait = _HTTP_GATE_LAST_TS + _HTTP_GATE_MIN_INTERVAL - now
+        if wait > 0:
+            time.sleep(wait)
+        _HTTP_GATE_LAST_TS = time.monotonic()
 
 
 _PUSHER_KEY_RE = re.compile(r"""pusherKey\s*[:=]\s*['"]([^'"]+)['"]""")
@@ -238,6 +272,7 @@ def discover_config(page_url: str, *, session: Optional[requests.Session] = None
     sess = session or requests.Session()
     sess.headers.update(_DEFAULT_HEADERS)
 
+    _gate_acquire()
     resp = sess.get(page_url, timeout=20, allow_redirects=True)
     resp.raise_for_status()
     body = resp.text
@@ -334,6 +369,7 @@ class AlphaHubParser(TrackSpecificParser):
         assert self._cfg is not None
         url = self._cfg.snapshot_url
         try:
+            _gate_acquire()
             resp = self._http.get(url, timeout=15)
             resp.raise_for_status()
             data = resp.json()
@@ -445,6 +481,7 @@ class AlphaHubParser(TrackSpecificParser):
         }
         if self._cfg.at_pst:
             headers['at-pst'] = self._cfg.at_pst
+        _gate_acquire()
         resp = self._http.post(
             self._cfg.auth_url,
             data={'socket_id': socket_id, 'channel_name': self._cfg.channel},

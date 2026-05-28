@@ -478,6 +478,38 @@ class TestStandingsBuild:
         assert row['Pit Stops'] == '1'
 
 
+class TestHttpGate:
+    """The module-level HTTP gate prevents ALL alphahub HTTP requests across
+    parsers from exceeding 1 / _HTTP_GATE_MIN_INTERVAL seconds combined.
+    Critical for surviving a deep rate-limit hole after a 429 storm."""
+
+    def test_gate_enforces_min_interval_between_calls(self, monkeypatch):
+        import alphahub_parser as ap
+        # Shrink interval so the test isn't slow, then reset the gate.
+        monkeypatch.setattr(ap, '_HTTP_GATE_MIN_INTERVAL', 0.05)
+        monkeypatch.setattr(ap, '_HTTP_GATE_LAST_TS', 0.0)
+        import time
+        t0 = time.monotonic()
+        for _ in range(5):
+            ap._gate_acquire()
+        elapsed = time.monotonic() - t0
+        # 5 calls with 50ms min interval → at least 4 gaps = 200ms.
+        # First call has no prior, so it returns immediately; gaps come after.
+        assert elapsed >= 0.18, f"gate didn't space calls: elapsed={elapsed:.3f}s"
+
+    def test_gate_does_not_block_when_calls_are_spaced(self, monkeypatch):
+        import alphahub_parser as ap
+        monkeypatch.setattr(ap, '_HTTP_GATE_MIN_INTERVAL', 0.05)
+        monkeypatch.setattr(ap, '_HTTP_GATE_LAST_TS', 0.0)
+        import time
+        ap._gate_acquire()
+        time.sleep(0.1)  # > min interval
+        t0 = time.monotonic()
+        ap._gate_acquire()
+        # Second call after sufficient spacing should return immediately.
+        assert time.monotonic() - t0 < 0.02
+
+
 class TestStartupStagger:
     """Sequential startup index spreads parser first-connects so we don't
     slam alpharacehub.com with N simultaneous discovery GETs and trip its
