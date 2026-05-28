@@ -29,6 +29,7 @@ from alphahub_parser import (
     _ms_to_gap,
     _ms_to_laptime,
     _ms_to_runtime,
+    _normalize_kart,
     _safe_int,
     discover_config,
 )
@@ -93,6 +94,41 @@ class TestFormatHelpers:
         assert _safe_int('17') == 17
         assert _safe_int(None) is None
         assert _safe_int('abc') is None
+
+
+class TestNormalizeKart:
+    def test_all_digits_passes_through(self):
+        # Buckmore-style numeric IDs are preserved exactly.
+        assert _normalize_kart('17') == 17
+        assert _normalize_kart(23) == 23
+        assert _normalize_kart('1') == 1
+
+    def test_empty_returns_zero(self):
+        assert _normalize_kart('') == 0
+        assert _normalize_kart(None) == 0
+
+    def test_alpha_prefixed_is_deterministic_and_distinct(self):
+        # Whilton Mill cadet class IDs ("C1", "C12") must map to distinct ints.
+        c1_a = _normalize_kart('C1')
+        c1_b = _normalize_kart('C1')
+        c12 = _normalize_kart('C12')
+        assert c1_a == c1_b                # stable
+        assert c1_a != c12                 # distinct
+        assert c1_a >= 1_000_000           # above the natural 1-999 numeric range
+        assert c12 >= 1_000_000
+
+    def test_does_not_collide_with_numeric_ids(self):
+        # An alpha ID must never produce a value in the 1-999 native range.
+        for label in ('C1', 'K1', 'C12', 'A99', 'X'):
+            assert _normalize_kart(label) >= 1_000_000
+
+    def test_md5_based_not_python_hash(self):
+        # Python hash() is salted per-process — verify our value matches the
+        # actual md5 derivation so it's stable across restarts.
+        import hashlib
+        digest = hashlib.md5(b'C1').hexdigest()
+        expected = 1_000_000 + (int(digest[:7], 16) % 9_000_000)
+        assert _normalize_kart('C1') == expected
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +338,46 @@ class TestStandingsBuild:
         }
         df = parser.get_current_standings()
         assert list(df['Position']) == ['1', '3', '5']
+
+    def test_alpha_prefixed_kart_number(self, parser: AlphaHubParser):
+        # Whilton Mill style: CompetitorNumber like "C1" must produce a
+        # numeric Kart (so the int-typed DB column is happy) and surface
+        # the original label in Team as "C1 - CADET 1".
+        parser.competitors = {
+            'C1':  {'CompetitorNumber': 'C1',  'Position': 1,
+                    'CompetitorName': 'CADET 1', 'LastLaptime': 33822,
+                    'BestLaptime': 33819, 'NumberOfLaps': 7},
+            'C12': {'CompetitorNumber': 'C12', 'Position': 2,
+                    'CompetitorName': 'CADET 12', 'LastLaptime': 34100,
+                    'BestLaptime': 33950, 'NumberOfLaps': 7},
+        }
+        df = parser.get_current_standings()
+        # Kart values are integers (no "C" prefix) and they're distinct.
+        karts = [int(k) for k in df['Kart']]
+        assert all(k >= 1_000_000 for k in karts)
+        assert karts[0] != karts[1]
+        # Team carries the original label so the user can still see "C1".
+        assert df.iloc[0]['Team'].startswith('C1 - ')
+        assert 'CADET 1' in df.iloc[0]['Team']
+        assert df.iloc[1]['Team'].startswith('C12 - ')
+
+    def test_numeric_kart_does_not_get_prepended(self, parser: AlphaHubParser):
+        # Buckmore-style numeric ID must keep Team clean (no "17 - " prefix).
+        parser.competitors = {
+            '17': {'CompetitorNumber': 17, 'Position': 1,
+                   'CompetitorName': 'Team Alpha', 'LastLaptime': 75000},
+        }
+        df = parser.get_current_standings()
+        assert df.iloc[0]['Team'] == 'Team Alpha'
+        assert df.iloc[0]['Kart'] == '17'
+
+    def test_alpha_kart_without_team_name(self, parser: AlphaHubParser):
+        # Edge case: alpha ID + missing team — Team falls back to bare ID.
+        parser.competitors = {
+            'C1': {'CompetitorNumber': 'C1', 'Position': 1},
+        }
+        df = parser.get_current_standings()
+        assert df.iloc[0]['Team'] == 'C1'
 
     def test_alt_field_names(self, parser: AlphaHubParser):
         # Some venues use TeamName/Rank/Laps/TotalTime/NumberOfPitStops instead.

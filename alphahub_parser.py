@@ -39,6 +39,7 @@ Field mapping (from the captured payload):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -118,6 +119,31 @@ def _safe_int(v) -> Optional[int]:
         return int(v)
     except (TypeError, ValueError):
         return None
+
+
+_DIGIT_RE = re.compile(r'^\d+$')
+
+
+def _normalize_kart(number: Any) -> int:
+    """AlphaHub CompetitorNumber → integer kart_number for the per-track DB
+    (schema declares INTEGER and downstream queries cast to int).
+
+    For all-digit IDs ("17", "23") that's just `int(...)` — matches Buckmore.
+    For alpha-prefixed IDs ("C1", "C12" cadet class at Whilton Mill) we derive
+    a deterministic 7-digit integer from MD5 of the full string. md5 (not
+    Python `hash`) so the value is stable across processes/restarts; 7 digits
+    fits any sensible session count (~10M slots) and avoids realistic
+    collisions for the dozens of karts in a single session.
+    """
+    s = str(number or '').strip()
+    if not s:
+        return 0
+    if _DIGIT_RE.match(s):
+        return int(s)
+    digest = hashlib.md5(s.encode('utf-8')).hexdigest()
+    # 7 hex chars → max 0xFFFFFFF = 268M. Mod down to a 7-digit space and
+    # ensure it doesn't collide with the natural 1-999 numeric range.
+    return 1_000_000 + (int(digest[:7], 16) % 9_000_000)
 
 
 def _looks_in_pit(comp: Dict[str, Any]) -> bool:
@@ -331,12 +357,21 @@ class AlphaHubParser(TrackSpecificParser):
                 gap_str = _ms_to_gap(gap_ms)
             in_pit = _looks_in_pit(c)
             status = 'Pit-in' if in_pit else (c.get('Status') or 'On Track')
+            raw_team = str(c.get('CompetitorName') or c.get('TeamName')
+                           or c.get('Name') or c.get('Team') or '').strip()
+            raw_num = str(num).strip()
+            # Whilton Mill etc. use class-prefixed IDs ("C1"); the DB needs an
+            # int, so we hash to a stable int and prepend the original label
+            # to Team so the user can still see "C1 - CADET 1".
+            if raw_num and not _DIGIT_RE.match(raw_num):
+                team_display = f"{raw_num} - {raw_team}" if raw_team else raw_num
+            else:
+                team_display = raw_team
             rows.append({
                 'Status': status,
                 'Position': str(pos) if pos not in (None, '') else '',
-                'Kart': str(num),
-                'Team': str(c.get('CompetitorName') or c.get('TeamName')
-                            or c.get('Name') or c.get('Team') or '').strip(),
+                'Kart': str(_normalize_kart(raw_num)),
+                'Team': team_display,
                 'Last Lap': _ms_to_laptime(c.get('LastLaptime') or c.get('LastLap')),
                 'Best Lap': _ms_to_laptime(c.get('BestLaptime') or c.get('BestLap')),
                 'Gap': gap_str,
