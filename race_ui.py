@@ -224,12 +224,47 @@ def _internal_error(exc: Exception, context: str = 'request'):
 # WebSocket connection handlers
 @socketio.on('connect')
 def handle_connect(auth=None):
-    """Handle client connection"""
+    """Handle client connection.
+
+    If the connecting client carries a valid session cookie (web dashboard
+    or a logged-in Android device), auto-join that user to their personal
+    `user_{id}` room. Per-user events like pit_alert emit to that room so
+    only the operator who set the alert is notified — not every device
+    that happens to be monitoring the same team.
+
+    Anonymous Socket.IO connections still work (e.g. read-only viewers),
+    they just miss any user-targeted events until they log in and
+    reconnect.
+    """
     print(f"Client connected: {request.sid}")
     with connected_clients_lock:
         connected_clients.add(request.sid)
     join_room('race_updates')
-    
+
+    # Per-user room join, best-effort. session.get reads the signed Flask
+    # session cookie so Socket.IO connections from the dashboard (same
+    # origin) AND from the Android app (which authenticates via
+    # POST /api/auth/login and passes the session cookie on connect)
+    # both land here.
+    user_id = None
+    try:
+        session_id = session.get('session_id')
+        user = verify_session(session_id) if session_id else None
+        if user:
+            user_id = user['id']
+            join_room(f'user_{user_id}')
+            print(f"  -> identified as user_id={user_id} ({user['username']}); joined user_{user_id}")
+            # Send an explicit confirmation event so the Android client can
+            # log which user-id it's bound to (useful for debugging "why am
+            # I not getting pit alerts" reports).
+            emit('session_identified', {
+                'user_id': user_id,
+                'username': user['username'],
+                'room': f'user_{user_id}',
+            })
+    except Exception as e:
+        print(f"  -> session lookup failed: {e}")
+
     # Send current race data on connect. As of Phase 2 we no longer ship
     # my_team / monitored_teams / pit_config / delta_times / gap_history in
     # the broadcast payload — those are per-user and live behind /api/me/prefs.
@@ -3163,6 +3198,77 @@ def _teardown_track_parser(track_id):
     except Exception as e:
         app.logger.warning(f"Track {track_id}: parser teardown failed: {e}")
         return False
+
+
+def _restart_track_parser(track_id):
+    """Teardown + respawn a single track's parser without restarting the whole
+    backend. Used by /api/admin/tracks/<id>/restart-parser to recover stragglers
+    that got stuck (e.g. an AlphaHubParser whose requests.Session was flagged
+    by Cloudflare bot scoring and is stuck in 429 retry-loop hell).
+
+    The new parser instance gets a fresh requests.Session, fresh startup
+    counter slot at the end of the line, and inherits the cached Pusher
+    config from tracks.db so it skips the live-page scrape on the in-process
+    reconnect path.
+    """
+    global multi_track_manager, multi_track_loop
+    if not (multi_track_manager and multi_track_loop):
+        return False
+    track = track_db.get_track_by_id(track_id)
+    if not track:
+        return False
+    # Manager.start_track_parser expects the same shape that load_tracks emits.
+    track_payload = {
+        'id': track['id'],
+        'track_name': track['track_name'],
+        'websocket_url': track['websocket_url'],
+        'column_mappings': track.get('column_mappings'),
+        'provider': track.get('provider', 'apex'),
+        'pusher_key': track.get('pusher_key'),
+        'pusher_cluster': track.get('pusher_cluster'),
+        'pusher_site': track.get('pusher_site'),
+        'pusher_channel_suffix': track.get('pusher_channel_suffix'),
+    }
+    try:
+        # Stop first (idempotent — returns False if there was nothing to stop).
+        fut = asyncio.run_coroutine_threadsafe(
+            multi_track_manager.stop_track_parser(track_id), multi_track_loop)
+        fut.result(timeout=10)
+        # Then respawn the parser task on the same event loop.
+        coro = multi_track_manager.start_track_parser(track_payload)
+        asyncio.run_coroutine_threadsafe(
+            _track_supervisor(track_id, coro), multi_track_loop)
+        return True
+    except Exception as e:
+        app.logger.warning(f"Track {track_id}: parser restart failed: {e}")
+        return False
+
+
+async def _track_supervisor(track_id, coro):
+    """Wrap start_track_parser in a task so we can also store the handle in
+    manager.tasks (consistent with start_all_parsers). start_track_parser runs
+    forever, so we register the task ourselves."""
+    task = asyncio.create_task(coro)
+    multi_track_manager.tasks[track_id] = task
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
+@app.route('/api/admin/tracks/<int:track_id>/restart-parser', methods=['POST'])
+@admin_required
+def admin_restart_track_parser(track_id):
+    """Hot-restart a single track's parser without bouncing the backend.
+    Returns 200 on success, 404 if the track doesn't exist, 503 if the
+    manager isn't ready, 500 on internal error."""
+    global multi_track_manager
+    if not multi_track_manager:
+        return jsonify({'error': 'multi-track manager not initialized'}), 503
+    if not track_db.get_track_by_id(track_id):
+        return jsonify({'error': f'unknown track_id {track_id}'}), 404
+    ok = _restart_track_parser(track_id)
+    return (jsonify({'success': True}), 200) if ok else (jsonify({'error': 'restart failed'}), 500)
 
 
 @app.route('/api/admin/tracks/<int:track_id>', methods=['DELETE'])
@@ -7821,9 +7927,16 @@ def trigger_pit_alert():
         }), 400
     
     try:
-        # Emit to the team's specific room
-        room = f'team_track_{track_id}_{team_name}'
-        
+        # Per-user routing: the alert lands ONLY on devices belonging to the
+        # user who triggered it (matched by session at Socket.IO connect time
+        # — see handle_connect). Previously this fanned out to every device
+        # in `team_track_{id}_{name}`, which meant a rival team monitoring
+        # the same name would buzz too. Now you only buzz your own phones.
+        user = getattr(request, 'current_user', None)
+        if not user:
+            return jsonify({'status': 'error', 'message': 'auth required'}), 401
+
+        user_room = f"user_{user['id']}"
         alert_data = {
             'track_id': track_id,
             'team_name': team_name,
@@ -7832,30 +7945,37 @@ def trigger_pit_alert():
             'timestamp': datetime.now().isoformat(),
             'flash_color': '#FF0000',  # Red flash
             'duration_ms': 80000,      # Flash for 80 seconds
-            'priority': 'high'
+            'priority': 'high',
+            # Forward the triggering user_id so a future multi-user device can
+            # route between accounts if needed.
+            'triggered_by_user_id': user['id'],
         }
-        
-        # Emit to team-specific room (Android clients in that room will receive it)
-        socketio.emit('pit_alert', alert_data, room=room)
-        
-        # Also emit to track room for web clients to show the alert
+
+        # Emit to the triggering user's personal room (Android + their own
+        # browser tabs both receive it).
+        socketio.emit('pit_alert', alert_data, room=user_room)
+
+        # Also keep the per-track broadcast for the web dashboard's banner
+        # alert (it's a UI hint shown on the standings panel, not a phone
+        # notification — broader audience is fine here).
         track_room = f'track_{track_id}'
         socketio.emit('pit_alert_broadcast', {
             'track_id': track_id,
             'team_name': team_name,
             'alert_message': alert_message,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'triggered_by_user_id': user['id'],
         }, room=track_room)
-        
-        print(f"[PIT ALERT] 🚨 PIT ALERT triggered for team '{team_name}' on track {track_id} - Message: '{alert_message}'")
-        print(f"[PIT ALERT] ✅ Successfully emitted 'pit_alert' to room: {room}")
-        print(f"[PIT ALERT] ✅ Successfully emitted 'pit_alert_broadcast' to room: {track_room}")
-        
+
+        print(f"[PIT ALERT] 🚨 by user_id={user['id']} for '{team_name}' on track {track_id}: '{alert_message}'")
+        print(f"[PIT ALERT] ✅ emitted 'pit_alert' to {user_room}")
+        print(f"[PIT ALERT] ✅ emitted 'pit_alert_broadcast' to {track_room}")
+
         return jsonify({
             'status': 'success',
-            'message': f'Pit alert sent to {team_name}',
-            'room': room,
-            'alert': alert_data
+            'message': f'Pit alert sent to your devices (user {user["id"]})',
+            'room': user_room,
+            'alert': alert_data,
         })
         
     except Exception as e:

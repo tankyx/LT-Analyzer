@@ -103,8 +103,14 @@ _PATH_SITE_RE = re.compile(r"/([a-z0-9_-]+)/live\b", re.I)
 
 
 _DEFAULT_HEADERS = {
+    # 2026-05-28: alpharacehub.com (Cloudflare) flagged the "canonical" Chrome
+    # UA — `... AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 ...` — as
+    # a bot signature and 429s anything sending it. Without `(KHTML, like
+    # Gecko)` the same UA returns 200. Empirically bisected after the 27-track
+    # rollout left our IP in Cloudflare's blocklist; a fresh canary returned
+    # 200 only with this exact variant.
     "User-Agent": (
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
         "Chrome/124.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -736,22 +742,27 @@ class AlphaHubParser(TrackSpecificParser):
         reconnect_delay = 15
         scraped_this_cycle = False
         while True:
-            # Prefer the cached config: skips the live-page scrape entirely on
-            # both reconnects (same process) AND fresh process starts (seed
-            # loaded from tracks.db at construction). Only when there's no
-            # cache, or _force_rescrape is set (post-401 to refresh at-pst),
-            # do we hit HTTP.
+            # Prefer the cached config when it can actually skip HTTP:
+            # the seed gives us the Pusher key/cluster/site/suffix, but
+            # Pusher auth ALSO needs the per-session cookies that the page
+            # GET sets (`<site>-pst`, `.AspNetCore.Culture`, `__cf_bm`). On
+            # first start within a process those cookies don't exist yet, so
+            # a seed-only attempt would 401. We only skip the scrape when
+            # this parser has already scraped once (self._http has hot
+            # cookies) — which is what happens on in-process reconnects.
             if self._cfg is None:
+                have_cookies = bool(self._http.cookies.get_dict())
                 seeded = (
                     self._config_from_seed(ws_url)
-                    if not self._force_rescrape else None
+                    if (have_cookies and not self._force_rescrape) else None
                 )
                 if seeded is not None:
                     self._cfg = seeded
                     scraped_this_cycle = False
                     self.logger.info(
                         f"Track {self.track_id}: using cached Pusher config "
-                        f"(site={seeded.site}, channel={seeded.channel}) — skipping scrape"
+                        f"(site={seeded.site}, channel={seeded.channel}) — "
+                        f"skipping scrape (in-process reconnect)"
                     )
                 else:
                     if self._force_rescrape:
