@@ -529,6 +529,17 @@ class TestPusherConfigCache:
         assert cfg.pusher_cluster == 'eu'
         assert cfg.channel_suffix == 'live'
 
+    def test_parser_has_no_hot_cookies_at_construction(self, tmp_path: Path):
+        # The whole reason start_monitoring won't use the seed on first start:
+        # a freshly-constructed parser's http session has no cookies yet, so
+        # auth would 401 without doing a page GET to harvest them. This
+        # asserts the precondition that drives the "have_cookies" gate.
+        p = self._make_parser(tmp_path, seed={
+            'pusher_key': 'k', 'pusher_cluster': 'eu',
+            'pusher_site': 'buckmore', 'pusher_channel_suffix': 'live',
+        })
+        assert p._http.cookies.get_dict() == {}
+
     def test_invalidate_clears_in_memory_only_and_arms_rescrape(self, tmp_path: Path):
         # On Pusher auth 401 we DON'T clear the DB/seed cache (key+cluster+
         # site+suffix are stable per venue — only at-pst rotates). Instead we
