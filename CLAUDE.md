@@ -4,22 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LT-Analyzer is a real-time race timing analysis system for karting/racing events that simultaneously monitors multiple tracks, receives live timing data from Apex Timing WebSocket connections, and provides real-time analytics through a web dashboard.
+LT-Analyzer is a real-time race timing analysis system for karting/racing events that simultaneously monitors multiple tracks, receives live timing data from **Apex Timing** WebSocket feeds and **AlphaHub** (alpharacehub.com) Pusher channels, and provides real-time analytics through a web dashboard.
 
 ## Architecture
 
 The system consists of four main components:
 
-1. **Multi-Track Manager** (`multi_track_manager.py`): Manages concurrent monitoring of multiple tracks, each with its own parser and database
-2. **Data Collection Layer** (`apex_timing_websocket.py`): WebSocket-based parser that receives live race data from Apex Timing servers
-3. **API Layer** (`race_ui.py`): Flask-SocketIO server that broadcasts track-specific updates via Socket.IO rooms
-4. **Frontend** (`racing-analyzer/`): Next.js React dashboard with track selector for visualizing race progress with real-time WebSocket updates
+1. **Multi-Track Manager** (`multi_track_manager.py`): Manages concurrent monitoring of multiple tracks. For each track row in `tracks.db` it spawns one parser, dispatched by the `provider` column: `apex` → `TrackSpecificParser`, `alphahub` → `AlphaHubParser`. Both subclass `TrackSpecificParser`, so per-track DB / monitor thread / Socket.IO emission are identical regardless of provider.
+2. **Data Collection Layer**:
+   - `apex_timing_websocket.py` — base WebSocket parser for Apex Timing pipe-delimited feeds (`wss://host:port/`).
+   - `alphahub_parser.py` — AlphaHub parser. Scrapes the live page for Pusher key/cluster/site/channel suffix, posts `/pusher/auth` (Origin/Referer/at-site headers — without them auth 401s), subscribes to `private-<site><channelSuffix>` (e.g. `private-buckmorelive`), loads the REST snapshot `/api/v1/<site>/live/current`, then merges `update` deltas by `Sequence` (refetches on big jumps; `refresh` re-snapshots; `new_session` resets + reopens session_id).
+3. **API Layer** (`race_ui.py`): Flask-SocketIO server that broadcasts track-specific updates via Socket.IO rooms (same shape for both providers).
+4. **Frontend** (`racing-analyzer/`): Next.js React dashboard with track selector for visualizing race progress with real-time WebSocket updates (provider-agnostic — uses `track_update` payloads).
 
 **Data Flow:**
 ```
-Apex Timing WebSocket → TrackSpecificParser → Track Database (race_data_track_N.db)
-                                                         ↓
-                                    Socket.IO Room (track_N) → Frontend (track selector)
+Apex Timing WebSocket ─┐
+                        ├─→ TrackSpecificParser  ─→ Track Database (race_data_track_N.db)
+AlphaHub Pusher ───────┘                                          ↓
+                                                  Socket.IO Room (track_N) → Frontend
 ```
 
 **Key Architectural Features:**
@@ -32,8 +35,9 @@ Apex Timing WebSocket → TrackSpecificParser → Track Database (race_data_trac
 
 ```
 LT-Analyzer/
-├── apex_timing_websocket.py    # Base WebSocket parser for live race data
-├── multi_track_manager.py      # Multi-track concurrent monitoring manager
+├── apex_timing_websocket.py    # Base WebSocket parser for Apex Timing feeds
+├── alphahub_parser.py          # AlphaHub (alpharacehub.com) Pusher parser
+├── multi_track_manager.py      # Multi-track concurrent monitoring manager (provider dispatch)
 ├── race_ui.py                  # Flask-SocketIO API server with room-based broadcasting
 ├── database_manager.py         # Database utilities and management
 ├── initialize_databases.py     # Database initialization script
@@ -390,7 +394,21 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
       - Survives layout changes without code updates
       - Single codebase supports all tracks worldwide
 
-17. **Team Data Analysis (/data page)** (`racing-analyzer/app/data/page.tsx`, `race_ui.py`):
+17. **AlphaHub Provider** (`alphahub_parser.py`):
+    - **What it is**: support for tracks whose live timing is hosted on **alpharacehub.com** (a Pusher-backed product), so they can sit alongside Apex tracks in the same dashboard / Fleet Tracker / analytics pipeline. First live circuit: **Buckmore Park**.
+    - **Selection**: the `tracks.provider` column (`apex` default, `alphahub` for these). `MultiTrackManager.start_track_parser` branches on it; `tracks.websocket_url` for AlphaHub holds the live PAGE URL (e.g. `https://www.alpharacehub.com/buckmore/live`) — the parser scrapes it for the Pusher config rather than a wss feed URL.
+    - **Discovery → auth → subscribe flow** (verified live):
+      1. GET the live page → regex-extract `pusherKey`, `pusherCluster`, `site` (falls back to URL `/{site}/live`), `channelSuffix` (default `live`); optional `at-pst` from cookies or page body.
+      2. Connect `wss://ws-<cluster>.pusher.com/app/<key>?protocol=7&…`, wait for `pusher:connection_established` to harvest `socket_id`.
+      3. POST `/pusher/auth` with `{socket_id, channel_name}` and **`Origin` + `Referer` + `at-site` + (optional) `at-pst` headers** — these headers are mandatory; without them Pusher auth 401s. Send `pusher:subscribe` with the returned `auth`.
+      4. GET REST snapshot `/api/v1/<site>/live/current` → seed `self.competitors` keyed by `CompetitorNumber` and remember `Sequence`.
+      5. Drain events: `update` merges by `Sequence` (jumps > 50 → re-snapshot); `refresh` re-fetches snapshot; `new_session` resets state and forces a new `session_id`.
+    - **Field mapping**: `CompetitorNumber→Kart`, `CompetitorName/TeamName→Team`, `Position→Position`, `LastLaptime`/`BestLaptime` ms → `M:SS.mmm`, `RunningTime` ms → `MM:SS`, `GapToFirst` ms → `+S.mmm` (or `Tour N` when `LapsToFirst>0`), `PitStops`/`NumberOfPitStops`→`Pit Stops`, `InPit/IsInPit/…→Status` (`Pit-in` wins over `Status` string).
+    - **Why subclass `TrackSpecificParser`**: reuses the per-track DB schema, session-id rollover (`check_and_update_session`), monitor thread, Socket.IO broadcasts, dedup-on-write, and Fleet Tracker integration. Only the ingress loop is provider-specific — `_ingest_current_state` rebuilds the standings DataFrame from `self.competitors` and calls the parent's `store_lap_data` / emit path. From the API and frontend's point of view AlphaHub tracks are indistinguishable from Apex tracks.
+    - **Reconnect strategy**: the page is re-scraped (and `at-pst` re-harvested) on every reconnect attempt so per-session tokens that rotate don't strand the parser; exponential backoff up to 60s.
+    - **Tests**: `tests/test_alphahub/test_alphahub_parser.py` (48 tests) covers format helpers, channel-name construction, config discovery (HTML scraping with mocked HTTP), snapshot ingest, delta merge (stale/duplicate/jump/no-sequence), and DataFrame construction with alt field names.
+
+18. **Team Data Analysis (/data page)** (`racing-analyzer/app/data/page.tsx`, `race_ui.py`):
     - **Top Teams Table**: Shows top 10/20/30 teams ranked by best lap time
       - Configurable limit selector
       - Click team to add to comparison (max 2 teams)
@@ -429,7 +447,7 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
       - Useful for cleaning up data errors (e.g., laps under 50 seconds)
       - Admin-only UI section with threshold input and confirmation
 
-18. **Team Profile Pages** (`/team/[teamName]`)(`racing-analyzer/app/team/[teamName]/page.tsx`, `race_ui.py`):
+19. **Team Profile Pages** (`/team/[teamName]`)(`racing-analyzer/app/team/[teamName]/page.tsx`, `race_ui.py`):
     - **Cross-Track Session History**: Shows all sessions for a team across ALL tracks
     - **Flexible Name Matching**: Finds teams even with different name formats
       - Example: "DELVENNE Simon" at Mariembourg, "SIMON DELVENNE" at Eupen
@@ -454,7 +472,7 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
       - "View Full Profile" button in all laps section
       - Back button to return to data page
 
-19. **Database Optimizations** (`multi_track_manager.py`):
+20. **Database Optimizations** (`multi_track_manager.py`):
     - **In-Memory Caching**:
       - Previous kart state cached per session to eliminate repeated DB queries
       - Cache initialized once per session from database
@@ -476,13 +494,13 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
       - Session lap details: ~28ms
       - Top teams query: ~6s (complex aggregation, acceptable for one-time load)
 
-20. **Dashboard Navigation**:
+21. **Dashboard Navigation**:
     - **Link to Data Page**: Blue button "📊 Team Data Analysis" in track selector section
       - One-click access to team analysis features
       - Positioned below session status indicator
       - Themed styling (adapts to light/dark mode)
 
-21. **Fleet Tracker** (`racing-analyzer/app/components/RaceDashboard/FleetTracker.tsx`, `KartAssignmentEntry.tsx`, `race_ui.py`, `multi_track_manager.py`):
+22. **Fleet Tracker** (`racing-analyzer/app/components/RaceDashboard/FleetTracker.tsx`, `KartAssignmentEntry.tsx`, `race_ui.py`, `multi_track_manager.py`):
     - **Problem it solves**: in endurance races a team keeps its competition number but physically swaps karts every stint; the timing feed only ever exposes *team* identity (`no`/`dr`), never the physical machine. Fleet Tracker lets the operator track which physical kart each team is on, rank the fleet by pace, and spot fast/slow machines entering the pits.
     - **Per-user & login-gated**: each user keeps their own kart registry + assignments and sees only their own board (see DB note in §5). Any logged-in user can use it — there is no admin gate.
     - **Pit-lane kanban UI** (a tab in the dashboard `TabbedInterface`):

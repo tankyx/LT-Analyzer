@@ -212,56 +212,88 @@ class MultiTrackManager:
             raise
 
     def load_tracks(self) -> List[Dict]:
-        """Load all tracks from tracks.db that have websocket URLs"""
+        """Load all tracks from tracks.db that have a live-timing URL.
+
+        For provider=apex the URL is the wss://host:port/ feed; for
+        provider=alphahub it's the public live page (we scrape it for the
+        Pusher config). Both live in `websocket_url` so this single
+        connectivity gate keeps working — the parser dispatch in
+        start_track_parser branches on provider.
+        """
         try:
             with sqlite3.connect('tracks.db') as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT id, track_name, websocket_url, column_mappings
+                    SELECT id, track_name, websocket_url, column_mappings,
+                           COALESCE(provider, 'apex') AS provider
                     FROM tracks
                     WHERE websocket_url IS NOT NULL AND websocket_url != ''
                 ''')
                 tracks = [dict(row) for row in cursor.fetchall()]
-                self.logger.info(f"Loaded {len(tracks)} tracks with WebSocket URLs")
+                self.logger.info(f"Loaded {len(tracks)} tracks with live-timing URLs")
                 return tracks
         except Exception as e:
             self.logger.error(f"Error loading tracks: {e}")
             return []
 
     async def start_track_parser(self, track: Dict):
-        """Start a parser for a specific track"""
+        """Start a parser for a specific track.
+
+        Dispatches by provider:
+          - 'apex'     (default)  → TrackSpecificParser (Apex pipe-delimited ws)
+          - 'alphahub'            → AlphaHubParser (Pusher private channel)
+        Both subclass TrackSpecificParser so the per-track DB / monitor thread /
+        Socket.IO broadcasts are identical from race_ui.py's point of view.
+        """
         track_id = track['id']
         track_name = track['track_name']
         websocket_url = track['websocket_url']
+        provider = (track.get('provider') or 'apex').lower()
 
         try:
             # Initialize database for this track
             self.initialize_track_database(track_id)
 
-            # Create a custom parser that uses the track-specific database
-            parser = TrackSpecificParser(track_id, track_name, self.get_database_path(track_id), self.socketio, manager=self)
-
-            # Set column mappings if available
-            column_mappings = track.get('column_mappings')
-            self.logger.debug(f"Track {track_id} column_mappings value: {repr(column_mappings)}")
-            if column_mappings:
-                try:
-                    self.logger.debug(f"Loading column mappings for track {track_id}: {column_mappings}")
-                    mappings = json.loads(column_mappings)
-                    self.logger.debug(f"Parsed mappings: {mappings}")
-                    parser.set_column_mappings(mappings)
-                except Exception as e:
-                    self.logger.error(f"Error setting column mappings for track {track_id}: {e}")
-                    import traceback
-                    self.logger.error(traceback.format_exc())
+            if provider == 'alphahub':
+                # Local import keeps the Apex-only deployment from paying the
+                # `requests` import cost when no AlphaHub tracks are configured.
+                from alphahub_parser import AlphaHubParser
+                parser = AlphaHubParser(
+                    track_id, track_name, self.get_database_path(track_id),
+                    self.socketio, manager=self,
+                )
             else:
-                self.logger.debug(f"No column mappings for track {track_id}")
+                parser = TrackSpecificParser(
+                    track_id, track_name, self.get_database_path(track_id),
+                    self.socketio, manager=self,
+                )
+
+                # Apex-only: column mappings tweak the data-type → field map.
+                # AlphaHub builds standings from a known JSON schema and doesn't
+                # use them.
+                column_mappings = track.get('column_mappings')
+                self.logger.debug(f"Track {track_id} column_mappings value: {repr(column_mappings)}")
+                if column_mappings:
+                    try:
+                        self.logger.debug(f"Loading column mappings for track {track_id}: {column_mappings}")
+                        mappings = json.loads(column_mappings)
+                        self.logger.debug(f"Parsed mappings: {mappings}")
+                        parser.set_column_mappings(mappings)
+                    except Exception as e:
+                        self.logger.error(f"Error setting column mappings for track {track_id}: {e}")
+                        import traceback
+                        self.logger.error(traceback.format_exc())
+                else:
+                    self.logger.debug(f"No column mappings for track {track_id}")
 
             self.parsers[track_id] = parser
 
-            # Start the parser with full monitoring (includes message loop)
-            self.logger.info(f"Starting parser for track {track_id} ({track_name}): {websocket_url}")
+            # Start the parser with full monitoring (includes message loop).
+            # For AlphaHub `websocket_url` is the live PAGE url, not a wss feed.
+            self.logger.info(
+                f"Starting {provider} parser for track {track_id} ({track_name}): {websocket_url}"
+            )
             await parser.start_monitoring(websocket_url)
 
         except Exception as e:

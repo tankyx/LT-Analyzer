@@ -36,6 +36,15 @@ class TrackDatabase:
                 columns = [col[1] for col in cursor.fetchall()]
                 if 'column_mappings' not in columns:
                     conn.execute("ALTER TABLE tracks ADD COLUMN column_mappings TEXT DEFAULT '{}'")
+                # provider: which live-timing backend feeds this track.
+                # 'apex' (default, existing behaviour) — Apex Timing pipe-delimited
+                # websocket, websocket_url is the wss://host:port/ feed.
+                # 'alphahub' — alphaRaceHub Pusher feed; websocket_url stores the
+                # public live page URL (e.g. https://alpharacehub.com/buckmore/live)
+                # which the parser scrapes for its Pusher key, site slug, and the
+                # private channel suffix needed to subscribe.
+                if 'provider' not in columns:
+                    conn.execute("ALTER TABLE tracks ADD COLUMN provider TEXT NOT NULL DEFAULT 'apex'")
 
                 # Physical-layout definitions per track. A single karting venue
                 # often runs multiple configs whose lap times differ 10%+; the
@@ -105,7 +114,7 @@ class TrackDatabase:
     def add_track(self, track_name: str, timing_url: str, websocket_url: Optional[str] = None,
                   column_mappings: Optional[Dict] = None, location: Optional[str] = None,
                   length_meters: Optional[int] = None, description: Optional[str] = None,
-                  is_active: bool = True) -> Dict:
+                  is_active: bool = True, provider: str = 'apex') -> Dict:
         """Add a new track to the database"""
         self.ensure_table_exists()  # Ensure table exists before operation
         try:
@@ -115,10 +124,10 @@ class TrackDatabase:
                 mappings_json = json.dumps(column_mappings or {})
                 cursor.execute('''
                     INSERT INTO tracks (track_name, timing_url, websocket_url, column_mappings,
-                                        location, length_meters, description, is_active)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                        location, length_meters, description, is_active, provider)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (track_name, timing_url, websocket_url, mappings_json,
-                      location, length_meters, description, is_active))
+                      location, length_meters, description, is_active, provider))
 
                 track_id = cursor.lastrowid
                 conn.commit()
@@ -133,6 +142,7 @@ class TrackDatabase:
                     'length_meters': length_meters,
                     'description': description,
                     'is_active': is_active,
+                    'provider': provider,
                     'message': 'Track added successfully'
                 }
         except sqlite3.IntegrityError:
@@ -151,7 +161,7 @@ class TrackDatabase:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT id, track_name, timing_url, websocket_url, column_mappings,
-                           location, length_meters, description, is_active,
+                           location, length_meters, description, is_active, provider,
                            created_at, updated_at
                     FROM tracks
                     ORDER BY track_name
@@ -179,6 +189,7 @@ class TrackDatabase:
                         'length_meters': row['length_meters'],
                         'description': row['description'],
                         'is_active': row['is_active'],
+                        'provider': (row['provider'] or 'apex'),
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at']
                     })
@@ -198,7 +209,7 @@ class TrackDatabase:
                 cursor = conn.cursor()
                 cursor.execute('''
                     SELECT id, track_name, timing_url, websocket_url, column_mappings,
-                           location, length_meters, description, is_active,
+                           location, length_meters, description, is_active, provider,
                            created_at, updated_at
                     FROM tracks
                     WHERE id = ?
@@ -226,6 +237,7 @@ class TrackDatabase:
                         'length_meters': row['length_meters'],
                         'description': row['description'],
                         'is_active': row['is_active'],
+                        'provider': (row['provider'] or 'apex'),
                         'created_at': row['created_at'],
                         'updated_at': row['updated_at']
                     }
@@ -238,7 +250,7 @@ class TrackDatabase:
                      timing_url: Optional[str] = None, websocket_url: Optional[str] = None,
                      column_mappings: Optional[Dict] = None, location: Optional[str] = None,
                      length_meters: Optional[int] = None, description: Optional[str] = None,
-                     is_active: Optional[bool] = None) -> Dict:
+                     is_active: Optional[bool] = None, provider: Optional[str] = None) -> Dict:
         """Update a track's information"""
         self.ensure_table_exists()  # Ensure table exists before operation
         try:
@@ -281,6 +293,10 @@ class TrackDatabase:
                 if is_active is not None:
                     update_fields.append("is_active = ?")
                     params.append(is_active)
+
+                if provider is not None:
+                    update_fields.append("provider = ?")
+                    params.append(provider)
 
                 if not update_fields:
                     return {'error': 'No fields to update'}

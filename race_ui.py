@@ -3083,6 +3083,7 @@ def admin_get_tracks():
             'websocket_url': track['websocket_url'],
             'column_mappings': track['column_mappings'],
             'is_active': track.get('is_active', True),
+            'provider': track.get('provider', 'apex'),
             'created_at': track['created_at'],
             'updated_at': track['updated_at']
         })
@@ -3106,7 +3107,8 @@ def admin_add_track():
         location=data.get('location'),
         length_meters=data.get('length_meters'),
         description=data.get('description'),
-        is_active=data.get('is_active', True)
+        is_active=data.get('is_active', True),
+        provider=(data.get('provider') or 'apex'),
     )
 
     if 'error' in result:
@@ -3138,7 +3140,8 @@ def admin_update_track(track_id):
         location=data.get('location'),
         length_meters=data.get('length_meters'),
         description=data.get('description'),
-        is_active=data.get('is_active')
+        is_active=data.get('is_active'),
+        provider=data.get('provider'),
     )
 
     if 'error' in result:
