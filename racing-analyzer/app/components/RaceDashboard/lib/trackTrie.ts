@@ -23,6 +23,9 @@
 export interface IndexedTrack {
   track_id: number;
   track_name: string;
+  // Optional extra tokens to make searchable alongside the name (e.g. the
+  // provider tag so "apex" / "alpha" filter the panel as the user expects).
+  extra_tokens?: string[];
 }
 
 type TrieNode = {
@@ -43,7 +46,11 @@ export const tokenize = (s: string): string[] =>
 export const buildTrackTrie = (tracks: IndexedTrack[]): TrieNode => {
   const root = newNode();
   for (const t of tracks) {
-    for (const token of tokenize(t.track_name)) {
+    const tokens = [
+      ...tokenize(t.track_name),
+      ...((t.extra_tokens || []).flatMap(tokenize)),
+    ];
+    for (const token of tokens) {
       let node = root;
       for (const ch of token) {
         let child = node.children.get(ch);

@@ -7,7 +7,23 @@ interface TrackStatus {
   active: boolean;
   last_update?: string;
   teams_count?: number;
+  provider?: string;  // 'apex' | 'alphahub' (omitted on older payloads)
 }
+
+// Display config for the provider badge. Keep palettes distinct enough to
+// glance at: indigo for Apex (the original), amber for AlphaHub (Pusher).
+const PROVIDER_BADGE: Record<string, { label: string; light: string; dark: string }> = {
+  apex: {
+    label: 'Apex',
+    light: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+    dark: 'bg-indigo-900/50 text-indigo-200 border-indigo-700',
+  },
+  alphahub: {
+    label: 'Alpha',
+    light: 'bg-amber-100 text-amber-800 border-amber-200',
+    dark: 'bg-amber-900/50 text-amber-200 border-amber-700',
+  },
+};
 
 interface MultiTrackStatusProps {
   tracks: TrackStatus[];
@@ -37,7 +53,18 @@ const MultiTrackStatus: React.FC<MultiTrackStatusProps> = ({
 
   // Build the prefix-tree once per tracks-array change (≤ a few ms even at
   // hundreds of tracks). Each keystroke then resolves in O(query_length).
-  const trie = useMemo(() => buildTrackTrie(sortedTracks), [sortedTracks]);
+  // Provider tag is fed as an extra token so "apex" / "alpha" filter too.
+  const trie = useMemo(
+    () =>
+      buildTrackTrie(
+        sortedTracks.map((t) => ({
+          track_id: t.track_id,
+          track_name: t.track_name,
+          extra_tokens: t.provider ? [t.provider] : undefined,
+        })),
+      ),
+    [sortedTracks],
+  );
 
   const filteredTracks = useMemo(() => {
     const ids = searchTrackTrie(trie, query);
@@ -124,12 +151,27 @@ const MultiTrackStatus: React.FC<MultiTrackStatusProps> = ({
                       : 'bg-gray-400'
                   }`} />
                   <div>
-                    <div className={`font-medium ${
-                      track.track_id === selectedTrackId
-                        ? isDarkMode ? 'text-blue-200' : 'text-blue-900'
-                        : isDarkMode ? 'text-white' : 'text-gray-900'
-                    }`}>
-                      {track.track_name}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className={`font-medium ${
+                        track.track_id === selectedTrackId
+                          ? isDarkMode ? 'text-blue-200' : 'text-blue-900'
+                          : isDarkMode ? 'text-white' : 'text-gray-900'
+                      }`}>
+                        {track.track_name}
+                      </div>
+                      {(() => {
+                        const pcfg = PROVIDER_BADGE[track.provider || 'apex'] || PROVIDER_BADGE.apex;
+                        return (
+                          <span
+                            className={`text-[10px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded border ${
+                              isDarkMode ? pcfg.dark : pcfg.light
+                            }`}
+                            title={`Live-timing provider: ${pcfg.label}`}
+                          >
+                            {pcfg.label}
+                          </span>
+                        );
+                      })()}
                     </div>
                     <div className={`text-xs ${
                       isDarkMode ? 'text-gray-400' : 'text-gray-600'

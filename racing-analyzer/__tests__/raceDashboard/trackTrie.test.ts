@@ -79,6 +79,25 @@ describe('searchTrackTrie', () => {
     expect(searchTrackTrie(root, 'kart zzz')).toEqual(new Set());
   });
 
+  test('extra_tokens are searchable alongside the name (provider filter)', () => {
+    const tagged = [
+      { track_id: 1, track_name: 'Karting Mariembourg', extra_tokens: ['apex'] },
+      { track_id: 184, track_name: 'Buckmore Park', extra_tokens: ['alphahub'] },
+      { track_id: 25, track_name: 'Whilton Mill', extra_tokens: ['alphahub'] },
+      { track_id: 212, track_name: 'Ardennes Karting', extra_tokens: ['apex'] },
+    ];
+    const t = buildTrackTrie(tagged);
+    // "alpha" -> only AlphaHub tracks
+    expect(searchTrackTrie(t, 'alpha')).toEqual(new Set([184, 25]));
+    // "apex" -> only Apex tracks
+    expect(searchTrackTrie(t, 'apex')).toEqual(new Set([1, 212]));
+    // Multi-token still intersects across name + extra_tokens.
+    // "kart alpha" -> Buckmore? No, Buckmore has no "kart" token. Should be empty.
+    expect(searchTrackTrie(t, 'kart alpha')).toEqual(new Set());
+    // "kart apex" -> Karting Mariembourg + Ardennes Karting.
+    expect(searchTrackTrie(t, 'kart apex')).toEqual(new Set([1, 212]));
+  });
+
   test('scales to a large roster (smoke test)', () => {
     const big = Array.from({ length: 500 }, (_, i) => ({
       track_id: i,

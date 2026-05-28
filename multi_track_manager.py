@@ -268,6 +268,11 @@ class MultiTrackManager:
                     track_id, track_name, self.get_database_path(track_id),
                     self.socketio, manager=self,
                 )
+            # Tag the parser with its provider so get_all_tracks_status can
+            # surface it in the dashboard without an isinstance check.
+            parser.provider = provider
+
+            if provider != 'alphahub':
 
                 # Apex-only: column mappings tweak the data-type → field map.
                 # AlphaHub builds standings from a known JSON schema and doesn't
@@ -402,7 +407,11 @@ class MultiTrackManager:
                 'track_name': parser.track_name,
                 'active': parser.session_active_status if hasattr(parser, 'session_active_status') else False,
                 'last_update': parser.last_data_time.isoformat() if parser.last_data_time else None,
-                'is_connected': parser.is_connected
+                'is_connected': parser.is_connected,
+                # Which live-timing backend this parser speaks. Surfaced in the
+                # multi-track status panel as a small badge so operators can
+                # tell Apex venues from AlphaHub venues at a glance.
+                'provider': getattr(parser, 'provider', 'apex'),
             }
 
             # Try to get teams count from current standings
