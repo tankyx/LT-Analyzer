@@ -93,7 +93,10 @@ def fleet_app(tmp_path_factory) -> Iterator:
     os.environ.setdefault("SESSION_COOKIE_SECURE", "false")
 
     for mod in list(sys.modules):
-        if mod == "race_ui" or mod.startswith("race_ui."):
+        if (
+            mod == "race_ui" or mod.startswith("race_ui.")
+            or mod == "race_app" or mod.startswith("race_app.")
+        ):
             del sys.modules[mod]
 
     import race_ui  # noqa: E402

@@ -70,7 +70,10 @@ def auth_app(tmp_path_factory) -> Iterator:
 
     # Drop any cached race_ui import so a previous session can't bleed state.
     for mod in list(sys.modules):
-        if mod == "race_ui" or mod.startswith("race_ui."):
+        if (
+            mod == "race_ui" or mod.startswith("race_ui.")
+            or mod == "race_app" or mod.startswith("race_app.")
+        ):
             del sys.modules[mod]
 
     sys.path.insert(0, str(tmpdir.parent.parent.parent))  # ensure project root importable
