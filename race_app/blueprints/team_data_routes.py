@@ -224,52 +224,65 @@ def search_teams_all_tracks():
                 'SELECT id, track_name FROM tracks WHERE is_active = 1'
             ).fetchall()
 
-        # Aggregate distinct cleaned team names across all track DBs
+        # Aggregate distinct cleaned team names across all track DBs.
+        # Query each track in parallel via ThreadPoolExecutor — reads are
+        # safe under WAL and this cuts P50 latency from ~N× to ~1×.
         agg = {}  # name_clean_lower -> {display, classes, track_ids}
-        for track_id, track_name in tracks:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _query_one_track(track_id, track_name):
+            results = []
             try:
-                conn = race_ui.get_track_db_connection(track_id)
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT DISTINCT
-                        CASE
-                            WHEN team_name LIKE '% - %' THEN TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))
-                            ELSE TRIM(team_name)
-                        END AS team_name_clean,
-                        CASE
-                            WHEN team_name LIKE '% - %' THEN SUBSTR(team_name, 1, 1)
-                            ELSE NULL
-                        END AS class_prefix
-                    FROM lap_times
-                    WHERE (
-                        CASE
-                            WHEN team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
-                            ELSE LOWER(TRIM(team_name))
-                        END
-                    ) LIKE ?
-                    """,
-                    (f'%{q_lower}%',),
-                )
-                for row in cursor.fetchall():
-                    name = (row[0] or '').strip()
-                    if not name:
-                        continue
-                    key = name.lower()
-                    entry = agg.setdefault(key, {
-                        'name': name,
-                        'classes': set(),
-                        'track_ids': set(),
-                        'track_names': set(),
-                    })
-                    if row[1]:
-                        entry['classes'].add(row[1])
-                    entry['track_ids'].add(track_id)
-                    entry['track_names'].add(track_name)
-                conn.close()
+                with race_ui.get_track_db_connection(track_id) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        SELECT DISTINCT
+                            CASE
+                                WHEN team_name LIKE '% - %' THEN TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3))
+                                ELSE TRIM(team_name)
+                            END AS team_name_clean,
+                            CASE
+                                WHEN team_name LIKE '% - %' THEN SUBSTR(team_name, 1, 1)
+                                ELSE NULL
+                            END AS class_prefix
+                        FROM lap_times
+                        WHERE (
+                            CASE
+                                WHEN team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                                ELSE LOWER(TRIM(team_name))
+                            END
+                        ) LIKE ?
+                        """,
+                        (f'%{q_lower}%',),
+                    )
+                    for row in cursor.fetchall():
+                        name = (row[0] or '').strip()
+                        if name:
+                            results.append((name, row[1], track_id, track_name))
             except Exception as track_error:
                 race_ui.app.logger.warning(f"search-all: track {track_id} query failed: {track_error}")
-                continue
+            return results
+
+        with ThreadPoolExecutor(max_workers=min(len(tracks), 8)) as executor:
+            futures = {executor.submit(_query_one_track, tid, tname): (tid, tname) for tid, tname in tracks}
+            for future in as_completed(futures):
+                try:
+                    for name, class_prefix, track_id, track_name in future.result():
+                        key = name.lower()
+                        entry = agg.setdefault(key, {
+                            'name': name,
+                            'classes': set(),
+                            'track_ids': set(),
+                            'track_names': set(),
+                        })
+                        if class_prefix:
+                            entry['classes'].add(class_prefix)
+                        entry['track_ids'].add(track_id)
+                        entry['track_names'].add(track_name)
+                except Exception as exc:
+                    tid, tname = futures[future]
+                    race_ui.app.logger.warning(f"search-all: track {tid} future failed: {exc}")
 
         # Also surface aliases whose alias_name or canonical_name matches q
         try:
@@ -737,83 +750,89 @@ def get_lap_details():
         conn = race_ui.get_track_db_connection(track_id)
         cursor = conn.cursor()
 
-        lap_details = {}
+        # Build team-name lookup: normalized key -> display name
+        team_lookup = {}
+        team_keys = []
+        for t in team_names:
+            key = t.strip().lower()
+            team_lookup[key] = t
+            team_keys.append(key)
 
-        for team_name in team_names:
-            team_name_lower = team_name.strip().lower()
+        if not team_keys:
+            return jsonify({'error': 'No teams provided'}), 400
 
-            # Debug: Count total records for this team in session
-            debug_count_query = """
-                SELECT COUNT(*) FROM lap_times
-                WHERE (
-                    CASE
-                        WHEN team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
-                        ELSE LOWER(TRIM(team_name))
-                    END
-                ) = ?
-                AND session_id = ?
-            """
-            cursor.execute(debug_count_query, (team_name_lower, int(session_id)))
-            total_records = cursor.fetchone()[0]
-            race_ui.app.logger.debug('race_ui.Team %s has %s records in session %s', team_name, total_records, session_id)
-
-            # Get all laps from lap_times by detecting when last_lap changes
-            lap_query = """
-                WITH lap_changes AS (
-                    SELECT
-                        timestamp,
-                        last_lap,
-                        LAG(last_lap) OVER (ORDER BY timestamp) as prev_last_lap,
-                        pit_stops,
-                        LAG(pit_stops, 1, 0) OVER (ORDER BY timestamp) as prev_pit_stops
-                    FROM lap_times
-                    WHERE (
-                        CASE
-                            WHEN team_name LIKE '% - %' THEN LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
-                            ELSE LOWER(TRIM(team_name))
-                        END
-                    ) = ?
-                    AND session_id = ?
-                    AND last_lap IS NOT NULL
-                    AND last_lap <> ''
-                    ORDER BY timestamp
-                ),
-                lap_completions AS (
-                    SELECT
-                        ROW_NUMBER() OVER (ORDER BY timestamp) as lap_number,
-                        last_lap,
-                        CASE
-                            WHEN last_lap LIKE '%:%' THEN
-                                CAST(SUBSTR(last_lap, 1, INSTR(last_lap, ':') - 1) AS REAL) * 60 +
-                                CAST(SUBSTR(last_lap, INSTR(last_lap, ':') + 1) AS REAL)
-                            ELSE 0
-                        END as lap_seconds,
-                        CASE WHEN pit_stops > prev_pit_stops THEN 1 ELSE 0 END as had_pit
-                    FROM lap_changes
-                    WHERE last_lap <> prev_last_lap OR prev_last_lap IS NULL
-                )
+        # Single batch query: fetch lap changes for ALL requested teams at once.
+        # Build a parameterised IN clause (safe — team_keys are Python strings,
+        # not user-controlled SQL fragments).
+        placeholders = ','.join('?' for _ in team_keys)
+        batch_query = f"""
+            WITH team_data AS (
                 SELECT
-                    lap_number,
-                    lap_seconds,
-                    had_pit
-                FROM lap_completions
-                WHERE lap_seconds > 50 AND lap_seconds < 600
-                ORDER BY lap_number ASC
-            """
+                    team_name,
+                    LOWER(TRIM(
+                        CASE
+                            WHEN team_name LIKE '% - %' THEN SUBSTR(team_name, INSTR(team_name, ' - ') + 3)
+                            ELSE team_name
+                        END
+                    )) AS team_key,
+                    timestamp,
+                    last_lap,
+                    pit_stops
+                FROM lap_times
+                WHERE session_id = ?
+                  AND last_lap IS NOT NULL
+                  AND last_lap <> ''
+            ),
+            lap_changes AS (
+                SELECT
+                    team_key,
+                    timestamp,
+                    last_lap,
+                    LAG(last_lap) OVER (PARTITION BY team_key ORDER BY timestamp) as prev_last_lap,
+                    pit_stops,
+                    LAG(pit_stops, 1, 0) OVER (PARTITION BY team_key ORDER BY timestamp) as prev_pit_stops
+                FROM team_data
+                WHERE team_key IN ({placeholders})
+                ORDER BY team_key, timestamp
+            ),
+            lap_completions AS (
+                SELECT
+                    team_key,
+                    ROW_NUMBER() OVER (PARTITION BY team_key ORDER BY timestamp) as lap_number,
+                    last_lap,
+                    CASE
+                        WHEN last_lap LIKE '%:%' THEN
+                            CAST(SUBSTR(last_lap, 1, INSTR(last_lap, ':') - 1) AS REAL) * 60 +
+                            CAST(SUBSTR(last_lap, INSTR(last_lap, ':') + 1) AS REAL)
+                        ELSE 0
+                    END as lap_seconds,
+                    CASE WHEN pit_stops > prev_pit_stops THEN 1 ELSE 0 END as had_pit
+                FROM lap_changes
+                WHERE last_lap <> prev_last_lap OR prev_last_lap IS NULL
+            )
+            SELECT team_key, lap_number, lap_seconds, had_pit
+            FROM lap_completions
+            WHERE lap_seconds > 50 AND lap_seconds < 600
+            ORDER BY team_key, lap_number ASC
+        """
+        params = [int(session_id)] + team_keys
+        cursor.execute(batch_query, params)
+        all_rows = cursor.fetchall()
 
-            cursor.execute(lap_query, (team_name_lower, int(session_id)))
-            laps_raw = cursor.fetchall()
-            race_ui.app.logger.debug('race_ui.Team %s - lap_details query returned %s laps', team_name, len(laps_raw))
+        # Group results by team
+        lap_details: dict = {}
+        for team_key, lap_number, lap_seconds, pit_this_lap in all_rows:
+            display_name = team_lookup.get(team_key, team_key)
+            lap_details.setdefault(display_name, []).append({
+                'lap_number': lap_number,
+                'lap_time': lap_seconds,
+                'pit_stop': pit_this_lap > 0,
+            })
 
-            laps = []
-            for (lap_number, lap_seconds, pit_this_lap) in laps_raw:
-                laps.append({
-                    'lap_number': lap_number,
-                    'lap_time': lap_seconds,
-                    'pit_stop': pit_this_lap > 0
-                })
-
-            lap_details[team_name] = laps
+        # Ensure every requested team has an entry (even if no laps found)
+        for t in team_names:
+            if t not in lap_details:
+                lap_details[t] = []
 
         # Detect stints for all teams based on pit stop laps (3:40 - 3:50 = 220-230 seconds)
         stints = []

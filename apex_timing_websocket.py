@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import sqlite3
 import time
 import traceback
@@ -65,8 +66,9 @@ class ApexTimingWebSocketParser:
         
         console_handler = logging.StreamHandler()
         
+        log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
         logging.basicConfig(
-            level=logging.DEBUG,
+            level=getattr(logging, log_level, logging.INFO),
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[file_handler, console_handler]
         )

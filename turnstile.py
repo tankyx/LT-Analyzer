@@ -21,7 +21,10 @@ DEFAULT_TIMEOUT = 8
 def verify_turnstile(token: str, remote_ip: str | None = None) -> tuple[bool, str]:
     secret = os.environ.get("TURNSTILE_SECRET_KEY", "").strip()
     if not secret:
-        logger.warning("Turnstile disabled (TURNSTILE_SECRET_KEY is empty) — passing through.")
+        if os.environ.get('FLASK_ENV') == 'production':
+            logger.error("Turnstile disabled in production (TURNSTILE_SECRET_KEY is empty) — bot protection is OFF.")
+        else:
+            logger.warning("Turnstile disabled (TURNSTILE_SECRET_KEY is empty) — passing through.")
         return True, "disabled"
     if not token:
         return False, "missing_token"

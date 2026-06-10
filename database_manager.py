@@ -357,6 +357,19 @@ class TrackDatabase:
                 if not update_fields:
                     return {'error': 'No fields to update'}
 
+                # Validate column names before building the query. Each entry is
+                # "col = ?" constructed from a hardcoded whitelist above; extract
+                # the column and assert it's in the known set so future additions
+                # can't inject arbitrary SQL via parameter name confusion.
+                _VALID_TRACK_COLS = {
+                    'track_name', 'timing_url', 'websocket_url', 'column_mappings',
+                    'location', 'length_meters', 'description', 'is_active', 'provider',
+                }
+                for field in update_fields:
+                    col = field.split(' = ', 1)[0]
+                    if col not in _VALID_TRACK_COLS:
+                        raise ValueError(f'Invalid column in update: {col!r}')
+
                 params.append(track_id)
                 query = f"UPDATE tracks SET {', '.join(update_fields)} WHERE id = ?"
 
@@ -533,6 +546,14 @@ class TrackDatabase:
                 params.append(1 if is_default else 0)
             if not fields:
                 return {'error': 'No fields to update'}
+
+            # Validate column names (same defence-in-depth as update_track).
+            _VALID_LAYOUT_COLS = {'name', 'min_field_best', 'max_field_best', 'is_default'}
+            for f in fields:
+                col = f.split(' = ', 1)[0]
+                if col not in _VALID_LAYOUT_COLS:
+                    raise ValueError(f'Invalid column in layout update: {col!r}')
+
             params.append(layout_id)
             with sqlite3.connect(self.db_path) as conn:
                 if is_default:

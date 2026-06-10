@@ -373,6 +373,11 @@ class AlphaHubHub:
     async def _handle_envelope(self, env: Dict[str, Any]) -> None:
         ev = env.get('event')
         ch_name = env.get('channel')
+        # Log non-ping events so we can see what Pusher is sending.
+        if ev not in ('pusher:ping', 'pusher:pong', None):
+            self.logger.info(
+                f"AlphaHubHub: received {ev!r} on {ch_name!r}"
+            )
         if ev == 'pusher:ping':
             if self._ws:
                 await self._ws.send(json.dumps({'event': 'pusher:pong', 'data': {}}))
@@ -383,17 +388,24 @@ class AlphaHubHub:
         # Channel-scoped events
         channel = self.channels.get(ch_name) if ch_name else None
         if channel is None:
+            self.logger.info(
+                f"AlphaHubHub: event {ev!r} on unknown channel {ch_name!r}"
+            )
             return
         if ev == 'pusher_internal:subscription_succeeded':
             self._subscribed.add(ch_name)
             channel.mark_subscribed()
             return
         data = env.get('data')
-        if isinstance(data, str):
+        # AlphaHub Pusher can double/triple-JSON-encode event payloads. Keep
+        # parsing while the result is still a string so we always pass a dict
+        # to the channel handler.
+        while isinstance(data, str):
             try:
                 data = json.loads(data)
             except Exception:
                 data = {'raw': data}
+                break
         try:
             await channel.on_event(ev, data or {})
         except Exception as e:
@@ -513,6 +525,12 @@ class AlphaHubChannel(TrackSpecificParser):
         return pd.DataFrame(rows)
 
     def _apply_delta(self, payload: Dict[str, Any]) -> bool:
+        # Diagnose: log EVERY delta attempt so we can see what's happening.
+        self.logger.info(
+            f"Track {self.track_id}: _apply_delta called, "
+            f"payload type={type(payload).__name__}, "
+            f"keys={sorted(payload.keys()) if isinstance(payload, dict) else 'N/A'!r}"
+        )
         seq = _safe_int(payload.get('Sequence'))
         if seq is not None and self.last_sequence is not None and seq <= self.last_sequence:
             return False
@@ -526,8 +544,36 @@ class AlphaHubChannel(TrackSpecificParser):
                 f"continuing without snapshot resync (hub mode)"
             )
         comps = payload.get('Competitors') or payload.get('competitors') or []
+        self.logger.info(
+            f"Track {self.track_id}: comps type={type(comps).__name__}, "
+            f"len={len(comps) if hasattr(comps, '__len__') else '?'}"
+        )
+        # AlphaHub Pusher sometimes double-encodes the Competitors array as a
+        # JSON string inside the already-parsed delta payload. Parse it out.
+        if isinstance(comps, str):
+            try:
+                comps = json.loads(comps)
+            except (TypeError, ValueError):
+                comps = []
+        if not isinstance(comps, list):
+            comps = []
         changed = False
         for c in comps:
+            # Diagnose: log first competitor's keys
+            if not hasattr(self, '_comp_keys_logged'):
+                self._comp_keys_logged = True
+                self.logger.info(
+                    f"Track {self.track_id}: first competitor keys: "
+                    f"{sorted(c.keys()) if isinstance(c, dict) else type(c).__name__!r}"
+                )
+            # Individual competitors can also arrive as JSON strings.
+            if isinstance(c, str):
+                try:
+                    c = json.loads(c)
+                except (TypeError, ValueError):
+                    continue
+            if not isinstance(c, dict):
+                continue
             num = str(c.get('CompetitorNumber') or c.get('Number')
                       or c.get('Kart') or '')
             if not num:
@@ -539,11 +585,18 @@ class AlphaHubChannel(TrackSpecificParser):
                     changed = True
         if seq is not None:
             self.last_sequence = seq
+        if changed:
+            self.logger.info(
+                f"Track {self.track_id}: delta applied, {len(self.competitors)} competitors"
+            )
         return changed
 
     def _ingest_current_state(self) -> None:
         df = self.get_current_standings()
         if df.empty:
+            self.logger.info(
+                f"Track {self.track_id}: ingest skipped — standings empty"
+            )
             return
         leader_gap = ''
         if 'Position' in df.columns and 'Gap' in df.columns:
@@ -566,6 +619,10 @@ class AlphaHubChannel(TrackSpecificParser):
         if event == 'update':
             if self._apply_delta(data):
                 await asyncio.to_thread(self._ingest_current_state)
+            else:
+                self.logger.info(
+                    f"Track {self.track_id}: update event ignored (delta unchanged)"
+                )
         elif event == 'refresh':
             # In hub mode we DON'T fetch the snapshot — the whole point is to
             # avoid HTTP storms. Deltas alone are eventually consistent.

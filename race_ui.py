@@ -1737,10 +1737,12 @@ def _ensure_auth_schema():
 
 _ensure_auth_schema()
 
+SESSION_LIFETIME_HOURS = int(os.environ.get('SESSION_LIFETIME_HOURS', '24'))
+
 def create_session(user_id):
     """Create a new session for user"""
     session_id = secrets.token_urlsafe(32)
-    expires_at = datetime.now() + timedelta(hours=24)
+    expires_at = datetime.now() + timedelta(hours=SESSION_LIFETIME_HOURS)
 
     with get_db_connection() as conn:
         conn.execute(
@@ -1814,6 +1816,7 @@ RATE_LIMITS = {
     # so a legitimate user using the dashboard isn't blocked; the goal is to
     # catch automated scraping or runaway loops.
     'heavy_read_ip': (int(os.environ.get('RATE_LIMIT_HEAVY_READ_IP_PER_HOUR', '120')), 3600),
+    'reset_password_ip': (int(os.environ.get('RATE_LIMIT_RESET_PASSWORD_IP_PER_HOUR', '20')), 3600),
 }
 
 RESERVED_USERNAMES = {'admin', 'root', 'system', 'support', 'security', 'administrator'}
@@ -3916,11 +3919,15 @@ class UnknownTrackError(Exception):
 
 def get_track_db_connection(track_id, timeout: float = 5.0):
     """
-    Get database connection for a specific track with timeout.
+    Get a database connection for a specific track with timeout.
 
     Validates that track_id is a positive int AND that it corresponds to a real
     row in tracks.db. This prevents sqlite3.connect() from creating stray
     race_data_track_N.db files on disk for attacker-supplied ids.
+
+    The returned sqlite3.Connection is itself a context manager; prefer
+    ``with get_track_db_connection(track_id) as conn:`` for automatic close.
+    Callers that don't use ``with`` must call ``conn.close()`` explicitly.
     """
     try:
         track_id = int(track_id)

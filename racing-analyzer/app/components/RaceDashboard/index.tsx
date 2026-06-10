@@ -26,6 +26,7 @@ import {
   getSelectedTrack,
   putSelectedTrack,
 } from '../../services/SelectedTrackService';
+import { parseTimeToSeconds } from '../../../utils/raceMath';
 
 // Types
 interface Team {
@@ -114,26 +115,7 @@ const TrendArrows = ({ trend }: { trend: Trend | undefined }) => {
   );
 };
 
-// Helper function to parse time string to seconds
-const parseTimeToSeconds = (timeStr: string): number => {
-  // Handle MM:SS.sss or MM:SS:sss format
-  if (timeStr.includes(':')) {
-    const parts = timeStr.split(':');
-    if (parts.length === 2) {
-      const minutes = parseInt(parts[0]);
-      const seconds = parseFloat(parts[1].replace(',', '.'));
-      return minutes * 60 + seconds;
-    } else if (parts.length === 3) {
-      // Handle MM:SS:sss format (sometimes used)
-      const minutes = parseInt(parts[0]);
-      const seconds = parseInt(parts[1]);
-      const milliseconds = parseInt(parts[2]) / 1000;
-      return minutes * 60 + seconds + milliseconds;
-    }
-  }
-  // Just seconds
-  return parseFloat(timeStr.replace(',', '.'));
-};
+// parseTimeToSeconds imported from utils/raceMath.ts (canonical implementation)
 
 // Helper function to calculate gaps between teams
 const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: string[], pitStopTime: number, requiredPitStops: number, isQualification: boolean = false): Record<string, DeltaData> => {
@@ -422,9 +404,13 @@ const RaceDashboard = () => {
   } | null>(null);
   const [alertedFleetPits, setAlertedFleetPits] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<string>('standings');
-  // Ref mirror so checkPitStops can read the registry without re-subscribing.
+  // Ref mirrors so callbacks can read current state without re-subscribing.
   const fleetRegistryRef = useRef<FleetKart[]>([]);
   useEffect(() => { fleetRegistryRef.current = fleetRegistry; }, [fleetRegistry]);
+  const teamsRef = useRef<Team[]>([]);
+  useEffect(() => { teamsRef.current = teams; }, [teams]);
+  const updatedRowsRef = useRef<Map<string, number>>(new Map());
+  useEffect(() => { updatedRowsRef.current = updatedRows; }, [updatedRows]);
 
   const triggerPitAlert = useCallback(async (kartNum: string, teamName: string) => {
     try {
@@ -732,12 +718,14 @@ const RaceDashboard = () => {
   useEffect(() => {
     // Helper function to detect changes and update rows
     const detectChanges = (newTeams: Team[]) => {
-      if (newTeams && teams.length > 0) {
+      const currentTeams = teamsRef.current;
+      const currentUpdatedRows = updatedRowsRef.current;
+      if (newTeams && currentTeams.length > 0) {
         const currentTime = Date.now();
-        const newUpdatedRows = new Map(updatedRows);
+        const newUpdatedRows = new Map(currentUpdatedRows);
         
         newTeams.forEach((newTeam: Team) => {
-          const oldTeam = teams.find(t => t.Kart === newTeam.Kart);
+          const oldTeam = currentTeams.find(t => t.Kart === newTeam.Kart);
           if (oldTeam) {
             // Check if any critical fields have changed
             const hasChanged = 
@@ -858,8 +846,9 @@ const RaceDashboard = () => {
       // Clean up WebSocket callbacks on unmount
       webSocketService.removeCallbacks();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkPitStops, refreshFleetThrottled]); // Only run on mount, teams and updatedRows changes are handled internally
+    // checkPitStops + refreshFleetThrottled are stable; teams/updatedRows
+    // are accessed via refs so the effect doesn't need to re-subscribe.
+  }, [checkPitStops, refreshFleetThrottled]);
 
   // Load available tracks on mount and restore saved selections
   useEffect(() => {

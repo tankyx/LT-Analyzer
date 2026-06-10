@@ -22,6 +22,14 @@ const customJestConfig = {
     '!app/**/page.tsx',
   ],
   testPathIgnorePatterns: ['<rootDir>/node_modules/', '<rootDir>/.next/'],
+  coverageThreshold: {
+    global: {
+      statements: 40,
+      branches: 30,
+      functions: 35,
+      lines: 40,
+    },
+  },
   transform: {
     // Use babel-jest to transpile tests with the next/babel preset
     '^.+\\.(js|jsx|ts|tsx)$': ['babel-jest', { presets: ['next/babel'] }],

@@ -21,6 +21,7 @@ from race_ui import (
     _window_cutoff,
     app,
     get_track_db_connection,
+    login_required,
     track_db,
 )
 
@@ -29,6 +30,7 @@ kart_fairness_bp = Blueprint('kart_fairness', __name__)
 
 
 @kart_fairness_bp.route('/api/track/<int:track_id>/kart-fairness', methods=['GET'])
+@login_required
 def get_track_kart_fairness(track_id):
     """Track-wide kart-fairness leaderboard, driver-normalized.
 

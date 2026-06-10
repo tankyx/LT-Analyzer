@@ -325,9 +325,8 @@ export const ApiService = {
       }
       const response = await fetch(`${API_BASE_URL}/api/team-data/compare`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify(body),
       });
       if (!response.ok) {
@@ -344,9 +343,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/team-data/common-sessions`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify({ teams: teamNames, track_id: trackId }),
       });
       if (!response.ok) {
@@ -371,9 +369,8 @@ export const ApiService = {
 
       const response = await fetch(`${API_BASE_URL}/api/team-data/lap-details`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify(body),
       });
       if (!response.ok) {
@@ -390,10 +387,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/team-data/delete-best-lap`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify({ team_name: teamName, track_id: trackId, best_lap_time: bestLapTime }),
       });
       if (!response.ok) {
@@ -411,10 +406,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/team-data/mass-delete-laps`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify({
           track_id: trackId,
           threshold_seconds: thresholdSeconds,
@@ -629,8 +622,8 @@ export const ApiService = {
   ) => {
     const response = await fetch(`${API_BASE_URL}/api/admin/tracks/${trackId}/layouts`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
@@ -646,8 +639,8 @@ export const ApiService = {
   ) => {
     const response = await fetch(`${API_BASE_URL}/api/admin/layouts/${layoutId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
@@ -660,8 +653,8 @@ export const ApiService = {
   deleteTrackLayout: async (layoutId: number) => {
     const response = await fetch(`${API_BASE_URL}/api/admin/layouts/${layoutId}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
+      headers: { ...(await getCsrfHeaders()) },
     });
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
@@ -693,8 +686,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/aliases`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
         body: JSON.stringify({ canonical_name, alias_name }),
       });
       if (!response.ok) {
@@ -712,8 +705,8 @@ export const ApiService = {
     try {
       const response = await fetch(`${API_BASE_URL}/api/admin/aliases/${id}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        headers: { ...(await getCsrfHeaders()) },
       });
       if (!response.ok) {
         const errorData = await response.json();

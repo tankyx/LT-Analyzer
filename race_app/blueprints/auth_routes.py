@@ -1,4 +1,5 @@
 """Auth + registration endpoints (/api/auth/*)."""
+import re
 import secrets
 import sqlite3
 import traceback
@@ -16,6 +17,7 @@ from race_ui import (
     RESET_TOKEN_HOURS,
     USERNAME_RE,
     VERIFICATION_TOKEN_HOURS,
+    _rate_limit_hit,
     login_required,
 )
 
@@ -178,6 +180,12 @@ def _validate_register_payload(data: dict) -> tuple[bool, str]:
     if not EMAIL_RE.match(email):
         return False, 'invalid_email'
     if len(password) < 12:
+        return False, 'weak_password'
+    # Require at least one character from each class (upper, lower, digit, special).
+    # This catches the weakest passwords without forcing users into patterns
+    # they'll just pad with "!" at the end.
+    if not (re.search(r'[A-Z]', password) and re.search(r'[a-z]', password)
+            and re.search(r'[0-9]', password) and re.search(r'[^A-Za-z0-9]', password)):
         return False, 'weak_password'
     if not accept_terms:
         return False, 'terms_not_accepted'
@@ -434,6 +442,14 @@ def reset_password():
         return jsonify({'error': 'invalid_token'}), 400
     if len(new_password) < 12:
         return jsonify({'error': 'weak_password'}), 400
+    # Same complexity check as registration.
+    if not (re.search(r'[A-Z]', new_password) and re.search(r'[a-z]', new_password)
+            and re.search(r'[0-9]', new_password) and re.search(r'[^A-Za-z0-9]', new_password)):
+        return jsonify({'error': 'weak_password'}), 400
+    # Rate-limit per email (defence-in-depth against token guessing).
+    ip = request.remote_addr or '-'
+    if _rate_limit_hit('reset_password_ip', ip):
+        return jsonify({'error': 'rate_limited'}), 429
     try:
         with race_ui.get_db_connection() as conn:
             row = conn.execute(

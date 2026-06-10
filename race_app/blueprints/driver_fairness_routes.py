@@ -24,6 +24,7 @@ from race_ui import (
     _window_cutoff,
     app,
     get_track_db_connection,
+    login_required,
     track_db,
 )
 
@@ -32,6 +33,7 @@ driver_fairness_bp = Blueprint('driver_fairness', __name__)
 
 
 @driver_fairness_bp.route('/api/driver/fairness', methods=['GET'])
+@login_required
 def get_driver_fairness():
     """Per-track kart fairness analysis for a driver.
 
