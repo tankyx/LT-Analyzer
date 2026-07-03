@@ -279,35 +279,52 @@ Allowed hostnames in the site config must include
 implicitly). For local dev, also add `localhost`.
 
 Empty `TURNSTILE_SECRET_KEY` on the backend → soft-pass with a warning
-log. Useful escape hatch if Cloudflare is globally down.
+in development, but **hard failure in production** (`FLASK_ENV=production`
+rejects captcha-gated requests when the key is missing). If Cloudflare is
+globally down, the escape hatch is to temporarily unset `FLASK_ENV`.
 
-## Phase 3d (gunicorn) — deferred
+## Runtime: gunicorn gthread (since the 2026-07 scale-hardening round)
 
-The current backend runs Werkzeug + `async_mode='threading'`. The
-asyncio scraper makes the gunicorn migration risky: `eventlet` workers
-monkey-patch socket primitives globally, which can subtly break
-`apex_timing_websocket.py`'s `websockets` library. `gthread` workers
-don't carry Socket.IO's WebSocket transport.
+`start-selenium.sh` now runs the backend under **gunicorn** with the
+`gthread` worker:
 
-If gunicorn becomes necessary (multi-worker, concurrent users beyond
-~hundreds):
+```bash
+gunicorn -k gthread -w 1 --threads "${GUNICORN_THREADS:-600}" \
+    --timeout 120 --graceful-timeout 30 --keep-alive 5 \
+    --error-logfile - -b 127.0.0.1:5000 wsgi:app
+```
 
-1. Provision a staging copy of the VPS (or a `:5001` instance).
-2. Install `gunicorn`, set `USE_EVENTLET=true`, restart with the new
-   start script:
+Design constraints (do not change casually):
 
-   ```bash
-   exec gunicorn --worker-class eventlet --workers 1 \
-       --bind 127.0.0.1:5000 --timeout 120 \
-       --access-logfile - --error-logfile - \
-       wsgi:app
-   ```
+- **`-w 1` is mandatory.** The process hosts the in-process asyncio
+  parser loop and all Socket.IO room state; there is no Redis
+  `message_queue` for cross-process fan-out. `wsgi.py` starts
+  multi-track monitoring on import (idempotent guard).
+- **`gthread`, not eventlet/gevent.** Monkey-patching breaks the asyncio
+  scraper loop (`websockets`). Native WebSocket in threading mode is
+  provided by `simple-websocket`; the frontend connects websocket-only.
+- **One thread pins per connected websocket client**, so
+  `GUNICORN_THREADS` must exceed the target concurrent-user count
+  (default 600 ≈ 500 dashboards + HTTP headroom). Threads are I/O-bound;
+  memory cost is modest (~O(100 MB) at 600).
+- nginx already proxies `/socket.io/` with `proxy_http_version 1.1`,
+  Upgrade/Connection headers and `proxy_read_timeout 7d` — required for
+  the websocket-only client.
 
-3. Verify all 11 scrapers reconnect cleanly and the dashboard streams
-   updates. Watch the scraper logs for `EventletDeprecationWarning` or
-   silent hangs.
-4. If eventlet breaks the scraper: fall back to gthread + accept
-   long-polling-only Socket.IO. Or run the scraper in a separate
-   process and have the Flask process consume from a queue.
+**Rollback**: set `USE_DEV_SERVER=1` in the pm2 environment (or `.env`)
+and `pm2 restart lt-analyzer-backend` — this runs the old
+`python race_ui.py` Werkzeug path unchanged.
 
-This isn't a small change. Don't combine it with anything else.
+**Deploy checklist** for runtime changes:
+1. `pm2 restart lt-analyzer-backend`, watch `pm2 logs` for the gunicorn
+   boot lines + "Multi-track monitoring thread started".
+2. Dashboard loads, socket connects via pure websocket (no
+   `transport=polling` requests in nginx logs after page load).
+3. Live standings stream on an active track; Fleet board loads; admin
+   panel works; logged-out socket connects are rejected.
+4. AlphaHub track (e.g. Buckmore #184) still updates.
+
+If multi-worker ever becomes necessary (beyond what one process can
+serve), that requires Redis as a Socket.IO message queue AND moving the
+parser loop into its own process with an IPC/status layer. That isn't a
+small change. Don't combine it with anything else.

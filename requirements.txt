@@ -11,7 +11,11 @@ Flask-Cors>=6.0,<7
 Flask-SocketIO>=5.6,<6
 python-engineio>=4.13,<5
 python-socketio>=5.16,<6
-eventlet>=0.40,<1
+# Production WSGI server (gthread worker; see wsgi.py). eventlet is NOT used —
+# monkey-patching breaks the asyncio parser loop; native WebSocket in
+# threading mode comes from simple-websocket.
+gunicorn>=23,<24
+simple-websocket>=1.1,<2
 
 # Auth / crypto
 bcrypt>=5.0,<6

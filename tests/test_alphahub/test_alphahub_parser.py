@@ -663,27 +663,25 @@ class TestDeltaMerge:
         assert changed is False
         assert '1' not in parser.competitors
 
-    def test_huge_sequence_jump_triggers_resync(self, parser: AlphaHubParser):
-        # When the seq jumps by >50 we assume missed packets and re-snapshot.
+    def test_huge_sequence_jump_schedules_resync(self, parser: AlphaHubParser):
+        # When the seq jumps by >50 we assume missed packets. The refetch is
+        # DEFERRED to the async caller (via _needs_snapshot_refetch) — calling
+        # the gated, blocking _fetch_snapshot inline here would run it on the
+        # shared parser event loop and freeze every track.
         parser.competitors = {'17': {'CompetitorNumber': 17, 'NumberOfLaps': 1}}
         parser.last_sequence = 1
 
         snapshot_called = []
-        def fake_snap():
-            snapshot_called.append(True)
-            parser.competitors = {'42': {'CompetitorNumber': 42, 'NumberOfLaps': 99}}
-            parser.last_sequence = 100
-        parser._fetch_snapshot = fake_snap
+        parser._fetch_snapshot = lambda: snapshot_called.append(True)
 
         changed = parser._apply_delta({
             'Sequence': 200,  # jump 1→200 >> 50
             'Competitors': [{'CompetitorNumber': 17, 'NumberOfLaps': 7}],
         })
         assert changed is True
-        assert snapshot_called == [True]
-        # State now reflects the snapshot, not the delta we tried to apply.
-        assert '42' in parser.competitors
-        assert parser.competitors['42']['NumberOfLaps'] == 99
+        # No inline fetch — only the flag for the event loop to act on.
+        assert snapshot_called == []
+        assert parser._needs_snapshot_refetch is True
 
     def test_delta_without_sequence_is_applied(self, parser: AlphaHubParser):
         # Some events omit Sequence (heartbeats / partial updates).

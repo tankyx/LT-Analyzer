@@ -365,6 +365,9 @@ class AlphaHubParser(TrackSpecificParser):
         # store_lap_data / broadcast pipeline.
         self.competitors: Dict[str, Dict[str, Any]] = {}
         self.last_sequence: Optional[int] = None
+        # Set by _apply_delta on a big sequence jump; the async loop performs
+        # the actual (blocking, rate-gated) refetch via asyncio.to_thread.
+        self._needs_snapshot_refetch = False
         self._http = requests.Session()
         self._http.headers.update(_DEFAULT_HEADERS)
         self._cfg: Optional[AlphaHubConfig] = None
@@ -485,12 +488,16 @@ class AlphaHubParser(TrackSpecificParser):
         if seq is not None and self.last_sequence is not None and seq <= self.last_sequence:
             return False  # stale/duplicate
         if seq is not None and self.last_sequence is not None and seq > self.last_sequence + 50:
-            # Big gap — likely missed packets. Refetch.
+            # Big gap — likely missed packets. Flag for a refetch, which the
+            # async caller performs via asyncio.to_thread: _fetch_snapshot is
+            # gated (up to seconds of sleep) + blocking HTTP, and this method
+            # runs directly on the shared parser event loop — fetching inline
+            # here would freeze every track's parser.
             self.logger.info(
                 f"Track {self.track_id}: sequence jump "
-                f"{self.last_sequence}→{seq}; refetching snapshot"
+                f"{self.last_sequence}→{seq}; scheduling snapshot refetch"
             )
-            self._fetch_snapshot()
+            self._needs_snapshot_refetch = True
             return True
         comps = payload.get('Competitors') or payload.get('competitors') or []
         changed = False
@@ -661,6 +668,9 @@ class AlphaHubParser(TrackSpecificParser):
                         data = {'raw': data}
                 if ev == 'update':
                     if self._apply_delta(data or {}):
+                        if getattr(self, '_needs_snapshot_refetch', False):
+                            self._needs_snapshot_refetch = False
+                            await asyncio.to_thread(self._fetch_snapshot)
                         await asyncio.to_thread(self._ingest_current_state)
                 elif ev == 'refresh':
                     self.logger.info(f"Track {self.track_id}: refresh event — refetching snapshot")
