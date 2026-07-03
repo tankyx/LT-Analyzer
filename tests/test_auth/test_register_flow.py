@@ -21,7 +21,7 @@ def test_happy_path_creates_user_unverified_and_sends_email(client, mock_email):
     resp = client.post("/api/auth/register", json={
         "username": "newperson",
         "email": "NewPerson@Example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "bigcode123",
         "accept_terms": True,
         "turnstile_token": "t",
@@ -52,7 +52,7 @@ def test_missing_invite_blocks_registration_when_closed(client, mock_email):
     resp = client.post("/api/auth/register", json={
         "username": "joiner1",
         "email": "j@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "accept_terms": True,
         "turnstile_token": "t",
     })
@@ -80,7 +80,7 @@ def test_reserved_username_rejected(client):
     resp = client.post("/api/auth/register", json={
         "username": "admin",  # reserved
         "email": "j@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "bigcode123",
         "accept_terms": True,
         "turnstile_token": "t",
@@ -94,7 +94,7 @@ def test_terms_not_accepted_rejected(client):
     resp = client.post("/api/auth/register", json={
         "username": "joiner3",
         "email": "j@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "bigcode123",
         "accept_terms": False,
         "turnstile_token": "t",
@@ -109,7 +109,7 @@ def test_duplicate_email_returns_generic_error(client, mock_email):
     r1 = client.post("/api/auth/register", json={
         "username": "person1",
         "email": "dup@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "bigcode123",
         "accept_terms": True,
         "turnstile_token": "t",
@@ -119,7 +119,7 @@ def test_duplicate_email_returns_generic_error(client, mock_email):
     r2 = client.post("/api/auth/register", json={
         "username": "person2",
         "email": "DUP@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "bigcode123",
         "accept_terms": True,
         "turnstile_token": "t",
@@ -133,7 +133,7 @@ def test_invite_uses_increment_and_exhaust(client, mock_email):
     r1 = client.post("/api/auth/register", json={
         "username": "first",
         "email": "first@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "single",
         "accept_terms": True,
         "turnstile_token": "t",
@@ -142,7 +142,7 @@ def test_invite_uses_increment_and_exhaust(client, mock_email):
     r2 = client.post("/api/auth/register", json={
         "username": "second",
         "email": "second@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "single",
         "accept_terms": True,
         "turnstile_token": "t",
@@ -162,7 +162,7 @@ def test_failed_register_does_not_burn_invite(client, mock_email):
     r1 = client.post("/api/auth/register", json={
         "username": "userone",
         "email": "dup@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "precious",
         "accept_terms": True,
         "turnstile_token": "t",
@@ -173,7 +173,7 @@ def test_failed_register_does_not_burn_invite(client, mock_email):
         r = client.post("/api/auth/register", json={
             "username": f"u_dup_{i}",
             "email": "dup@example.com",  # same email — partial-unique index rejects
-            "password": "a-strong-pass-12",
+            "password": "A-strong-pass-12",
             "invite_code": "precious",
             "accept_terms": True,
             "turnstile_token": "t",
@@ -192,7 +192,7 @@ def test_audit_row_written_on_register(client, mock_email):
     client.post("/api/auth/register", json={
         "username": "audited",
         "email": "audited@example.com",
-        "password": "a-strong-pass-12",
+        "password": "A-strong-pass-12",
         "invite_code": "bigcode123",
         "accept_terms": True,
         "turnstile_token": "t",

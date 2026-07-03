@@ -1,8 +1,8 @@
 """Cloudflare Turnstile server-side verification.
 
-Empty TURNSTILE_SECRET_KEY → soft-pass with a warning. Lets dev work without
-a Cloudflare account and gives the operator an escape hatch if Cloudflare
-is globally down.
+Empty TURNSTILE_SECRET_KEY → soft-pass with a warning in development, hard
+failure in production (FLASK_ENV=production). Lets dev work without a
+Cloudflare account without leaving prod silently unprotected.
 """
 
 import logging
@@ -22,9 +22,9 @@ def verify_turnstile(token: str, remote_ip: str | None = None) -> tuple[bool, st
     secret = os.environ.get("TURNSTILE_SECRET_KEY", "").strip()
     if not secret:
         if os.environ.get('FLASK_ENV') == 'production':
-            logger.error("Turnstile disabled in production (TURNSTILE_SECRET_KEY is empty) — bot protection is OFF.")
-        else:
-            logger.warning("Turnstile disabled (TURNSTILE_SECRET_KEY is empty) — passing through.")
+            logger.error("Turnstile misconfigured in production (TURNSTILE_SECRET_KEY is empty) — rejecting request.")
+            return False, "not_configured"
+        logger.warning("Turnstile disabled (TURNSTILE_SECRET_KEY is empty) — passing through.")
         return True, "disabled"
     if not token:
         return False, "missing_token"

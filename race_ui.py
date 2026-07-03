@@ -1,10 +1,13 @@
 import asyncio
+import ipaddress
 import json
 import os
 import re
+import socket as socket_module
 import threading
 import time
 import traceback
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta
 from collections import deque
 import random
@@ -37,7 +40,10 @@ def _parse_cors_origins():
     raw = os.environ.get('CORS_ORIGINS', '')
     origins = [o.strip() for o in raw.split(',') if o.strip()]
     if not origins:
-        # Fallback for local dev only; production MUST set CORS_ORIGINS.
+        if os.environ.get('FLASK_ENV') == 'production':
+            # A missing whitelist would silently fall back to
+            # localhost:3000 with supports_credentials=True.
+            raise RuntimeError('CORS_ORIGINS environment variable is required in production')
         origins = ['http://localhost:3000']
     return origins
 
@@ -222,48 +228,108 @@ def _internal_error(exc: Exception, context: str = 'request'):
     return jsonify({'error': 'An internal error occurred'}), 500
 
 # WebSocket connection handlers
+
+# Per-sid state for socket-level access control. `_socket_users` maps sid ->
+# user dict captured at connect (all connections are authenticated).
+# `_socket_room_joins` holds the set of rooms each sid explicitly joined, so
+# a client can't create unbounded rooms. Both are cleaned up on disconnect.
+_socket_users: dict = {}
+_socket_room_joins: dict = {}
+_socket_state_lock = threading.Lock()
+SOCKET_MAX_ROOM_JOINS = int(os.environ.get('SOCKET_MAX_ROOM_JOINS', '20'))
+
+MAX_TEAM_NAME_LEN = 64
+
+
+def _socket_room_join_allowed(sid, room: str) -> bool:
+    """Register an explicit room join for this sid.
+
+    Rejoining a room the sid already holds is always allowed (track switching
+    joins/leaves repeatedly); only *distinct* rooms count toward the cap.
+    """
+    with _socket_state_lock:
+        rooms = _socket_room_joins.setdefault(sid, set())
+        if room in rooms:
+            return True
+        if len(rooms) >= SOCKET_MAX_ROOM_JOINS:
+            return False
+        rooms.add(room)
+        return True
+
+
+def _socket_room_left(sid, room: str):
+    with _socket_state_lock:
+        rooms = _socket_room_joins.get(sid)
+        if rooms:
+            rooms.discard(room)
+
+
+def _valid_team_name(team_name) -> bool:
+    return (
+        isinstance(team_name, str)
+        and 0 < len(team_name) <= MAX_TEAM_NAME_LEN
+        and team_name.isprintable()
+    )
+
+
+def _known_track_id(raw):
+    """Coerce a client-supplied track id to int and check it exists.
+
+    Accepts tracks with a live parser OR present in tracks.db (a track can be
+    configured but not currently monitored). Returns the int id or None.
+    """
+    try:
+        track_id = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if track_id <= 0:
+        return None
+    if multi_track_manager and track_id in multi_track_manager.parsers:
+        return track_id
+    return track_id if track_db.get_track_by_id(track_id) else None
+
+
 @socketio.on('connect')
 def handle_connect(auth=None):
     """Handle client connection.
 
-    If the connecting client carries a valid session cookie (web dashboard
-    or a logged-in Android device), auto-join that user to their personal
-    `user_{id}` room. Per-user events like pit_alert emit to that room so
-    only the operator who set the alert is notified — not every device
-    that happens to be monitoring the same team.
+    Connections REQUIRE a valid session cookie — anonymous Socket.IO clients
+    are rejected (return False → connect refused). The dashboard and the
+    Android app both authenticate via POST /api/auth/login first, so the
+    signed Flask session cookie is present on the Engine.IO handshake.
 
-    Anonymous Socket.IO connections still work (e.g. read-only viewers),
-    they just miss any user-targeted events until they log in and
-    reconnect.
+    The authenticated user auto-joins their personal `user_{id}` room.
+    Per-user events like pit_alert emit to that room so only the operator
+    who set the alert is notified — not every device that happens to be
+    monitoring the same team.
     """
-    print(f"Client connected: {request.sid}")
-    with connected_clients_lock:
-        connected_clients.add(request.sid)
-    join_room('race_updates')
-
-    # Per-user room join, best-effort. session.get reads the signed Flask
-    # session cookie so Socket.IO connections from the dashboard (same
-    # origin) AND from the Android app (which authenticates via
-    # POST /api/auth/login and passes the session cookie on connect)
-    # both land here.
-    user_id = None
     try:
         session_id = session.get('session_id')
         user = verify_session(session_id) if session_id else None
-        if user:
-            user_id = user['id']
-            join_room(f'user_{user_id}')
-            print(f"  -> identified as user_id={user_id} ({user['username']}); joined user_{user_id}")
-            # Send an explicit confirmation event so the Android client can
-            # log which user-id it's bound to (useful for debugging "why am
-            # I not getting pit alerts" reports).
-            emit('session_identified', {
-                'user_id': user_id,
-                'username': user['username'],
-                'room': f'user_{user_id}',
-            })
     except Exception as e:
-        print(f"  -> session lookup failed: {e}")
+        print(f"Socket connect: session lookup failed: {e}")
+        user = None
+    if not user:
+        print(f"Socket connect rejected (no valid session): {request.sid}")
+        return False
+
+    print(f"Client connected: {request.sid} (user_id={user['id']}, {user['username']})")
+    with connected_clients_lock:
+        connected_clients.add(request.sid)
+    with _socket_state_lock:
+        _socket_users[request.sid] = user
+    join_room('race_updates')
+
+    user_id = user['id']
+    join_room(f'user_{user_id}')
+    # Send an explicit confirmation event so the Android client can log
+    # which user-id it's bound to (useful for debugging "why am I not
+    # getting pit alerts" reports).
+    emit('session_identified', {
+        'user_id': user_id,
+        'username': user['username'],
+        'room': f'user_{user_id}',
+    })
 
     # Send current race data on connect. As of Phase 2 we no longer ship
     # my_team / monitored_teams / pit_config / delta_times / gap_history in
@@ -284,6 +350,9 @@ def handle_disconnect():
     print(f"Client disconnected: {request.sid}")
     with connected_clients_lock:
         connected_clients.discard(request.sid)
+    with _socket_state_lock:
+        _socket_users.pop(request.sid, None)
+        _socket_room_joins.pop(request.sid, None)
     leave_room('race_updates')
     leave_room('standings_stream')
 
@@ -296,10 +365,12 @@ def handle_join_track(data):
     broadcast (which only fires when the upstream WebSocket pushes new lap
     data — could be a long wait if the track is idle).
     """
-    track_id = data.get('track_id')
-    if not track_id:
+    track_id = _known_track_id((data or {}).get('track_id'))
+    if track_id is None:
         return
     room = f'track_{track_id}'
+    if not _socket_room_join_allowed(request.sid, room):
+        return
     join_room(room)
     print(f"Client {request.sid} joined {room}")
     emit('track_joined', {'track_id': track_id})
@@ -324,11 +395,14 @@ def handle_join_track(data):
 @socketio.on('leave_track')
 def handle_leave_track(data):
     """Handle client leaving a track-specific room"""
-    track_id = data.get('track_id')
-    if track_id:
-        room = f'track_{track_id}'
-        leave_room(room)
-        print(f"Client {request.sid} left {room}")
+    try:
+        track_id = int((data or {}).get('track_id'))
+    except (TypeError, ValueError):
+        return
+    room = f'track_{track_id}'
+    leave_room(room)
+    _socket_room_left(request.sid, room)
+    print(f"Client {request.sid} left {room}")
 
 @socketio.on('join_all_tracks')
 def handle_join_all_tracks():
@@ -357,18 +431,20 @@ def handle_subscribe_user_prefs(data):
     """Phase 2.5: join a per-user room so the client receives prefs_updated
     notifications when any of their other tabs/devices write new prefs.
 
-    The user_id comes from the client (which already authenticated via HTTP).
-    A spoofed user_id only lets someone receive "you should re-fetch" pings
-    for that user — the actual prefs themselves still require the HTTP session
-    cookie to fetch, so this is informational, not authoritative.
+    Only the authenticated owner may subscribe: the requested user_id must
+    match the user bound to this connection at connect time.
     """
     try:
         user_id = int((data or {}).get('user_id'))
     except (TypeError, ValueError):
         return
-    if user_id <= 0:
+    with _socket_state_lock:
+        user = _socket_users.get(request.sid)
+    if not user or user['id'] != user_id:
         return
     room = f'user_prefs_{user_id}'
+    if not _socket_room_join_allowed(request.sid, room):
+        return
     join_room(room)
     print(f"Client {request.sid} joined {room}")
 
@@ -379,23 +455,39 @@ def handle_unsubscribe_user_prefs(data):
         user_id = int((data or {}).get('user_id'))
     except (TypeError, ValueError):
         return
-    leave_room(f'user_prefs_{user_id}')
+    room = f'user_prefs_{user_id}'
+    leave_room(room)
+    _socket_room_left(request.sid, room)
 
 @socketio.on('join_team_room')
 def handle_join_team_room(data):
     """Handle client joining a team-specific room for a track"""
-    track_id = data.get('track_id')
-    team_name = data.get('team_name')
+    raw_track_id = (data or {}).get('track_id')
+    team_name = (data or {}).get('team_name')
 
-    if not track_id or not team_name:
+    if not raw_track_id or not team_name:
         emit('team_room_error', {
             'error': 'Both track_id and team_name are required',
             'timestamp': datetime.now().isoformat()
         })
         return
 
+    track_id = _known_track_id(raw_track_id)
+    if track_id is None:
+        emit('team_room_error', {
+            'error': 'Track not found',
+            'timestamp': datetime.now().isoformat()
+        })
+        return
+
+    if not _valid_team_name(team_name):
+        emit('team_room_error', {
+            'error': f'team_name must be a printable string of at most {MAX_TEAM_NAME_LEN} characters',
+            'timestamp': datetime.now().isoformat()
+        })
+        return
+
     try:
-        # Validate track exists
         track_info = track_db.get_track_by_id(track_id)
         if not track_info:
             emit('team_room_error', {
@@ -407,6 +499,12 @@ def handle_join_team_room(data):
         # Join the team-specific room (no team validation - allow subscribing
         # before data arrives so clients receive updates as soon as racing starts)
         room = f'team_track_{track_id}_{team_name}'
+        if not _socket_room_join_allowed(request.sid, room):
+            emit('team_room_error', {
+                'error': 'Too many rooms joined on this connection',
+                'timestamp': datetime.now().isoformat()
+            })
+            return
         join_room(room)
         print(f"Client {request.sid} joined team room: {room}")
 
@@ -430,18 +528,26 @@ def handle_join_team_room(data):
 @socketio.on('leave_team_room')
 def handle_leave_team_room(data):
     """Handle client leaving a team-specific room"""
-    track_id = data.get('track_id')
-    team_name = data.get('team_name')
+    raw_track_id = (data or {}).get('track_id')
+    team_name = (data or {}).get('team_name')
 
-    if not track_id or not team_name:
+    if not raw_track_id or not team_name:
         emit('team_room_error', {
             'error': 'Both track_id and team_name are required',
             'timestamp': datetime.now().isoformat()
         })
         return
 
+    try:
+        track_id = int(raw_track_id)
+    except (TypeError, ValueError):
+        return
+    if not _valid_team_name(team_name):
+        return
+
     room = f'team_track_{track_id}_{team_name}'
     leave_room(room)
+    _socket_room_left(request.sid, room)
     print(f"Client {request.sid} left team room: {room}")
 
     emit('team_room_left', {
@@ -1587,7 +1693,9 @@ def start_update_thread():
 # Authentication helper functions
 def get_db_connection():
     """Get database connection"""
-    conn = sqlite3.connect('auth.db')
+    # timeout=5.0 → sqlite busy handler waits up to 5s instead of raising
+    # "database is locked" immediately when a writer holds the lock.
+    conn = sqlite3.connect('auth.db', timeout=5.0)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -1597,6 +1705,9 @@ def _ensure_auth_schema():
     and create driver_aliases / Phase 1 tables defensively."""
     try:
         with sqlite3.connect('auth.db') as conn:
+            # WAL is a persistent DB property: readers no longer block on the
+            # writer (session verify happens on every authenticated request).
+            conn.execute('PRAGMA journal_mode=WAL')
             cols = [row[1] for row in conn.execute('PRAGMA table_info(login_attempts)').fetchall()]
             if cols and 'attempted_at' not in cols and 'timestamp' in cols:
                 conn.execute('ALTER TABLE login_attempts RENAME COLUMN timestamp TO attempted_at')
@@ -1844,7 +1955,7 @@ def _rate_limit_hit(bucket: str, key: str, max_events: int | None = None,
         return False
     cutoff = (datetime.now() - timedelta(seconds=window_seconds)).strftime('%Y-%m-%d %H:%M:%S')
     try:
-        with sqlite3.connect('auth.db') as conn:
+        with sqlite3.connect('auth.db', timeout=5.0) as conn:
             conn.execute(
                 'INSERT INTO rate_limit_events (bucket, key) VALUES (?, ?)',
                 (bucket, key or '-'),
@@ -1881,7 +1992,7 @@ def _audit(action: str, *, actor_user_id=None, target=None, details=None):
                 payload = json.dumps(details, default=str)
             except (TypeError, ValueError):
                 payload = json.dumps({'_unserialisable': repr(details)[:500]})
-        with sqlite3.connect('auth.db') as conn:
+        with sqlite3.connect('auth.db', timeout=5.0) as conn:
             conn.execute(
                 'INSERT INTO audit_log (actor_user_id, action, target, ip_address, user_agent, details) '
                 'VALUES (?, ?, ?, ?, ?, ?)',
@@ -1935,7 +2046,7 @@ def _is_rate_limited(username: str, ip_address: str) -> bool:
     # SQLite's CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" (space separator,
     # no microseconds). Match that format exactly for string comparison.
     cutoff = (datetime.now() - timedelta(minutes=LOGIN_WINDOW_MINUTES)).strftime('%Y-%m-%d %H:%M:%S')
-    with sqlite3.connect('auth.db') as conn:
+    with sqlite3.connect('auth.db', timeout=5.0) as conn:
         cursor = conn.cursor()
         cursor.execute(
             '''SELECT COUNT(*) FROM login_attempts
@@ -2173,6 +2284,53 @@ def get_track(track_id):
         return jsonify(track)
     return jsonify({'error': 'Track not found'}), 404
 
+ALLOWED_TRACK_URL_SCHEMES = {'ws', 'wss', 'http', 'https'}
+# Set to 'true' only in dev/test environments where tracks point at localhost.
+ALLOW_PRIVATE_TRACK_URLS = os.environ.get('ALLOW_PRIVATE_TRACK_URLS', 'false').lower() == 'true'
+
+
+def _validate_track_url(url: str, field: str) -> str | None:
+    """SSRF guard for admin-supplied track URLs the parsers will connect to.
+
+    Returns an error message, or None when the URL is acceptable. Rejects
+    non-ws/wss/http/https schemes, userinfo tricks, and hostnames that resolve
+    to loopback / private / link-local / metadata address space.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return f'{field}: not a valid URL'
+    if parts.scheme.lower() not in ALLOWED_TRACK_URL_SCHEMES:
+        return f'{field}: scheme must be one of {sorted(ALLOWED_TRACK_URL_SCHEMES)}'
+    if not parts.hostname:
+        return f'{field}: missing hostname'
+    if parts.username or parts.password:
+        return f'{field}: credentials in URL are not allowed'
+    if ALLOW_PRIVATE_TRACK_URLS:
+        return None
+    try:
+        infos = socket_module.getaddrinfo(parts.hostname, None)
+    except socket_module.gaierror:
+        return f'{field}: hostname does not resolve'
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0])
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return f'{field}: host resolves to a non-public address'
+    return None
+
+
+def _validate_track_urls(data) -> str | None:
+    """Validate every URL field present and non-empty in an admin payload."""
+    for field in ('websocket_url', 'timing_url'):
+        value = (data.get(field) or '').strip()
+        if value:
+            err = _validate_track_url(value, field)
+            if err:
+                return err
+    return None
+
+
 # Admin track management routes
 @app.route('/api/admin/tracks', methods=['GET'])
 @admin_required
@@ -2209,6 +2367,10 @@ def admin_add_track():
     if not data or 'name' not in data:
         return jsonify({'error': 'Track name is required'}), 400
 
+    url_error = _validate_track_urls(data)
+    if url_error:
+        return jsonify({'error': url_error}), 400
+
     # Use track_db to add the track
     result = track_db.add_track(
         track_name=data['name'],
@@ -2240,6 +2402,10 @@ def admin_update_track(track_id):
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
+
+    url_error = _validate_track_urls(data)
+    if url_error:
+        return jsonify({'error': url_error}), 400
 
     # Use track_db to update the track
     result = track_db.update_track(

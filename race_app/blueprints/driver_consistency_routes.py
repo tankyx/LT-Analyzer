@@ -4,14 +4,19 @@ import sqlite3
 from flask import Blueprint, jsonify, request
 
 import race_ui
+from race_ui import login_required
 
 
 driver_consistency_bp = Blueprint('driver_consistency', __name__)
 
 
 @driver_consistency_bp.route('/api/driver/consistency', methods=['GET'])
+@login_required
 def get_driver_consistency():
     """Cross-track lap-time consistency stats for a driver/team.
+
+    Fans out across every active track DB, so it's login-gated, rate-limited
+    and cached (the result only changes when new sessions land).
 
     Query params:
       name (required) - driver/team name (flexible tokenized matching).
@@ -20,6 +25,12 @@ def get_driver_consistency():
         raw_name = request.args.get('name', '').strip()
         if not raw_name:
             return jsonify({'error': 'name parameter is required'}), 400
+        if race_ui._rate_limit_hit('heavy_read_ip', request.remote_addr or '-'):
+            return jsonify({'error': 'rate_limited'}), 429
+        cache_key = f'driver_consistency:{raw_name.lower()}'
+        cached = race_ui._cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
         alias_names = race_ui._expand_alias_group(raw_name)
         if not alias_names:
             return jsonify({'error': 'name parameter is required'}), 400
@@ -156,12 +167,14 @@ def get_driver_consistency():
             for s in sorted(sessions_out, key=lambda x: x['session_date'] or '')
         ]
 
-        return jsonify({
+        payload = {
             'driver_name': raw_name,
             'overall': overall,
             'sessions': sessions_out,
             'trend': trend,
-        })
+        }
+        race_ui._cache_put(cache_key, payload)
+        return jsonify(payload)
 
     except Exception as e:
         race_ui.app.logger.exception("consistency endpoint failed")

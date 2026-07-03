@@ -251,6 +251,7 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
    - Tracks are completely isolated - separate databases, separate Socket.IO rooms, separate sessions
 
 2. **Socket.IO Room Architecture**:
+   - **Connections require login**: the Engine.IO handshake must carry a valid session cookie (set by `POST /api/auth/login`); anonymous connects are rejected. Join handlers validate input (`track_id` must be a known track, `team_name` ≤64 printable chars) and each connection is capped at 20 distinct explicitly-joined rooms.
    - Each track has a dedicated room: `track_1`, `track_2`, etc.
    - Frontend joins/leaves rooms when user selects a track in the dropdown
    - Only subscribed clients receive updates for their selected track
@@ -342,10 +343,10 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
     - UI in Stint Planner tab with dropdown selector, save/delete buttons
 
 15. **Team-Specific Socket.IO Rooms** (`race_ui.py`, `multi_track_manager.py`):
-    - External apps can subscribe to real-time updates for a specific team on a specific track
+    - External apps can subscribe to real-time updates for a specific team on a specific track (they must authenticate first — log in via `POST /api/auth/login` and present the session cookie on the Socket.IO handshake)
     - Room naming convention: `team_track_{track_id}_{team_name}`
     - Client emits `join_team_room` with `{ track_id, team_name }`
-    - Backend validates track and team exist before allowing join
+    - Backend validates the track exists and the team name is ≤64 printable characters before allowing join
     - Server emits `team_specific_update` to team room with:
       - Position, kart number, status
       - Last lap, best lap, total laps completed
@@ -354,7 +355,6 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
       - Pit stops count
       - Session ID and timestamp
     - Updates broadcast automatically whenever race data updates (same frequency as track updates)
-    - Test client available: `python test_team_socket.py`
     - Use case: Mobile apps monitoring specific team performance in real-time
 
 16. **Data-Type Based Column Detection** (`apex_timing_websocket.py`):

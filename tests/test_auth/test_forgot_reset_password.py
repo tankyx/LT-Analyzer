@@ -58,7 +58,7 @@ def test_reset_password_happy_path_changes_hash_and_invalidates_sessions(
 
     resp = client.post("/api/auth/reset-password", json={
         "token": token,
-        "new_password": "brand-new-strong-pass",
+        "new_password": "Brand-new-strong-pass1!",
     })
     assert resp.status_code == 200
     with sqlite3.connect("auth.db") as conn:
@@ -70,14 +70,14 @@ def test_reset_password_happy_path_changes_hash_and_invalidates_sessions(
             "SELECT COUNT(*) FROM sessions WHERE user_id = ?", (authenticated_user["id"],)
         ).fetchone()[0]
     assert row[1] is None  # token cleared
-    assert auth_app.verify_password("brand-new-strong-pass", row[0])
+    assert auth_app.verify_password("Brand-new-strong-pass1!", row[0])
     assert sess_count == 0  # all sessions invalidated
 
 
 def test_reset_password_invalid_token(client):
     resp = client.post("/api/auth/reset-password", json={
         "token": "nope",
-        "new_password": "a-strong-pass-12",
+        "new_password": "A-strong-pass-12",
     })
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "invalid_token"
@@ -91,7 +91,7 @@ def test_reset_password_expired_token(client, authenticated_user):
         )
     resp = client.post("/api/auth/reset-password", json={
         "token": "exp_tok",
-        "new_password": "a-strong-pass-12",
+        "new_password": "A-strong-pass-12",
     })
     assert resp.status_code == 400
     assert resp.get_json()["error"] == "expired_token"

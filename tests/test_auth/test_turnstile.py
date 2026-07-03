@@ -19,9 +19,18 @@ def _resp(status=200, json_body=None):
 
 def test_verify_turnstile_soft_pass_when_no_secret(monkeypatch, caplog):
     monkeypatch.setenv("TURNSTILE_SECRET_KEY", "")
+    monkeypatch.delenv("FLASK_ENV", raising=False)
     ok, err = turnstile.verify_turnstile("anything", "1.2.3.4")
     assert ok is True
     assert err == "disabled"
+
+
+def test_verify_turnstile_fails_closed_in_production_without_secret(monkeypatch):
+    monkeypatch.setenv("TURNSTILE_SECRET_KEY", "")
+    monkeypatch.setenv("FLASK_ENV", "production")
+    ok, err = turnstile.verify_turnstile("anything", "1.2.3.4")
+    assert ok is False
+    assert err == "not_configured"
 
 
 def test_verify_turnstile_success(monkeypatch):

@@ -135,7 +135,7 @@ class TestRegisterInputValidation:
         resp = client.post("/api/auth/register", json={
             "username": "ab",  # 2 chars, minimum is 3
             "email": "test@example.com",
-            "password": "a-strong-pass-12",
+            "password": "A-strong-pass-12",
             "accept_terms": True,
             "turnstile_token": "t",
         })
@@ -146,7 +146,7 @@ class TestRegisterInputValidation:
         resp = client.post("/api/auth/register", json={
             "username": "user name",  # spaces are not allowed
             "email": "test@example.com",
-            "password": "a-strong-pass-12",
+            "password": "A-strong-pass-12",
             "accept_terms": True,
             "turnstile_token": "t",
         })
@@ -157,7 +157,7 @@ class TestRegisterInputValidation:
         resp = client.post("/api/auth/register", json={
             "username": "user@name!",  # special chars outside [_.-] are not allowed
             "email": "test@example.com",
-            "password": "a-strong-pass-12",
+            "password": "A-strong-pass-12",
             "accept_terms": True,
             "turnstile_token": "t",
         })
@@ -168,7 +168,7 @@ class TestRegisterInputValidation:
         resp = client.post("/api/auth/register", json={
             "username": "admin",
             "email": "test@example.com",
-            "password": "a-strong-pass-12",
+            "password": "A-strong-pass-12",
             "accept_terms": True,
             "turnstile_token": "t",
         })
@@ -179,7 +179,7 @@ class TestRegisterInputValidation:
         resp = client.post("/api/auth/register", json={
             "username": "root",
             "email": "test@example.com",
-            "password": "a-strong-pass-12",
+            "password": "A-strong-pass-12",
             "accept_terms": True,
             "turnstile_token": "t",
         })

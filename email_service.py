@@ -9,7 +9,7 @@ endpoint level, not here.
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -80,7 +80,7 @@ class NullEmailSender(EmailSender):
         logger.info("NullEmailSender: to=%s subject=%r tags=%s", to_email, subject, list(tags or []))
         try:
             Path(self.spool_dir).mkdir(parents=True, exist_ok=True)
-            stamp = datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
             safe_to = to_email.replace("/", "_").replace("\\", "_")
             path = Path(self.spool_dir) / f"{stamp}_{safe_to}.json"
             payload = {

@@ -43,7 +43,7 @@ def test_register_endpoint_exempt_from_csrf(client, mock_email):
     resp = client.post("/api/auth/register", json={
         "username": "csrffree",
         "email": "csrffree@example.com",
-        "password": "strong-pass-1234",
+        "password": "Strong-pass-1234",
         "invite_code": "opencode",
         "accept_terms": True,
         "turnstile_token": "t",
