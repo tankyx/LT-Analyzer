@@ -214,8 +214,13 @@ def _cache_put(key: str, value, ttl: int | None = None):
         _query_cache[key] = (expires_at, value)
 
 
-# Stale-while-revalidate: keys currently being refreshed in the background.
+# Stale-while-revalidate: keys currently being refreshed in the background,
+# plus per-key flight locks serializing COLD computes. Without the flight
+# lock, N concurrent cold requests all ran the expensive aggregation at
+# once — under load test this piled up dozens of multi-hundred-MB sqlite
+# temp B-trees and exhausted the /tmp tmpfs ("database or disk is full").
 _swr_refreshing: set = set()
+_swr_flights: dict = {}
 _swr_lock = threading.Lock()
 
 
@@ -224,8 +229,10 @@ def _cache_get_swr(key: str, compute, ttl: int | None = None):
 
     Fresh entry → return it. Expired-but-present entry → return the stale
     value immediately and refresh it in a background thread (single-flight
-    per key). No entry → compute inline (first request pays the cost once).
-    `compute` must be a self-contained zero-arg callable (no request context).
+    per key). No entry → compute inline, single-flight: exactly one thread
+    runs `compute`, concurrent callers wait on the flight lock and then read
+    the cached result. `compute` must be a self-contained zero-arg callable
+    (no request context).
     """
     now = time.time()
     with _query_cache_lock:
@@ -251,9 +258,20 @@ def _cache_get_swr(key: str, compute, ttl: int | None = None):
                         _swr_refreshing.discard(key)
             threading.Thread(target=_refresh, daemon=True).start()
         return value
-    value = compute()
-    _cache_put(key, value, ttl)
-    return value
+
+    # Cold path: serialize identical computes behind a per-key flight lock.
+    with _swr_lock:
+        if len(_swr_flights) > 1000:  # unbounded-growth backstop
+            _swr_flights.clear()
+        flight = _swr_flights.setdefault(key, threading.Lock())
+    with flight:
+        with _query_cache_lock:
+            entry = _query_cache.get(key)
+        if entry is not None and time.time() <= entry[0]:
+            return entry[1]
+        value = compute()
+        _cache_put(key, value, ttl)
+        return value
 
 
 def _cache_invalidate_prefix(prefix: str):

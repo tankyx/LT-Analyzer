@@ -104,3 +104,32 @@ class TestStaleWhileRevalidate:
                 break
             time.sleep(0.02)
         assert auth_app._query_cache.get('swr:c')[1] == 'new'
+
+    def test_cold_path_single_flight(self, auth_app, reset_db):
+        """Concurrent cold requests must run compute exactly once (found by
+        the N=300 load test: parallel cold top-teams aggregations exhausted
+        the /tmp tmpfs with sqlite temp files)."""
+        import threading as _threading
+        with auth_app._query_cache_lock:
+            auth_app._query_cache.clear()
+        calls = []
+        gate = _threading.Event()
+
+        def slow_compute():
+            calls.append(1)
+            gate.wait(2)  # hold the flight so all threads pile up behind it
+            return 'computed'
+
+        results = []
+        threads = [_threading.Thread(
+            target=lambda: results.append(
+                auth_app._cache_get_swr('swr:flight', slow_compute)))
+            for _ in range(8)]
+        for t in threads:
+            t.start()
+        time.sleep(0.2)
+        gate.set()
+        for t in threads:
+            t.join(timeout=5)
+        assert results == ['computed'] * 8
+        assert len(calls) == 1
