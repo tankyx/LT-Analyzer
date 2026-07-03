@@ -114,6 +114,8 @@ def fleet_app(tmp_path_factory) -> Iterator:
 @pytest.fixture
 def reset_fleet(fleet_app) -> Iterator:
     """Truncate per-test mutable tables in auth.db and the track DB."""
+    fleet_app._session_cache_invalidate()
+    fleet_app._rate_limit_reset()
     with sqlite3.connect("auth.db") as conn:
         for tbl in ("sessions", "login_attempts", "audit_log", "users"):
             try:

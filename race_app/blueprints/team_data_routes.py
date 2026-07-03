@@ -218,6 +218,11 @@ def search_teams_all_tracks():
             limit = 20
         q_lower = q.lower()
 
+        cache_key = f'search_all:{q_lower}:{limit}'
+        cached = race_ui._cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+
         # Enumerate active tracks once
         with sqlite3.connect('tracks.db') as tconn:
             tracks = tconn.execute(
@@ -305,7 +310,7 @@ def search_teams_all_tracks():
             race_ui.app.logger.warning(f"search-all alias lookup failed: {e}")
 
         results = sorted(agg.values(), key=lambda r: r['name'].lower())[:limit]
-        return jsonify({
+        payload = {
             'teams': [
                 {
                     'name': r['name'],
@@ -316,7 +321,9 @@ def search_teams_all_tracks():
                 }
                 for r in results
             ],
-        })
+        }
+        race_ui._cache_put(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         race_ui.app.logger.exception('search-all endpoint failed')
         return race_ui._internal_error(e)
@@ -340,13 +347,27 @@ def get_top_teams():
 
         # Phase 3: cache lookup. ~60s TTL is fine for a leaderboard — laps
         # don't change that fast at the ranks that matter, and admin
-        # delete/mass-delete operations invalidate the prefix.
+        # delete/mass-delete operations invalidate the prefix. Served via
+        # stale-while-revalidate: this aggregation can take seconds on big
+        # track DBs, so once warm no request ever waits on the recompute.
         cache_key = f'top_teams:{track_id}:{session_id}:{limit}'
-        cached = race_ui._cache_get(cache_key)
-        if cached is not None:
-            return jsonify(cached)
 
-        conn = race_ui.get_track_db_connection(track_id)
+        def _compute():
+            return _compute_top_teams(track_id, session_id, limit)
+
+        payload = race_ui._cache_get_swr(cache_key, _compute)
+        return jsonify(payload)
+    except Exception as e:
+        print(f"Error getting top teams: {e}")
+        traceback.print_exc()
+        return race_ui._internal_error(e)
+
+
+def _compute_top_teams(track_id, session_id, limit):
+    """Self-contained top-teams aggregation (no request context) so the SWR
+    cache can refresh it from a background thread."""
+    conn = race_ui.get_track_db_connection(track_id)
+    try:
         cursor = conn.cursor()
 
         # Build session filter
@@ -517,15 +538,9 @@ def get_top_teams():
                 'best_lap_timestamp': row[6] if len(row) > 6 else None
             })
 
+        return {'teams': teams, 'limit': limit}
+    finally:
         conn.close()
-
-        payload = {'teams': teams, 'limit': limit}
-        race_ui._cache_put(cache_key, payload)
-        return jsonify(payload)
-    except Exception as e:
-        print(f"Error getting top teams: {e}")
-        traceback.print_exc()
-        return race_ui._internal_error(e)
 
 @team_data_bp.route('/api/team-data/stats', methods=['GET'])
 @login_required
@@ -1121,79 +1136,58 @@ def delete_best_lap():
         if not (30.0 <= best_lap_seconds <= 600.0):
             return jsonify({'error': 'best_lap_time out of realistic range (30-600s)'}), 400
 
-        # Retry logic to handle database locks
-        max_retries = 3
-        retry_delay = 0.5  # seconds
-        last_error = None
+        # WAL + the connection's 5s busy timeout already absorb writer
+        # contention; the old sleep-retry loop on top of that could hold a
+        # request thread for ~16s under sustained lock.
+        conn = race_ui.get_track_db_connection(track_id, timeout=5.0)
+        try:
+            cursor = conn.cursor()
 
-        for attempt in range(max_retries):
-            try:
-                conn = race_ui.get_track_db_connection(track_id, timeout=5.0)
-                cursor = conn.cursor()
+            # Find and nullify the best_lap field for records matching this team and lap time
+            # Handle both formats: with class prefix "1 - TEAMNAME" and without "TEAMNAME"
+            # Also handle mixed best_lap formats: "MM:SS.mmm" and raw seconds
+            update_query = """
+                UPDATE lap_times
+                SET best_lap = NULL
+                WHERE CASE
+                        WHEN team_name LIKE '% - %' THEN
+                            LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
+                        ELSE
+                            LOWER(TRIM(team_name))
+                    END = ?
+                AND ABS(
+                    CASE
+                        WHEN best_lap LIKE '%:%' THEN
+                            CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                            CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                        WHEN best_lap IS NOT NULL AND best_lap != '' THEN
+                            CAST(best_lap AS REAL)
+                        ELSE 999999
+                    END - ?
+                ) < 0.01
+            """
 
-                # Find and nullify the best_lap field for records matching this team and lap time
-                # Handle both formats: with class prefix "1 - TEAMNAME" and without "TEAMNAME"
-                # Also handle mixed best_lap formats: "MM:SS.mmm" and raw seconds
-                update_query = """
-                    UPDATE lap_times
-                    SET best_lap = NULL
-                    WHERE CASE
-                            WHEN team_name LIKE '% - %' THEN
-                                LOWER(TRIM(SUBSTR(team_name, INSTR(team_name, ' - ') + 3)))
-                            ELSE
-                                LOWER(TRIM(team_name))
-                        END = ?
-                    AND ABS(
-                        CASE
-                            WHEN best_lap LIKE '%:%' THEN
-                                CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
-                                CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
-                            WHEN best_lap IS NOT NULL AND best_lap != '' THEN
-                                CAST(best_lap AS REAL)
-                            ELSE 999999
-                        END - ?
-                    ) < 0.01
-                """
+            cursor.execute(update_query, (team_name, best_lap_seconds))
+            rows_updated = cursor.rowcount
+            conn.commit()
+        finally:
+            conn.close()
 
-                cursor.execute(update_query, (team_name, best_lap_seconds))
-                rows_updated = cursor.rowcount
-                conn.commit()
-                conn.close()
+        if rows_updated == 0:
+            return jsonify({'error': 'No matching lap time found for this team'}), 404
 
-                if rows_updated == 0:
-                    return jsonify({'error': 'No matching lap time found for this team'}), 404
-
-                race_ui._audit('admin_delete_best_lap',
-                       actor_user_id=request.current_user['id'],
-                       target=f'track_{track_id}/{team_name}',
-                       details={'best_lap_time': best_lap_time, 'rows_updated': rows_updated})
-                # Bust caches that might surface stale results.
-                race_ui._cache_invalidate_prefix(f'top_teams:{track_id}:')
-                race_ui._cache_invalidate_prefix('cross_track_sessions:')
-                return jsonify({
-                    'success': True,
-                    'message': f'Deleted best lap time for {team_name}',
-                    'rows_updated': rows_updated
-                })
-
-            except sqlite3.OperationalError as e:
-                last_error = e
-                if 'locked' in str(e).lower() and attempt < max_retries - 1:
-                    print(f"Database locked on attempt {attempt + 1}/{max_retries}, retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                    continue
-                else:
-                    raise
-            finally:
-                try:
-                    if 'conn' in locals():
-                        conn.close()
-                except Exception:
-                    pass
-
-        # If we get here, all retries failed
-        raise last_error if last_error else Exception("Unknown error during database operation")
+        race_ui._audit('admin_delete_best_lap',
+               actor_user_id=request.current_user['id'],
+               target=f'track_{track_id}/{team_name}',
+               details={'best_lap_time': best_lap_time, 'rows_updated': rows_updated})
+        # Bust caches that might surface stale results.
+        race_ui._cache_invalidate_prefix(f'top_teams:{track_id}:')
+        race_ui._cache_invalidate_prefix('cross_track_sessions:')
+        return jsonify({
+            'success': True,
+            'message': f'Deleted best lap time for {team_name}',
+            'rows_updated': rows_updated
+        })
 
     except Exception as e:
         print(f"Error deleting best lap: {e}")
@@ -1238,89 +1232,67 @@ def mass_delete_laps():
         if delete_type not in ['lap_history', 'best_laps']:
             return jsonify({'error': 'delete_type must be "lap_history" or "best_laps"'}), 400
 
-        # Retry logic to handle database locks
-        max_retries = 3
-        retry_delay = 0.5
-        last_error = None
+        # WAL + the connection's 10s busy timeout absorb writer contention;
+        # no sleep-retry loop (it could hold a request thread for ~30s).
+        conn = race_ui.get_track_db_connection(track_id, timeout=10.0)
+        try:
+            cursor = conn.cursor()
 
-        for attempt in range(max_retries):
-            try:
-                conn = race_ui.get_track_db_connection(track_id, timeout=10.0)
-                cursor = conn.cursor()
+            rows_affected = 0
 
-                rows_affected = 0
+            if delete_type == 'lap_history':
+                # Delete individual lap records from lap_history
+                delete_query = """
+                    DELETE FROM lap_history
+                    WHERE CASE
+                            WHEN lap_time LIKE '%:%' THEN
+                                CAST(SUBSTR(lap_time, 1, INSTR(lap_time, ':') - 1) AS REAL) * 60 +
+                                CAST(SUBSTR(lap_time, INSTR(lap_time, ':') + 1) AS REAL)
+                            WHEN lap_time IS NOT NULL AND lap_time != '' THEN
+                                CAST(lap_time AS REAL)
+                            ELSE 999999
+                        END < ?
+                """
+                cursor.execute(delete_query, (threshold_seconds,))
+                rows_affected = cursor.rowcount
 
-                if delete_type == 'lap_history':
-                    # Delete individual lap records from lap_history
-                    delete_query = """
-                        DELETE FROM lap_history
-                        WHERE CASE
-                                WHEN lap_time LIKE '%:%' THEN
-                                    CAST(SUBSTR(lap_time, 1, INSTR(lap_time, ':') - 1) AS REAL) * 60 +
-                                    CAST(SUBSTR(lap_time, INSTR(lap_time, ':') + 1) AS REAL)
-                                WHEN lap_time IS NOT NULL AND lap_time != '' THEN
-                                    CAST(lap_time AS REAL)
-                                ELSE 999999
-                            END < ?
-                    """
-                    cursor.execute(delete_query, (threshold_seconds,))
-                    rows_affected = cursor.rowcount
+            elif delete_type == 'best_laps':
+                # Nullify best_lap field in lap_times if below threshold
+                update_query = """
+                    UPDATE lap_times
+                    SET best_lap = NULL
+                    WHERE CASE
+                            WHEN best_lap LIKE '%:%' THEN
+                                CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
+                                CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
+                            WHEN best_lap IS NOT NULL AND best_lap != '' THEN
+                                CAST(best_lap AS REAL)
+                            ELSE 999999
+                        END < ?
+                """
+                cursor.execute(update_query, (threshold_seconds,))
+                rows_affected = cursor.rowcount
 
-                elif delete_type == 'best_laps':
-                    # Nullify best_lap field in lap_times if below threshold
-                    update_query = """
-                        UPDATE lap_times
-                        SET best_lap = NULL
-                        WHERE CASE
-                                WHEN best_lap LIKE '%:%' THEN
-                                    CAST(SUBSTR(best_lap, 1, INSTR(best_lap, ':') - 1) AS REAL) * 60 +
-                                    CAST(SUBSTR(best_lap, INSTR(best_lap, ':') + 1) AS REAL)
-                                WHEN best_lap IS NOT NULL AND best_lap != '' THEN
-                                    CAST(best_lap AS REAL)
-                                ELSE 999999
-                            END < ?
-                    """
-                    cursor.execute(update_query, (threshold_seconds,))
-                    rows_affected = cursor.rowcount
+            conn.commit()
+        finally:
+            conn.close()
 
-                conn.commit()
-                conn.close()
-
-                race_ui._audit('admin_mass_delete_laps',
-                       actor_user_id=request.current_user['id'],
-                       target=f'track_{track_id}',
-                       details={'delete_type': delete_type,
-                                'threshold_seconds': threshold_seconds,
-                                'rows_affected': rows_affected})
-                # Mass deletion almost certainly changes the leaderboard.
-                race_ui._cache_invalidate_prefix(f'top_teams:{track_id}:')
-                race_ui._cache_invalidate_prefix('cross_track_sessions:')
-                return jsonify({
-                    'success': True,
-                    'message': f'Mass deletion completed',
-                    'rows_affected': rows_affected,
-                    'delete_type': delete_type,
-                    'threshold_seconds': threshold_seconds
-                })
-
-            except sqlite3.OperationalError as e:
-                last_error = e
-                if 'locked' in str(e).lower() and attempt < max_retries - 1:
-                    print(f"Database locked on attempt {attempt + 1}/{max_retries}, retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    raise
-            finally:
-                try:
-                    if 'conn' in locals():
-                        conn.close()
-                except Exception:
-                    pass
-
-        # If we get here, all retries failed
-        raise last_error if last_error else Exception("Unknown error during mass delete operation")
+        race_ui._audit('admin_mass_delete_laps',
+               actor_user_id=request.current_user['id'],
+               target=f'track_{track_id}',
+               details={'delete_type': delete_type,
+                        'threshold_seconds': threshold_seconds,
+                        'rows_affected': rows_affected})
+        # Mass deletion almost certainly changes the leaderboard.
+        race_ui._cache_invalidate_prefix(f'top_teams:{track_id}:')
+        race_ui._cache_invalidate_prefix('cross_track_sessions:')
+        return jsonify({
+            'success': True,
+            'message': f'Mass deletion completed',
+            'rows_affected': rows_affected,
+            'delete_type': delete_type,
+            'threshold_seconds': threshold_seconds
+        })
 
     except Exception as e:
         print(f"Error in mass delete: {e}")

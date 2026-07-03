@@ -136,6 +136,7 @@ def logout():
             # The pre-fix version of this handler matched on id and therefore never
             # actually deleted any session row.
             conn.execute('DELETE FROM sessions WHERE session_token = ?', (session_id,))
+        race_ui._session_cache_invalidate(session_id)
         session.clear()
 
     return jsonify({'success': True})
@@ -469,6 +470,7 @@ def reset_password():
             # Invalidate all live sessions for this user.
             conn.execute('DELETE FROM sessions WHERE user_id = ?', (row['id'],))
             conn.commit()
+        race_ui._session_cache_invalidate()
         race_ui._audit('password_reset_completed', actor_user_id=row['id'], target=row['email'])
         return jsonify({'success': True})
     except sqlite3.Error as exc:
@@ -534,6 +536,7 @@ def me_delete():
         )
         conn.execute('DELETE FROM sessions WHERE user_id = ?', (user['id'],))
         conn.commit()
+    race_ui._session_cache_invalidate()
     race_ui._audit('account_deleted', actor_user_id=user['id'])
     session.clear()
     return jsonify({'success': True})

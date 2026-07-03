@@ -177,6 +177,7 @@ last_race_data_hash = None
 _query_cache: dict = {}
 _query_cache_lock = threading.Lock()
 QUERY_CACHE_TTL_SECONDS = int(os.environ.get('QUERY_CACHE_TTL_SECONDS', '60'))
+QUERY_CACHE_MAX_ENTRIES = int(os.environ.get('QUERY_CACHE_MAX_ENTRIES', '500'))
 _query_cache_stats = {'hits': 0, 'misses': 0, 'evictions': 0}
 
 
@@ -199,7 +200,60 @@ def _cache_get(key: str):
 def _cache_put(key: str, value, ttl: int | None = None):
     expires_at = time.time() + (ttl if ttl is not None else QUERY_CACHE_TTL_SECONDS)
     with _query_cache_lock:
+        if key not in _query_cache and len(_query_cache) >= QUERY_CACHE_MAX_ENTRIES:
+            # Bound memory: drop expired entries first, then the soonest-to-
+            # expire ones until we're back under the cap.
+            now = time.time()
+            expired = [k for k, (exp, _) in _query_cache.items() if exp <= now]
+            for k in expired:
+                del _query_cache[k]
+            while len(_query_cache) >= QUERY_CACHE_MAX_ENTRIES:
+                oldest = min(_query_cache, key=lambda k: _query_cache[k][0])
+                del _query_cache[oldest]
+                _query_cache_stats['evictions'] += 1
         _query_cache[key] = (expires_at, value)
+
+
+# Stale-while-revalidate: keys currently being refreshed in the background.
+_swr_refreshing: set = set()
+_swr_lock = threading.Lock()
+
+
+def _cache_get_swr(key: str, compute, ttl: int | None = None):
+    """Cached read that never blocks warm readers on a slow recompute.
+
+    Fresh entry → return it. Expired-but-present entry → return the stale
+    value immediately and refresh it in a background thread (single-flight
+    per key). No entry → compute inline (first request pays the cost once).
+    `compute` must be a self-contained zero-arg callable (no request context).
+    """
+    now = time.time()
+    with _query_cache_lock:
+        entry = _query_cache.get(key)
+    if entry is not None:
+        expires_at, value = entry
+        if now <= expires_at:
+            with _query_cache_lock:
+                _query_cache_stats['hits'] += 1
+            return value
+        with _swr_lock:
+            already_refreshing = key in _swr_refreshing
+            if not already_refreshing:
+                _swr_refreshing.add(key)
+        if not already_refreshing:
+            def _refresh():
+                try:
+                    _cache_put(key, compute(), ttl)
+                except Exception as exc:  # pragma: no cover — defensive
+                    print(f'[swr] background refresh failed for {key}: {exc}')
+                finally:
+                    with _swr_lock:
+                        _swr_refreshing.discard(key)
+            threading.Thread(target=_refresh, daemon=True).start()
+        return value
+    value = compute()
+    _cache_put(key, value, ttl)
+    return value
 
 
 def _cache_invalidate_prefix(prefix: str):
@@ -1865,10 +1919,36 @@ def create_session(user_id):
     return session_id
 
 
+# verify_session runs on every authenticated request AND every Socket.IO
+# connect; a short TTL cache avoids an auth.db connection per request. A
+# cached entry may outlive a role change / forced logout by at most the TTL,
+# except where we explicitly invalidate (logout, password reset, admin user
+# mutation — those clear the affected token or the whole cache).
+_session_cache = {}  # session_token -> (user_dict, cached_at)
+_session_cache_lock = threading.Lock()
+SESSION_CACHE_TTL_SECONDS = int(os.environ.get('SESSION_CACHE_TTL_SECONDS', '60'))
+SESSION_CACHE_MAX_ENTRIES = 5000
+
+
+def _session_cache_invalidate(token=None):
+    """Drop one token (logout) or everything (user/role/password mutations)."""
+    with _session_cache_lock:
+        if token is None:
+            _session_cache.clear()
+        else:
+            _session_cache.pop(token, None)
+
+
 def verify_session(session_id):
     """Verify if session is valid and return user info"""
     if not session_id:
         return None
+
+    now = time.time()
+    with _session_cache_lock:
+        entry = _session_cache.get(session_id)
+        if entry and now - entry[1] < SESSION_CACHE_TTL_SECONDS:
+            return dict(entry[0])
 
     with get_db_connection() as conn:
         cursor = conn.execute(
@@ -1880,7 +1960,19 @@ def verify_session(session_id):
         )
         user = cursor.fetchone()
 
-    return dict(user) if user else None
+    if not user:
+        _session_cache_invalidate(session_id)
+        return None
+
+    user_dict = dict(user)
+    with _session_cache_lock:
+        if len(_session_cache) >= SESSION_CACHE_MAX_ENTRIES:
+            # Evict the oldest tenth; simple and rare at this size.
+            oldest = sorted(_session_cache, key=lambda k: _session_cache[k][1])
+            for k in oldest[:max(1, SESSION_CACHE_MAX_ENTRIES // 10)]:
+                del _session_cache[k]
+        _session_cache[session_id] = (user_dict, now)
+    return dict(user_dict)
 
 def login_required(f):
     """Decorator to require login for routes"""
@@ -1937,13 +2029,28 @@ EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 _email_sender = get_email_sender()
 
 
+# In-memory sliding-window rate limiter. The previous implementation wrote
+# one sqlite row per hit into auth.db, which at hundreds of users made the
+# limiter itself a write hot-spot (and it failed open on DB errors). A
+# single-process deque-per-key window is exact, cheap, and can't fail open.
+# State resets on restart, which for abuse throttling is acceptable.
+_rate_limit_windows: dict = {}   # (bucket, key) -> deque[monotonic timestamps]
+_rate_limit_lock = threading.Lock()
+_RATE_LIMIT_MAX_KEYS = 50_000    # hard bound on tracked (bucket, key) pairs
+
+
+def _rate_limit_reset():
+    """Test helper: forget all rate-limit state."""
+    with _rate_limit_lock:
+        _rate_limit_windows.clear()
+
+
 def _rate_limit_hit(bucket: str, key: str, max_events: int | None = None,
                     window_seconds: int | None = None) -> bool:
     """Record a rate-limit event and report whether the bucket is now exhausted.
 
     Looks up defaults from RATE_LIMITS when max/window not passed. Returns True
-    if the count in window has reached `max_events`. Probabilistic GC cleans
-    rows older than 24h on ~1% of calls so we don't need a background thread.
+    if the count in window has reached `max_events`.
     """
     if max_events is None or window_seconds is None:
         defaults = RATE_LIMITS.get(bucket)
@@ -1953,29 +2060,23 @@ def _rate_limit_hit(bucket: str, key: str, max_events: int | None = None,
         window_seconds = window_seconds if window_seconds is not None else defaults[1]
     if max_events <= 0:
         return False
-    cutoff = (datetime.now() - timedelta(seconds=window_seconds)).strftime('%Y-%m-%d %H:%M:%S')
-    try:
-        with sqlite3.connect('auth.db', timeout=5.0) as conn:
-            conn.execute(
-                'INSERT INTO rate_limit_events (bucket, key) VALUES (?, ?)',
-                (bucket, key or '-'),
-            )
-            row = conn.execute(
-                'SELECT COUNT(*) FROM rate_limit_events '
-                'WHERE bucket = ? AND key = ? AND occurred_at > ?',
-                (bucket, key or '-', cutoff),
-            ).fetchone()
-            count = row[0] if row else 0
-            if random.random() < 0.01:
-                gc_cutoff = (datetime.now() - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-                conn.execute(
-                    'DELETE FROM rate_limit_events WHERE occurred_at < ?', (gc_cutoff,)
-                )
-        return count >= max_events
-    except sqlite3.Error as exc:
-        # Don't fail the request on rate-limit infrastructure errors — log and pass.
-        print(f'[rate_limit] {bucket}/{key}: {exc}')
-        return False
+    now = time.monotonic()
+    wkey = (bucket, key or '-')
+    with _rate_limit_lock:
+        dq = _rate_limit_windows.get(wkey)
+        if dq is None:
+            if len(_rate_limit_windows) >= _RATE_LIMIT_MAX_KEYS:
+                # Prune windows with no recent activity before adding new keys.
+                stale = [k for k, d in _rate_limit_windows.items()
+                         if not d or now - d[-1] > 86_400]
+                for k in stale:
+                    del _rate_limit_windows[k]
+            dq = _rate_limit_windows[wkey] = deque()
+        cutoff = now - window_seconds
+        while dq and dq[0] <= cutoff:
+            dq.popleft()
+        dq.append(now)
+        return len(dq) >= max_events
 
 
 def _audit(action: str, *, actor_user_id=None, target=None, details=None):
@@ -3752,6 +3853,17 @@ FLEET_MIN_BAND_SECONDS = 0.15      # floor for the fast/slow classification band
 # {(track_id, user_id): {session_id, computed_at, payload}}
 _fleet_cache = {}
 
+# The heavy part of the fleet board — parsing the whole lap_history, the
+# rolling field reference and per-team stint segmentation — is identical for
+# every user watching the same session. It is cached per (track_id,
+# session_id) with a single-flight lock so N users polling /fleet/state cost
+# one computation per TTL, not N. Only the cheap per-user attribution/board
+# layer runs per request.
+_fleet_stint_cache = {}         # (track_id, session_id) -> {'computed_at', 'data'}
+_fleet_stint_locks = {}         # (track_id, session_id) -> single-flight lock
+_fleet_stint_cache_lock = threading.Lock()
+FLEET_STINT_CACHE_TTL_SECONDS = float(os.environ.get('FLEET_STINT_CACHE_TTL_SECONDS', '3.0'))
+
 
 def _live_session_id(track_id):
     """Current session id from the live parser, or None when not running."""
@@ -3799,28 +3911,18 @@ def _infer_stint_index(cur, session_id, team_name):
     return int(row[0]) if row and row[0] is not None else 0
 
 
-def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None):
-    """Core fleet pace fingerprint for one user. Reads lap_history (shared) +
-    the user's fleet tables for the session and returns the board body.
+def _compute_session_stint_data(conn, session_id):
+    """User-independent half of the fleet board: per-team stint segmentation
+    plus the rolling field reference for a session.
 
-    Pure with respect to its inputs (conn + standings_df) so it is unit-testable
-    without a live websocket. standings_df (optional) supplies live location and
-    holder kart-number/position from the current feed.
+    Everything here depends only on lap_history, so the result is shared by
+    every user's board for the same (track, session) — see
+    _get_session_stint_data for the cache.
     """
     cur = conn.cursor()
 
-    # 1. This user's active registry: id -> (label, lane)
-    cur.execute(
-        "SELECT id, label, lane FROM fleet_karts WHERE is_active = 1 AND user_id = ? ORDER BY label",
-        (user_id,))
-    registry = {}
-    kart_lane = {}
-    for kid, label, lane in cur.fetchall():
-        registry[kid] = label
-        kart_lane[kid] = lane
-
-    # 2. Per-team clean lap series (reuse the dedup/parse/clamp of the endurance
-    #    analyzer) and a flat field list for the rolling reference.
+    # Per-team clean lap series (reuse the dedup/parse/clamp of the endurance
+    # analyzer) and a flat field list for the rolling reference.
     cur.execute(
         """SELECT team_name, timestamp, lap_time, pit_this_lap
              FROM lap_history
@@ -3841,8 +3943,8 @@ def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None):
         per_team.setdefault(team, []).append((ts, secs, int(pit) if pit is not None else 0))
         all_clean.append((ts, secs))
 
-    # 3. Rolling field reference (cancels track conditions). Median of clean laps
-    #    in the last FLEET_FIELD_WINDOW_SECONDS; fall back to session-wide median.
+    # Rolling field reference (cancels track conditions). Median of clean laps
+    # in the last FLEET_FIELD_WINDOW_SECONDS; fall back to session-wide median.
     def _parse_iso(ts):
         try:
             return datetime.fromisoformat(ts)
@@ -3861,12 +3963,82 @@ def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None):
         if field_ref is None:
             field_ref = _quantile(sorted(s for _, s in all_clean), 0.5)
 
-    # 4. Segment stints per team and attribute each stint's residual to the
-    #    physical kart that was assigned for that stint index.
+    return {
+        'team_stints': {team: _segment_stints(laps) for team, laps in per_team.items()},
+        'field_ref': field_ref,
+        'teams': list(per_team.keys()),
+    }
+
+
+def _get_session_stint_data(track_id, session_id, conn=None):
+    """Shared-cache wrapper around _compute_session_stint_data.
+
+    Single-flight: with N concurrent users on one track, one thread computes
+    while the others wait and then read the fresh entry. Entries for other
+    sessions of the same track are evicted on write (a track has one live
+    session at a time).
+    """
+    key = (track_id, session_id)
+    now = time.time()
+    with _fleet_stint_cache_lock:
+        entry = _fleet_stint_cache.get(key)
+        if entry and now - entry['computed_at'] < FLEET_STINT_CACHE_TTL_SECONDS:
+            return entry['data']
+        flight = _fleet_stint_locks.setdefault(key, threading.Lock())
+    with flight:
+        with _fleet_stint_cache_lock:
+            entry = _fleet_stint_cache.get(key)
+            if entry and time.time() - entry['computed_at'] < FLEET_STINT_CACHE_TTL_SECONDS:
+                return entry['data']
+        own_conn = conn is None
+        if own_conn:
+            conn = get_track_db_connection(track_id)
+        try:
+            data = _compute_session_stint_data(conn, session_id)
+        finally:
+            if own_conn:
+                conn.close()
+        with _fleet_stint_cache_lock:
+            for k in [k for k in _fleet_stint_cache if k[0] == track_id and k != key]:
+                _fleet_stint_cache.pop(k, None)
+                _fleet_stint_locks.pop(k, None)
+            _fleet_stint_cache[key] = {'computed_at': time.time(), 'data': data}
+        return data
+
+
+def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None, stint_data=None):
+    """Core fleet pace fingerprint for one user. Reads the user's fleet tables
+    for the session, attributes shared stint data to their karts, and returns
+    the board body.
+
+    Pure with respect to its inputs (conn + standings_df) so it is unit-testable
+    without a live websocket. standings_df (optional) supplies live location and
+    holder kart-number/position from the current feed. stint_data (optional)
+    supplies precomputed _compute_session_stint_data output — pass the shared
+    cached value on the hot path; when omitted it is computed inline.
+    """
+    cur = conn.cursor()
+
+    # 1. This user's active registry: id -> (label, lane)
+    cur.execute(
+        "SELECT id, label, lane FROM fleet_karts WHERE is_active = 1 AND user_id = ? ORDER BY label",
+        (user_id,))
+    registry = {}
+    kart_lane = {}
+    for kid, label, lane in cur.fetchall():
+        registry[kid] = label
+        kart_lane[kid] = lane
+
+    # 2-3. Shared (user-independent) stint segmentation + field reference.
+    if stint_data is None:
+        stint_data = _compute_session_stint_data(conn, session_id)
+    field_ref = stint_data['field_ref']
+
+    # 4. Attribute each stint's residual to the physical kart that was
+    #    assigned for that stint index.
     amap = _fleet_assignment_map(cur, session_id, user_id)
     kart_samples = {}  # fleet_kart_id -> {residuals, weights, laps}
-    for team, laps in per_team.items():
-        stints = _segment_stints(laps)
+    for team, stints in stint_data['team_stints'].items():
         team_amap = amap.get(team, {})
         for idx, st in enumerate(stints):
             kid = team_amap.get(idx)
@@ -4007,7 +4179,7 @@ def _compute_live_fleet_pace(conn, session_id, user_id, standings_df=None):
         'field_ref_seconds': round(field_ref, 3) if field_ref is not None else None,
         'fleet_median_residual': round(fleet_median_residual, 3) if fleet_median_residual is not None else None,
         'karts': karts,
-        'unassigned_teams': sorted(t for t in per_team if t not in current_holder),
+        'unassigned_teams': sorted(t for t in stint_data['teams'] if t not in current_holder),
     }
 
 
@@ -4024,7 +4196,9 @@ def compute_fleet_payload(track_id, session_id, user_id, standings_df=None, time
     except UnknownTrackError:
         return None
     try:
-        body = _compute_live_fleet_pace(conn, session_id, user_id, standings_df=standings_df)
+        stint_data = _get_session_stint_data(track_id, session_id, conn=conn)
+        body = _compute_live_fleet_pace(conn, session_id, user_id,
+                                        standings_df=standings_df, stint_data=stint_data)
     finally:
         conn.close()
     payload = {

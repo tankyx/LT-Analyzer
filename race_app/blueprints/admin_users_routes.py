@@ -107,6 +107,9 @@ def update_user(user_id):
             cursor.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
         conn.commit()
 
+    # Role/active/password changes must not be served from the session cache.
+    race_ui._session_cache_invalidate()
+
     race_ui._audit('admin_user_updated', actor_user_id=request.current_user['id'],
            target=str(user_id),
            details={'fields': [c for c, _ in updates]})
@@ -122,6 +125,7 @@ def delete_user(user_id):
     with race_ui.get_db_connection() as conn:
         conn.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
         conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    race_ui._session_cache_invalidate()
     race_ui._audit('admin_user_deleted', actor_user_id=request.current_user['id'],
            target=str(user_id))
     return jsonify({'success': True})

@@ -90,6 +90,8 @@ def auth_app(tmp_path_factory) -> Iterator:
 @pytest.fixture
 def reset_db(auth_app) -> Iterator:
     """Truncate the per-test mutable tables before each test."""
+    auth_app._session_cache_invalidate()
+    auth_app._rate_limit_reset()
     with sqlite3.connect("auth.db") as conn:
         for tbl in (
             "sessions",

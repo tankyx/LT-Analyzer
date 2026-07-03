@@ -23,6 +23,27 @@ def _slug_from_url(url: str) -> str:
     return m.group(1) if m else ''
 
 
+def _room_occupied(socketio, room: str) -> bool:
+    """True when at least one client sits in `room`. Serializing and emitting
+    full standings for empty rooms is pure waste at ~1 msg/s per track, so
+    broadcast paths check occupancy first. Fails open (emit) if the server's
+    room registry can't be read."""
+    try:
+        rooms = socketio.server.manager.rooms.get('/', {})
+        return bool(rooms.get(room))
+    except Exception:
+        return True
+
+
+def _any_room_with_prefix(socketio, prefix: str) -> bool:
+    """True when any occupied room name starts with `prefix`."""
+    try:
+        rooms = socketio.server.manager.rooms.get('/', {})
+        return any(name.startswith(prefix) and sids for name, sids in rooms.items())
+    except Exception:
+        return True
+
+
 class MultiTrackManager:
     """Manages multiple track parsers running concurrently"""
 
@@ -476,19 +497,16 @@ class MultiTrackManager:
                 'provider': getattr(parser, 'provider', 'apex'),
             }
 
-            # Try to get teams count from current standings
+            # Cheap count from grid state — building a pandas DataFrame per
+            # parser per broadcast was the old (expensive) way to get this.
             try:
-                if hasattr(parser, 'get_current_standings'):
-                    standings = parser.get_current_standings()
-                    if standings is not None and not standings.empty:
-                        status['teams_count'] = len(standings)
-                    else:
-                        status['teams_count'] = 0
+                if hasattr(parser, 'get_teams_count'):
+                    status['teams_count'] = parser.get_teams_count()
                 else:
                     status['teams_count'] = 0
             except Exception as e:
                 self.logger.warning(
-                    f"Track {track_id}: failed to read current standings for status: {e}"
+                    f"Track {track_id}: failed to read teams count for status: {e}"
                 )
                 status['teams_count'] = 0
 
@@ -500,6 +518,8 @@ class MultiTrackManager:
         """Broadcast status of all tracks to the all_tracks room"""
         if self.socketio:
             try:
+                if not _room_occupied(self.socketio, 'all_tracks'):
+                    return
                 tracks_status = self.get_all_tracks_status()
                 self.socketio.emit('all_tracks_status', {
                     'tracks': tracks_status,
@@ -1005,27 +1025,33 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                 if self._commit_count % 10 == 0:
                     self.cleanup_old_cache_sessions(keep_last_n=2)
 
-                # Broadcast update to Socket.IO room for this track
+                # Broadcast update to Socket.IO room for this track — but only
+                # when someone is listening. Building + serializing the full
+                # standings ~1×/s for every idle track is wasted CPU once many
+                # tracks are monitored.
                 if self.socketio:
                     try:
-                        # Get current standings
-                        standings_df = self.get_current_standings()
-                        if not standings_df.empty:
-                            teams_data = standings_df.to_dict('records')
+                        room = f'track_{self.track_id}'
+                        track_room_occupied = _room_occupied(self.socketio, room)
+                        team_rooms_occupied = _any_room_with_prefix(
+                            self.socketio, f'team_track_{self.track_id}_')
+                        if track_room_occupied or team_rooms_occupied:
+                            standings_df = self.get_current_standings()
+                            if not standings_df.empty:
+                                if track_room_occupied:
+                                    teams_data = standings_df.to_dict('records')
+                                    self.socketio.emit('track_update', {
+                                        'track_id': self.track_id,
+                                        'track_name': self.track_name,
+                                        'teams': teams_data,
+                                        'session_id': session_id,
+                                        'timestamp': timestamp
+                                    }, room=room)
+                                    self.logger.debug(f"Emitted update to room {room} with {len(teams_data)} teams")
 
-                            # Emit to track-specific room
-                            room = f'track_{self.track_id}'
-                            self.socketio.emit('track_update', {
-                                'track_id': self.track_id,
-                                'track_name': self.track_name,
-                                'teams': teams_data,
-                                'session_id': session_id,
-                                'timestamp': timestamp
-                            }, room=room)
-                            self.logger.debug(f"Emitted update to room {room} with {len(teams_data)} teams")
-
-                            # Emit team-specific updates to individual team rooms
-                            self.emit_team_specific_updates(standings_df, session_id, timestamp)
+                                if team_rooms_occupied:
+                                    # Emit team-specific updates to individual team rooms
+                                    self.emit_team_specific_updates(standings_df, session_id, timestamp)
 
                     except Exception as emit_error:
                         self.logger.error(f"Error emitting Socket.IO update: {emit_error}")
@@ -1057,6 +1083,12 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
             for idx, team in enumerate(teams):
                 team_name = team.get('Team', '')
                 if not team_name:
+                    continue
+
+                # Only build + emit for rooms someone actually joined; with N
+                # teams on track this turns N emits per update into ~0-2.
+                room = f'team_track_{self.track_id}_{team_name}'
+                if not _room_occupied(self.socketio, room):
                     continue
 
                 position_str = team.get('Position', '')
@@ -1091,7 +1123,6 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                     'Status': team.get('Status', 'On Track'),
                 }
 
-                room = f'team_track_{self.track_id}_{team_name}'
                 self.socketio.emit('team_specific_update', team_update, room=room)
 
         except Exception as e:

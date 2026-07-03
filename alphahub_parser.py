@@ -507,6 +507,10 @@ class AlphaHubParser(TrackSpecificParser):
             self.last_sequence = seq
         return changed
 
+    def get_teams_count(self) -> int:
+        """Cheap team count for status broadcasts (no DataFrame build)."""
+        return len(self.competitors)
+
     # ---- DataFrame construction --------------------------------------------------
     def get_current_standings(self) -> pd.DataFrame:
         """Build the same shape Apex's parent produces (sorted by Position).

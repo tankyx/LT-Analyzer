@@ -497,6 +497,12 @@ class ApexTimingWebSocketParser:
         self.session_info['title'] = title
         self.logger.debug(f"Session title: {title}")
         
+    def get_teams_count(self) -> int:
+        """Number of teams currently on the grid, without the DataFrame build
+        of get_current_standings — used by status broadcasts that only need
+        the count."""
+        return sum(1 for row in self.grid_data.values() if row.get('Kart'))
+
     def get_current_standings(self) -> pd.DataFrame:
         """Convert current grid data to DataFrame format compatible with existing code"""
         teams = []
