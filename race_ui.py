@@ -1754,6 +1754,16 @@ def get_db_connection():
     return conn
 
 
+# Session tokens are stored hashed: DB theft must not yield live cookies.
+# SHA-256 without salt is fine — tokens are 256-bit random values, not
+# passwords, so rainbow/brute-force attacks don't apply.
+_SESSION_TOKEN_HASH_RE = re.compile(r'^[0-9a-f]{64}$')
+
+
+def _hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
 def _ensure_auth_schema():
     """Normalize auth.db across versions (legacy 'timestamp' column -> 'attempted_at')
     and create driver_aliases / Phase 1 tables defensively."""
@@ -1896,6 +1906,33 @@ def _ensure_auth_schema():
             prefs_cols = {row[1] for row in conn.execute('PRAGMA table_info(user_track_prefs)').fetchall()}
             if 'stint_assignments' not in prefs_cols:
                 conn.execute('ALTER TABLE user_track_prefs ADD COLUMN stint_assignments TEXT')
+
+            # Indexes for the per-username / per-IP login throttle counts.
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS idx_login_attempts_user_time '
+                'ON login_attempts(username, attempted_at)'
+            )
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS idx_login_attempts_ip_time '
+                'ON login_attempts(ip_address, attempted_at)'
+            )
+
+            # --- One-time migration: hash any plaintext session tokens -------
+            # Raw tokens are 43-char urlsafe strings; hashed ones are 64 hex
+            # chars, so the shape test makes this idempotent. Hashing in place
+            # keeps every live session valid across the deploy.
+            plain = [
+                (row[0], row[1])
+                for row in conn.execute('SELECT id, session_token FROM sessions').fetchall()
+                if row[1] and not _SESSION_TOKEN_HASH_RE.match(row[1])
+            ]
+            for row_id, raw_token in plain:
+                conn.execute(
+                    'UPDATE sessions SET session_token = ? WHERE id = ?',
+                    (_hash_session_token(raw_token), row_id),
+                )
+            if plain:
+                print(f'Migrated {len(plain)} plaintext session tokens to SHA-256')
     except sqlite3.Error as e:
         print(f'Warning: auth schema normalization skipped: {e}')
 
@@ -1903,18 +1940,39 @@ def _ensure_auth_schema():
 _ensure_auth_schema()
 
 SESSION_LIFETIME_HOURS = int(os.environ.get('SESSION_LIFETIME_HOURS', '24'))
+# Newest N live sessions kept per user; older ones are dropped on login so a
+# scripted login loop can't grow the sessions table without bound.
+MAX_SESSIONS_PER_USER = int(os.environ.get('MAX_SESSIONS_PER_USER', '10'))
+
 
 def create_session(user_id):
-    """Create a new session for user"""
+    """Create a new session for user.
+
+    Only the SHA-256 of the token is stored (see _hash_session_token) — a
+    leaked auth.db does not yield usable cookies. Doubling as periodic GC,
+    each login also drops this user's expired rows and trims them to the
+    newest MAX_SESSIONS_PER_USER.
+    """
     session_id = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(hours=SESSION_LIFETIME_HOURS)
 
     with get_db_connection() as conn:
         conn.execute(
+            'DELETE FROM sessions WHERE expires_at <= ?',
+            (datetime.now().isoformat(),),
+        )
+        conn.execute(
             '''INSERT INTO sessions (session_token, user_id, expires_at)
                VALUES (?, ?, ?)''',
-            (session_id, user_id, expires_at.isoformat()),
+            (_hash_session_token(session_id), user_id, expires_at.isoformat()),
         )
+        if MAX_SESSIONS_PER_USER > 0:
+            conn.execute(
+                '''DELETE FROM sessions WHERE user_id = ? AND id NOT IN (
+                       SELECT id FROM sessions WHERE user_id = ?
+                       ORDER BY id DESC LIMIT ?)''',
+                (user_id, user_id, MAX_SESSIONS_PER_USER),
+            )
 
     return session_id
 
@@ -1956,7 +2014,7 @@ def verify_session(session_id):
                FROM sessions s
                JOIN users u ON s.user_id = u.id
                WHERE s.session_token = ? AND s.expires_at > ?''',
-            (session_id, datetime.now().isoformat()),
+            (_hash_session_token(session_id), datetime.now().isoformat()),
         )
         user = cursor.fetchone()
 
@@ -2140,8 +2198,16 @@ def _csrf_guard():
     return None
 
 
+# Per-account (across all IPs) and per-IP (across all accounts) failure caps.
+# The joint (username, ip) key alone is bypassable by rotating source IPs.
+LOGIN_USERNAME_MAX_ATTEMPTS = int(os.environ.get('LOGIN_USERNAME_MAX_ATTEMPTS', '10'))
+LOGIN_IP_MAX_ATTEMPTS = int(os.environ.get('LOGIN_IP_MAX_ATTEMPTS', '30'))
+
+
 def _is_rate_limited(username: str, ip_address: str) -> bool:
-    """Return True if (username, ip) has too many recent failed logins."""
+    """True when recent failed logins exceed any of three thresholds:
+    the joint (username, ip) pair, the username across all IPs (distributed
+    brute force on one account), or the IP across all usernames (spraying)."""
     if LOGIN_MAX_ATTEMPTS <= 0:
         return False
     # SQLite's CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" (space separator,
@@ -2155,8 +2221,25 @@ def _is_rate_limited(username: str, ip_address: str) -> bool:
                  AND attempted_at > ?''',
             (username, ip_address, cutoff),
         )
-        failures = cursor.fetchone()[0]
-    return failures >= LOGIN_MAX_ATTEMPTS
+        if cursor.fetchone()[0] >= LOGIN_MAX_ATTEMPTS:
+            return True
+        if LOGIN_USERNAME_MAX_ATTEMPTS > 0:
+            cursor.execute(
+                '''SELECT COUNT(*) FROM login_attempts
+                   WHERE username = ? AND success = 0 AND attempted_at > ?''',
+                (username, cutoff),
+            )
+            if cursor.fetchone()[0] >= LOGIN_USERNAME_MAX_ATTEMPTS:
+                return True
+        if LOGIN_IP_MAX_ATTEMPTS > 0:
+            cursor.execute(
+                '''SELECT COUNT(*) FROM login_attempts
+                   WHERE ip_address = ? AND success = 0 AND attempted_at > ?''',
+                (ip_address, cutoff),
+            )
+            if cursor.fetchone()[0] >= LOGIN_IP_MAX_ATTEMPTS:
+                return True
+    return False
 
 
 

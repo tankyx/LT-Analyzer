@@ -134,8 +134,9 @@ def logout():
         with race_ui.get_db_connection() as conn:
             # The token lives in session_token, not id (which is an autoincrement PK).
             # The pre-fix version of this handler matched on id and therefore never
-            # actually deleted any session row.
-            conn.execute('DELETE FROM sessions WHERE session_token = ?', (session_id,))
+            # actually deleted any session row. Tokens are stored hashed.
+            conn.execute('DELETE FROM sessions WHERE session_token = ?',
+                         (race_ui._hash_session_token(session_id),))
         race_ui._session_cache_invalidate(session_id)
         session.clear()
 
