@@ -15,6 +15,13 @@ import {
   writeCache,
   clearCache,
 } from '@/app/services/UserPrefsService';
+import { invalidateCsrfToken } from '@/app/services/csrfToken';
+
+// The CSRF token is cached at module scope; start every test cold so each
+// test's fetch mock controls the token it sees.
+beforeEach(() => {
+  invalidateCsrfToken();
+});
 
 describe('UserPrefsService.getPrefs', () => {
   beforeEach(() => {

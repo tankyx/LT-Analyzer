@@ -17,6 +17,7 @@
 jest.mock('@/utils/config', () => ({ API_BASE_URL: 'http://api.test' }));
 
 import { ApiService } from '@/app/services/ApiService';
+import { invalidateCsrfToken } from '@/app/services/csrfToken';
 
 type FetchMock = jest.Mock & { mock: { calls: any[][] } };
 
@@ -34,6 +35,8 @@ function findCallByUrl(suffix: string) {
 
 beforeEach(() => {
   (global.fetch as unknown) = jest.fn();
+  // The token is cached at module scope; each test starts cold.
+  invalidateCsrfToken();
 });
 
 describe('ApiService CSRF-protected mutations', () => {
@@ -90,6 +93,37 @@ describe('ApiService CSRF-protected mutations', () => {
       // backend can mis-parse).
       expect(call![1].body).toBeUndefined();
     }
+  });
+
+  test('token is cached — two mutations share one preflight', async () => {
+    (global.fetch as FetchMock)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'csrf-test-token' }) })
+      .mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    await ApiService.updateMonitoring({ myTeam: 'A', monitoredTeams: [] });
+    await ApiService.resetRaceData();
+    const csrfCalls = (global.fetch as FetchMock).mock.calls.filter(
+      c => String(c[0]).endsWith('/api/auth/csrf'),
+    );
+    expect(csrfCalls).toHaveLength(1);
+    // Both mutations carried the cached token.
+    expect(findCallByUrl('/api/update-monitoring')![1].headers['X-CSRF-Token']).toBe('csrf-test-token');
+    expect(findCallByUrl('/api/reset-race-data')![1].headers['X-CSRF-Token']).toBe('csrf-test-token');
+  });
+
+  test('invalidateCsrfToken forces a fresh preflight (login rotation)', async () => {
+    (global.fetch as FetchMock)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'token-1' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'token-2' }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+    await ApiService.resetRaceData();
+    invalidateCsrfToken(); // AuthContext does this on login/logout
+    await ApiService.resetRaceData();
+    const posts = (global.fetch as FetchMock).mock.calls.filter(
+      c => String(c[0]).endsWith('/api/reset-race-data'),
+    );
+    expect(posts[0][1].headers['X-CSRF-Token']).toBe('token-1');
+    expect(posts[1][1].headers['X-CSRF-Token']).toBe('token-2');
   });
 
   test('a CSRF preflight failure does not throw — request still attempts', async () => {

@@ -6,6 +6,7 @@
  */
 
 import { API_BASE_URL } from '../../utils/config';
+import { getCsrfHeaders } from './csrfToken';
 
 export interface UserTrackPrefs {
   track_id: number;
@@ -86,15 +87,9 @@ export function setLastSeenUpdatedAt(trackId: number, updatedAt: string | null):
   if (updatedAt) lastSeenUpdatedAt.set(trackId, updatedAt);
 }
 
-async function csrfHeaders(): Promise<Record<string, string>> {
-  // The CSRF token endpoint is anonymous (GET); we always have a token in
-  // session (issued on first request after page load). Fetch fresh each call —
-  // cheap and avoids stale-token races after server-side rotation on login.
-  const resp = await fetch(`${API_BASE_URL}/api/auth/csrf`, { credentials: 'include' });
-  if (!resp.ok) return {};
-  const data = await resp.json().catch(() => ({}));
-  return data?.csrfToken ? { 'X-CSRF-Token': data.csrfToken } : {};
-}
+// Shared cached token — the token only rotates on login, and AuthContext
+// invalidates the cache there; no need for a network roundtrip per mutation.
+const csrfHeaders = getCsrfHeaders;
 
 export async function getPrefs(trackId: number): Promise<UserTrackPrefs> {
   const resp = await fetch(`${API_BASE_URL}/api/me/prefs/${trackId}`, {

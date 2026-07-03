@@ -268,13 +268,34 @@ class WebSocketService {
       reconnectionAttempts: this.maxReconnectAttempts,
       reconnectionDelay: this.reconnectDelay,
       reconnectionDelayMax: this.maxReconnectDelay,
-      transports: ['polling', 'websocket'], // Start with polling, upgrade to websocket
+      // Websocket-only: HTTP long-polling multiplied request load on the
+      // single backend process (every message = an HTTP roundtrip per
+      // client). nginx proxies /socket.io/ with Upgrade headers.
+      transports: ['websocket'],
       path: '/socket.io/',
-      withCredentials: false,
+      // The backend requires a logged-in session on the socket handshake;
+      // send cookies even when the API origin differs (dev: :3000 -> :5000).
+      withCredentials: true,
       timeout: 20000, // 20 second timeout
     });
 
     this.setupEventListeners();
+  }
+
+  /**
+   * Tear down and re-establish the connection. Called after login/logout so
+   * the new session cookie is presented on the handshake (the server rejects
+   * unauthenticated sockets, so a pre-login connection attempt has failed or
+   * carries no user binding).
+   */
+  reconnect(): void {
+    if (this.socket) {
+      this.socket.removeAllListeners();
+      this.socket.disconnect();
+      this.socket = null;
+    }
+    this.reconnectAttempts = 0;
+    this.connect();
   }
 
   private setupEventListeners(): void {

@@ -1,6 +1,7 @@
 // racing-analyzer/app/services/ApiService.ts
 
 import { API_BASE_URL } from '../../utils/config';
+import { getCsrfHeaders } from './csrfToken';
 
 export const ApiService = {
   // Get race data
@@ -965,13 +966,5 @@ export const ApiService = {
     }
   },
 };
-
-// CSRF header helper for Fleet Tracker mutations (mirrors UserPrefsService).
-async function getCsrfHeaders(): Promise<Record<string, string>> {
-  const resp = await fetch(`${API_BASE_URL}/api/auth/csrf`, { credentials: 'include' });
-  if (!resp.ok) return {};
-  const data = await resp.json().catch(() => ({}));
-  return data?.csrfToken ? { 'X-CSRF-Token': data.csrfToken } : {};
-}
 
 export default ApiService;

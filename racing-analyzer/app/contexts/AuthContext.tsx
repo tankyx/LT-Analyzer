@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode 
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL } from '../../utils/config';
 import webSocketService from '../services/WebSocketService';
+import { invalidateCsrfToken } from '../services/csrfToken';
 
 interface User {
   id: number;
@@ -109,8 +110,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (response.ok && data.success) {
           setUser(data.user);
           localStorage.setItem('user', JSON.stringify(data.user));
+          // Token rotated server-side on login; drop both caches.
+          invalidateCsrfToken();
           await fetchCsrf();
           await checkAuth();
+          // The socket handshake requires the (new) session cookie — a
+          // pre-login connection attempt was rejected by the server.
+          webSocketService.reconnect();
           return { ok: true, user: data.user };
         }
         if (response.status === 401 && data.error === 'email_not_verified') {
@@ -140,7 +146,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       localStorage.removeItem('user');
       // Force a new CSRF token for the next anonymous session.
+      invalidateCsrfToken();
       await fetchCsrf();
+      // Drop the authenticated socket; the server rejects anonymous
+      // reconnects until the next login.
+      webSocketService.disconnect();
       router.push('/login');
     }
   }, [apiFetch, fetchCsrf, router]);

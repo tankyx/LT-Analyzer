@@ -358,6 +358,135 @@ const PitAlertButton = ({ kartNum, teamName, trackId, onTriggerAlert }: {
 
 
 
+// Gate for live /fleet/state polling. Exported for unit tests.
+// Hidden browser tabs never poll; users without a fleet only poll while the
+// Fleet tab is open; users WITH a fleet poll in the background so the
+// "fast kart in the pits" alerts still fire from other tabs.
+export const shouldPollFleet = (
+  visibilityState: DocumentVisibilityState | undefined,
+  activeTab: string,
+  registrySize: number,
+): boolean => {
+  if (visibilityState === 'hidden') return false;
+  return activeTab === 'fleet' || registrySize > 0;
+};
+
+const getTeamClass = (teamName: string): string | null => {
+  if (teamName.startsWith('1 - ')) return '1';
+  if (teamName.startsWith('2 - ')) return '2';
+  return null; // No class prefix - could consider this as a default class if needed
+};
+
+interface StandingsRowProps {
+  team: Team;
+  isDarkMode: boolean;
+  isMyTeam: boolean;
+  isMonitored: boolean;
+  teamColor: string | undefined;
+  isUpdated: boolean;
+  selectedTrackId: number;
+  onToggleMonitor: (kartNum: string) => void;
+  onTriggerAlert: (kartNum: string, teamName: string, trackId: number) => Promise<void>;
+}
+
+// Memoized standings row: the teams array is rebuilt on every ~1s update, so
+// a custom comparator on the displayed fields keeps unchanged rows from
+// re-rendering with each broadcast.
+const StandingsRow = React.memo(function StandingsRow({
+  team, isDarkMode, isMyTeam, isMonitored, teamColor, isUpdated,
+  selectedTrackId, onToggleMonitor, onTriggerAlert,
+}: StandingsRowProps) {
+  return (
+    <tr
+      id={`team-${team.Kart}`}
+      className={`
+        transition-colors
+        ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}
+        ${isMyTeam ? (isDarkMode ? 'bg-blue-900 hover:bg-blue-800' : 'bg-blue-50 hover:bg-blue-100') : ''}
+        ${team.Status === 'Pit-in' ? (isDarkMode ? 'bg-red-900/40 hover:bg-red-800/40' : 'bg-red-50 hover:bg-red-100') : ''}
+        ${isMonitored && team.Status === 'Pit-in' ? 'pit-alert' : ''}
+        ${isUpdated ? 'row-updated' : ''}
+      `}
+      style={isMonitored ? {
+        borderLeft: `4px solid ${teamColor || 'transparent'}`
+      } : {}}
+    >
+      <td className="px-4 py-3">
+        <div className={`font-medium text-center rounded-full w-8 h-8 flex items-center justify-center ${parseInt(team.Position) <= 3 ? (isDarkMode ? 'bg-yellow-700 text-yellow-100' : 'bg-yellow-100 text-yellow-800') : (isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-800')}`}>
+          {team.Position}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex flex-col">
+          <div className="font-medium truncate max-w-[200px] flex items-center">
+            {isMonitored && (
+              <div
+                className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
+                style={{ backgroundColor: teamColor || 'transparent' }}
+              ></div>
+            )}
+            {team.Team}
+
+            {/* Add class badge if we can determine the class */}
+            {getTeamClass(team.Team) && (
+              <span
+                className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
+                  getTeamClass(team.Team) === '1'
+                    ? (isDarkMode ? 'bg-purple-900 text-purple-100' : 'bg-purple-100 text-purple-800')
+                    : (isDarkMode ? 'bg-green-900 text-green-100' : 'bg-green-100 text-green-800')
+                }`}
+              >
+                Class {getTeamClass(team.Team)}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Kart #{team.Kart}</span>
+            {team.Status !== undefined && <StatusImageIndicator status={team.Status} size="sm" />}
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3">{team['Last Lap']}</td>
+      <td className="px-4 py-3">{team['Best Lap']}</td>
+      <td className="px-4 py-3 text-right">{team.Gap}</td>
+      <td className="px-4 py-3 text-center">
+        <StarIcon
+          filled={isMonitored}
+          onClick={() => onToggleMonitor(team.Kart)}
+        />
+        {isMonitored &&
+         team.Status !== 'Pit-in' &&
+         team.Status !== 'Finished' &&
+         team.Status !== 'DNF' &&
+         team.Status !== 'DSQ' && (
+          <PitAlertButton
+            kartNum={team.Kart}
+            teamName={team.Team}
+            trackId={selectedTrackId}
+            onTriggerAlert={onTriggerAlert}
+          />
+        )}
+      </td>
+    </tr>
+  );
+}, (prev, next) => (
+  prev.team.Position === next.team.Position &&
+  prev.team.Team === next.team.Team &&
+  prev.team.Kart === next.team.Kart &&
+  prev.team.Status === next.team.Status &&
+  prev.team['Last Lap'] === next.team['Last Lap'] &&
+  prev.team['Best Lap'] === next.team['Best Lap'] &&
+  prev.team.Gap === next.team.Gap &&
+  prev.isDarkMode === next.isDarkMode &&
+  prev.isMyTeam === next.isMyTeam &&
+  prev.isMonitored === next.isMonitored &&
+  prev.teamColor === next.teamColor &&
+  prev.isUpdated === next.isUpdated &&
+  prev.selectedTrackId === next.selectedTrackId &&
+  prev.onToggleMonitor === next.onToggleMonitor &&
+  prev.onTriggerAlert === next.onTriggerAlert
+));
+
 const RaceDashboard = () => {
   const { user, logout, apiFetch } = useAuth();
   const router = useRouter();
@@ -452,12 +581,6 @@ const RaceDashboard = () => {
     }
   }, [selectedTrackId, apiFetch]);
 
-  const getTeamClass = (teamName: string): string | null => {
-    if (teamName.startsWith('1 - ')) return '1';
-    if (teamName.startsWith('2 - ')) return '2';
-    return null; // No class prefix - could consider this as a default class if needed
-  };
-
   const filteredTeams = useMemo(() => {
     if (selectedClass === 'all') return teams;
     
@@ -466,6 +589,12 @@ const RaceDashboard = () => {
       return teamClass === selectedClass;
     });
   }, [teams, selectedClass]);
+
+  // Sort once per data/filter change, not on every render inside the JSX.
+  const sortedTeams = useMemo(
+    () => [...filteredTeams].sort((a, b) => parseInt(a.Position) - parseInt(b.Position)),
+    [filteredTeams],
+  );
 
   const teamCounts = useMemo(() => {
     const counts = {
@@ -648,8 +777,14 @@ const RaceDashboard = () => {
 
   // Fleet data is per-user, so there's no shared broadcast — each client pulls
   // its own board from /fleet/state. Throttle live refetches so a fast feed
-  // doesn't hammer the endpoint.
+  // doesn't hammer the endpoint, and skip polling entirely unless the user
+  // actually uses the Fleet Tracker: hidden browser tabs never poll, and a
+  // user with no fleet configured only polls while the Fleet tab is open.
+  // (Users WITH a fleet keep polling in the background so the "fast kart in
+  // the pits" alerts still fire while they watch another tab.)
   const lastFleetFetchRef = useRef(0);
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   const refreshFleetState = useCallback(async () => {
     if (!selectedTrackId) return;
     try {
@@ -663,11 +798,23 @@ const RaceDashboard = () => {
   }, [selectedTrackId, checkFleetPitAlerts]);
 
   const refreshFleetThrottled = useCallback(() => {
+    const visibility = typeof document !== 'undefined' ? document.visibilityState : undefined;
+    if (!shouldPollFleet(visibility, activeTabRef.current, fleetRegistryRef.current.length)) return;
     const now = Date.now();
     if (now - lastFleetFetchRef.current < 3000) return;
     lastFleetFetchRef.current = now;
     refreshFleetState();
   }, [refreshFleetState]);
+
+  // Opening the Fleet tab refreshes the board immediately (the gate above
+  // may have kept it stale while the tab was closed).
+  useEffect(() => {
+    if (activeTab === 'fleet' && selectedTrackId) {
+      lastFleetFetchRef.current = Date.now();
+      refreshFleetState();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, selectedTrackId]);
 
   // Re-fetch the user's fleet registry (after CRUD/auto-populate or track
   // change) and the board so a new roster shows immediately.
@@ -723,21 +870,23 @@ const RaceDashboard = () => {
       if (newTeams && currentTeams.length > 0) {
         const currentTime = Date.now();
         const newUpdatedRows = new Map(currentUpdatedRows);
-        
+
+        // Map lookup instead of a find() per team — the old O(teams²) scan
+        // ran on every ~1s update.
+        const oldByKart = new Map(currentTeams.map(t => [t.Kart, t]));
         newTeams.forEach((newTeam: Team) => {
-          const oldTeam = currentTeams.find(t => t.Kart === newTeam.Kart);
+          const oldTeam = oldByKart.get(newTeam.Kart);
           if (oldTeam) {
             // Check if any critical fields have changed
-            const hasChanged = 
+            const hasChanged =
               oldTeam.Position !== newTeam.Position ||
               oldTeam['Last Lap'] !== newTeam['Last Lap'] ||
               oldTeam['Best Lap'] !== newTeam['Best Lap'] ||
               oldTeam.Gap !== newTeam.Gap ||
               oldTeam['Pit Stops'] !== newTeam['Pit Stops'] ||
               oldTeam.Status !== newTeam.Status;
-            
+
             if (hasChanged) {
-              console.log(`Row updated: Kart ${newTeam.Kart} - Position: ${oldTeam.Position} -> ${newTeam.Position}, Last Lap: ${oldTeam['Last Lap']} -> ${newTeam['Last Lap']}`);
               newUpdatedRows.set(newTeam.Kart, currentTime);
             }
           }
@@ -1021,14 +1170,15 @@ const RaceDashboard = () => {
     return unsubscribe;
   }, [selectedTrackId]);
 
-  const toggleTeamMonitoring = (kartNum: string) => {
+  // Stable identity so memoized StandingsRow props don't churn per render.
+  const toggleTeamMonitoring = useCallback((kartNum: string) => {
     setIsUserUpdate(true);
-    setMonitoredTeams(prev => 
+    setMonitoredTeams(prev =>
       prev.includes(kartNum)
         ? prev.filter(k => k !== kartNum)
         : [...prev, kartNum]
     );
-  };
+  }, []);
 
   const dismissAlert = (id: number) => {
     setAlerts(prev => prev.filter(alert => alert.id !== id));
@@ -1072,81 +1222,19 @@ const RaceDashboard = () => {
         <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
           {/* Use filteredTeams instead of teams */}
           {filteredTeams.length > 0 ? (
-            [...filteredTeams]
-              .sort((a, b) => parseInt(a.Position) - parseInt(b.Position))
-              .map(team => (
-                <tr 
-                  id={`team-${team.Kart}`}
-                  key={team.Kart} 
-                  className={`
-                    transition-colors
-                    ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'} 
-                    ${team.Kart === myTeam ? (isDarkMode ? 'bg-blue-900 hover:bg-blue-800' : 'bg-blue-50 hover:bg-blue-100') : ''}
-                    ${team.Status === 'Pit-in' ? (isDarkMode ? 'bg-red-900/40 hover:bg-red-800/40' : 'bg-red-50 hover:bg-red-100') : ''}
-                    ${monitoredTeams.includes(team.Kart) && team.Status === 'Pit-in' ? 'pit-alert' : ''}
-                    ${updatedRows.has(team.Kart) ? 'row-updated' : ''}
-                  `}
-                  style={monitoredTeams.includes(team.Kart) ? { 
-                    borderLeft: `4px solid ${teamColors[team.Kart] || 'transparent'}`
-                  } : {}}
-                >
-                  <td className="px-4 py-3">
-                    <div className={`font-medium text-center rounded-full w-8 h-8 flex items-center justify-center ${parseInt(team.Position) <= 3 ? (isDarkMode ? 'bg-yellow-700 text-yellow-100' : 'bg-yellow-100 text-yellow-800') : (isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-800')}`}>
-                      {team.Position}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-col">
-                      <div className="font-medium truncate max-w-[200px] flex items-center">
-                        {monitoredTeams.includes(team.Kart) && (
-                          <div 
-                            className="w-3 h-3 rounded-full mr-2 flex-shrink-0" 
-                            style={{ backgroundColor: teamColors[team.Kart] || 'transparent' }}
-                          ></div>
-                        )}
-                        {team.Team}
-                        
-                        {/* Add class badge if we can determine the class */}
-                        {getTeamClass(team.Team) && (
-                          <span 
-                            className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-                              getTeamClass(team.Team) === '1' 
-                                ? (isDarkMode ? 'bg-purple-900 text-purple-100' : 'bg-purple-100 text-purple-800')
-                                : (isDarkMode ? 'bg-green-900 text-green-100' : 'bg-green-100 text-green-800')
-                            }`}
-                          >
-                            Class {getTeamClass(team.Team)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Kart #{team.Kart}</span>
-                        {team.Status !== undefined && <StatusImageIndicator status={team.Status} size="sm" />}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">{team['Last Lap']}</td>
-                  <td className="px-4 py-3">{team['Best Lap']}</td>
-                  <td className="px-4 py-3 text-right">{team.Gap}</td>
-                  <td className="px-4 py-3 text-center">
-                    <StarIcon 
-                      filled={monitoredTeams.includes(team.Kart)} 
-                      onClick={() => toggleTeamMonitoring(team.Kart)}
-                    />
-                    {monitoredTeams.includes(team.Kart) && 
-                     team.Status !== 'Pit-in' && 
-                     team.Status !== 'Finished' && 
-                     team.Status !== 'DNF' && 
-                     team.Status !== 'DSQ' && (
-                      <PitAlertButton 
-                        kartNum={team.Kart}
-                        teamName={team.Team}
-                        trackId={selectedTrackId}
-                        onTriggerAlert={triggerPitAlert}
-                      />
-                    )}
-                  </td>
-                </tr>
+            sortedTeams.map(team => (
+                <StandingsRow
+                  key={team.Kart}
+                  team={team}
+                  isDarkMode={isDarkMode}
+                  isMyTeam={team.Kart === myTeam}
+                  isMonitored={monitoredTeams.includes(team.Kart)}
+                  teamColor={teamColors[team.Kart]}
+                  isUpdated={updatedRows.has(team.Kart)}
+                  selectedTrackId={selectedTrackId}
+                  onToggleMonitor={toggleTeamMonitoring}
+                  onTriggerAlert={triggerPitAlert}
+                />
               ))
           ) : (
             <tr className={`${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>

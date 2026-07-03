@@ -522,4 +522,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   );
 };
 
-export default TimeDeltaChart;
+// Memoized: the dashboard re-renders ~1×/s on every track_update; without
+// memo the whole recharts tree re-rendered even when this chart's props
+// hadn't changed.
+export default React.memo(TimeDeltaChart);
