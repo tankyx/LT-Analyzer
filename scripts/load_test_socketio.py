@@ -29,10 +29,12 @@ Usage:
 """
 
 import argparse
+import json
 import statistics
 import sys
 import threading
 import time
+from datetime import datetime
 
 try:
     import websocket
@@ -42,15 +44,18 @@ except ImportError:
 
 class Stats:
     def __init__(self):
-        self.intervals = []
+        self.intervals = []    # per-client gap between consecutive updates
+        self.staleness = []    # receive time - payload timestamp (same host clock)
         self.lock = threading.Lock()
         self.connected = 0
         self.rejected = 0
         self.errors = 0
 
-    def record(self, dt: float):
+    def record(self, dt: float, stale: float | None):
         with self.lock:
             self.intervals.append(dt)
+            if stale is not None:
+                self.staleness.append(stale)
 
 
 def run_client(idx: int, args, stats: Stats, stop: threading.Event):
@@ -95,8 +100,15 @@ def run_client(idx: int, args, stats: Stats, stop: threading.Event):
                 ws.send('3')
             elif frame.startswith('42["track_update"'):
                 now = time.monotonic()
+                stale = None
+                try:
+                    payload = json.loads(frame[2:])[1]
+                    ts = datetime.fromisoformat(payload['timestamp'])
+                    stale = time.time() - ts.timestamp()
+                except Exception:
+                    pass
                 if last_update is not None:
-                    stats.record(now - last_update)
+                    stats.record(now - last_update, stale)
                 last_update = now
     finally:
         try:
@@ -134,12 +146,20 @@ def main():
     if not stats.intervals:
         print('NO track_update received — is a session active on this track?')
         return
-    xs = sorted(stats.intervals)
-    p = lambda q: xs[min(len(xs) - 1, int(q * len(xs)))]
-    print(f'track_update inter-arrival over {len(xs)} samples across all clients:')
-    print(f'  p50={statistics.median(xs):.3f}s  p95={p(0.95):.3f}s  '
-          f'p99={p(0.99):.3f}s  max={xs[-1]:.3f}s')
-    print('target: p95 < 2s')
+
+    def report(label, values, target):
+        xs = sorted(values)
+        p = lambda q: xs[min(len(xs) - 1, int(q * len(xs)))]
+        print(f'{label} over {len(xs)} samples:')
+        print(f'  p50={statistics.median(xs):.3f}s  p95={p(0.95):.3f}s  '
+              f'p99={p(0.99):.3f}s  max={xs[-1]:.3f}s   {target}')
+
+    # Inter-arrival mostly reflects the upstream feed cadence (Apex only
+    # pushes on lap events); delivery staleness is the server-health metric.
+    report('track_update inter-arrival', stats.intervals, '(feed cadence, informational)')
+    if stats.staleness:
+        report('delivery staleness (recv - emit timestamp)', stats.staleness,
+               'target: p95 < 2s')
 
 
 if __name__ == '__main__':
