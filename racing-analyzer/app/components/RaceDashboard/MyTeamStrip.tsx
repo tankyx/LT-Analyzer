@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Bell, ChevronDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bell, ChevronDown, X } from 'lucide-react';
 import StatusPill from './StatusPill';
 import { displayTeamName } from './lib/teamName';
 import { calculateTrend, headToHeadGap, parseTimeToSeconds } from '../../../utils/raceMath';
@@ -144,7 +144,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
         onSelectMyTeam(e.target.value);
         setPicking(false);
       }}
-      className="h-11 md:h-10 w-full md:w-auto md:min-w-[280px] px-3 rounded-lg border border-line bg-canvas text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent/50"
+      className="h-11 md:h-10 w-full md:w-auto md:min-w-[280px] min-w-0 px-3 rounded-lg border border-line bg-canvas text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent/50"
     >
       <option value="">Choose your team…</option>
       {sortedTeams.map((t) => (
@@ -192,17 +192,31 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
           {position}
         </div>
         <div className="flex flex-col gap-1 min-w-0 flex-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[15px] md:text-[17px] font-bold truncate">{displayTeamName(me.Team)}</span>
+          {picking ? (
+            <div className="flex items-center gap-2 min-w-0">
+              {picker}
+              <button
+                type="button"
+                onClick={() => setPicking(false)}
+                aria-label="Cancel team change"
+                className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ) : (
             <button
               type="button"
-              onClick={() => setPicking((p) => !p)}
+              onClick={() => setPicking(true)}
               aria-label="Change my team"
-              className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+              title="Change my team"
+              className="group flex items-center gap-1.5 min-w-0 max-w-full -ml-1 pl-1 pr-2 h-8 rounded-md text-left hover:bg-surface-2"
             >
-              <ChevronDown size={16} />
+              <span className="text-[15px] md:text-[17px] font-bold truncate">{displayTeamName(me.Team)}</span>
+              <ChevronDown size={16} className="shrink-0 text-muted group-hover:text-ink" />
+              <span className="hidden md:inline shrink-0 text-xs font-semibold text-muted group-hover:text-ink">Change</span>
             </button>
-          </div>
+          )}
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="font-mono tabular text-xs text-muted">#{me.Kart}</span>
             <StatusPill status={me.Status} />
@@ -308,7 +322,6 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
         />
       </div>
 
-      {picking && <div className="md:self-start">{picker}</div>}
     </section>
   );
 };

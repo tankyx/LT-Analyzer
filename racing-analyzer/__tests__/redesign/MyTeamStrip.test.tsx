@@ -96,4 +96,20 @@ describe('MyTeamStrip', () => {
     );
     expect(screen.queryByTitle('Send PIT NOW alert to the driver overlay')).toBeNull();
   });
+
+  test('the team name is the change control: opens the picker in place, can be cancelled or used', async () => {
+    const onSelect = jest.fn();
+    render(
+      <MyTeamStrip teams={field} myTeam="14" onSelectMyTeam={onSelect} isQualificationMode={false} requiredPitStops={5} />,
+    );
+    expect(screen.queryByLabelText('Choose your team')).toBeNull();
+    await userEvent.click(screen.getByLabelText('Change my team'));
+    expect(screen.getByLabelText('Choose your team')).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText('Cancel team change'));
+    expect(screen.queryByLabelText('Choose your team')).toBeNull();
+    await userEvent.click(screen.getByLabelText('Change my team'));
+    await userEvent.selectOptions(screen.getByLabelText('Choose your team'), '21');
+    expect(onSelect).toHaveBeenCalledWith('21');
+    expect(screen.queryByLabelText('Choose your team')).toBeNull();
+  });
 });
