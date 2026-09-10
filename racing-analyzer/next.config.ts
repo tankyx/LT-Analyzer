@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Let a local dev/preview server build into its own folder so it never
+  // overwrites the production `.next` that pm2 is serving from.
+  // Usage: NEXT_DIST_DIR=.next-dev npx next dev -p 3001
+  distDir: process.env.NEXT_DIST_DIR || '.next',
+
   // Don't ship `.js.map` files to browsers in production. Default in older
   // Next was off; newer 15.x emits them unless explicitly disabled. Source
   // maps let anyone reconstruct our original TS source from the minified

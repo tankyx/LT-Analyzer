@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 
-interface TabProps {
+export interface TabProps {
   id: string;
   label: string;
   icon?: React.ReactNode;
@@ -12,15 +11,21 @@ interface TabbedInterfaceProps {
   tabs: TabProps[];
   defaultTab?: string;
   children: React.ReactNode[];
+  /** Kept for call-site compatibility; theming now comes from CSS tokens. */
   isDarkMode?: boolean;
   onTabChange?: (tabId: string) => void;
 }
 
+/**
+ * Tabs with two navigations for one state: a segmented bar above the content
+ * on desktop, and a fixed bottom tab bar (thumb reach, 44px+ targets) on
+ * phones. Panels stay mounted and are hidden, so charts and planners keep
+ * their state when the user switches away.
+ */
 const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
   tabs,
   defaultTab,
   children,
-  isDarkMode = false,
   onTabChange,
 }) => {
   const [activeTab, setActiveTab] = useState<string>(defaultTab || tabs[0]?.id || '');
@@ -31,60 +36,79 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
   };
 
   return (
-    <div className="rounded-lg shadow overflow-hidden">
-      {/* Tab Navigation — horizontally scrollable so all tabs are reachable on mobile */}
-      <div className={`flex border-b overflow-x-auto ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => handleTabChange(tab.id)}
-            className={`
-              flex items-center gap-2 px-4 py-3 transition-colors font-medium flex-shrink-0 whitespace-nowrap
-              ${activeTab === tab.id 
-                ? (isDarkMode 
-                    ? 'text-white border-b-2 border-blue-500' 
-                    : 'text-blue-600 border-b-2 border-blue-500') 
-                : (isDarkMode 
-                    ? 'text-gray-300 hover:text-gray-100' 
-                    : 'text-gray-600 hover:text-gray-900')
-              }
-            `}
-          >
-            {tab.icon}
-            {tab.label}
-            {tab.count !== undefined && (
-              <span className={`
-                ml-1 px-2 py-0.5 text-xs rounded-full 
-                ${activeTab === tab.id 
-                  ? (isDarkMode ? 'bg-blue-700 text-white' : 'bg-blue-100 text-blue-800') 
-                  : (isDarkMode ? 'bg-gray-600 text-gray-200' : 'bg-gray-200 text-gray-700')
-                }
-              `}>
-                {tab.count}
-              </span>
-            )}
-          </button>
-        ))}
+    <div className="flex flex-col gap-3">
+      {/* Desktop: segmented tab bar */}
+      <div role="tablist" aria-label="Dashboard sections" className="hidden md:flex items-center gap-1.5">
+        {tabs.map((tab) => {
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              role="tab"
+              aria-selected={active}
+              onClick={() => handleTabChange(tab.id)}
+              className={`flex items-center gap-2 h-10 px-3.5 rounded-lg text-sm font-semibold border transition-colors ${
+                active
+                  ? 'bg-surface-2 text-ink border-line'
+                  : 'text-muted border-transparent hover:text-ink hover:bg-surface'
+              }`}
+            >
+              {tab.icon}
+              {tab.label}
+              {tab.count !== undefined && (
+                <span
+                  className={`font-mono tabular text-[11px] px-1.5 py-px rounded-full ${
+                    active ? 'bg-accent text-accent-ink' : 'bg-line text-muted'
+                  }`}
+                >
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Tab Content */}
-      <div className={`transition-colors ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
-        {children.map((child, index) => (
-          <div 
-            key={tabs[index]?.id || index}
-            className={activeTab === tabs[index]?.id ? 'block' : 'hidden'}
-          >
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            >
+      {/* Panels */}
+      <div>
+        {children.map((child, index) => {
+          const tab = tabs[index];
+          if (!tab) return null;
+          return (
+            <div key={tab.id} role="tabpanel" hidden={activeTab !== tab.id}>
               {child}
-            </motion.div>
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
+
+      {/* Phone: fixed bottom tab bar */}
+      <nav
+        aria-label="Dashboard sections"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 flex items-stretch border-t border-line bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
+      >
+        {tabs.map((tab) => {
+          const active = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => handleTabChange(tab.id)}
+              aria-current={active ? 'page' : undefined}
+              className={`relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 text-[11px] font-semibold ${
+                active ? 'text-accent' : 'text-muted'
+              }`}
+            >
+              {tab.icon}
+              <span className="truncate max-w-full px-1">{tab.label}</span>
+              {tab.count !== undefined && tab.count > 0 && (
+                <span className="absolute top-1.5 right-[calc(50%-22px)] font-mono tabular text-[10px] leading-none px-1 py-0.5 rounded-full bg-line text-muted">
+                  {tab.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 };

@@ -4,12 +4,19 @@ import TimeDeltaChart from './TimeDeltaChart';
 import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
 import webSocketService, { RaceDataUpdate, TeamsUpdate, SessionUpdate, AllTracksStatusUpdate, TrackStatus, FleetKartState } from '../../services/WebSocketService';
-import StatusImageIndicator from './StatusImageIndicator';
+import StatusPill from './StatusPill';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
 import StintPlanner from './StintPlanner';
 import AdminPanel from './AdminPanel';
-import MultiTrackStatus from './MultiTrackStatus';
+import AppBar from './AppBar';
+import TrackRail, { RailTrack } from './TrackRail';
+import MyTeamStrip from './MyTeamStrip';
+import AlertStack from './AlertStack';
+import StandingsRow, { STANDINGS_GRID, PitAlertButton } from './StandingsRow';
+import { getTeamClass, displayTeamName } from './lib/teamName';
+import { useTheme } from '../../contexts/ThemeContext';
+import { AlertTriangle, Car, Clock, Eye, Info, LineChart, List, Settings, Star, X } from 'lucide-react';
 import FleetTracker, { FleetKart } from './FleetTracker';
 import KartAssignmentEntry from './KartAssignmentEntry';
 import { useAuth } from '../../contexts/AuthContext';
@@ -303,61 +310,6 @@ const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: st
   return deltas;
 };
 
-// Star icon component with improved hover effect
-const StarIcon = ({ filled, onClick }: { filled: boolean; onClick?: () => void }) => (
-  <button 
-    onClick={onClick}
-    className={`transition-all duration-200 ease-in-out transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-300 rounded-full p-1 min-w-6 ${filled ? 'text-yellow-400 hover:text-yellow-500' : 'text-gray-400 hover:text-gray-600'}`}
-  >
-    <svg 
-      viewBox="0 0 24 24" 
-      width="20" 
-      height="20" 
-      stroke="currentColor" 
-      fill={filled ? "currentColor" : "none"}
-      strokeWidth="2"
-    >
-      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-    </svg>
-  </button>
-);
-
-// Pit Alert Button Component
-const PitAlertButton = ({ kartNum, teamName, trackId, onTriggerAlert }: { 
-  kartNum: string; 
-  teamName: string;
-  trackId: number;
-  onTriggerAlert?: (kartNum: string, teamName: string, trackId: number) => Promise<void>;
-}) => {
-  const [isLoading, setIsLoading] = useState(false);
-  
-  const handleClick = async () => {
-    setIsLoading(true);
-    try {
-      if (onTriggerAlert) {
-        await onTriggerAlert(kartNum, teamName, trackId);
-      }
-    } catch (error) {
-      console.error('Failed to trigger pit alert:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
-  return (
-    <button
-      onClick={handleClick}
-      disabled={isLoading}
-      className="ml-2 px-2 py-1 text-xs font-bold rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-red-600 hover:bg-red-700 text-white"
-      title="Trigger PIT ALERT on Android Overlay"
-    >
-      {isLoading ? '🔄' : '🚨 PIT'}
-    </button>
-  );
-};
-
-
-
 // Gate for live /fleet/state polling. Exported for unit tests.
 // Hidden browser tabs never poll; users without a fleet only poll while the
 // Fleet tab is open; users WITH a fleet poll in the background so the
@@ -371,122 +323,6 @@ export const shouldPollFleet = (
   return activeTab === 'fleet' || registrySize > 0;
 };
 
-const getTeamClass = (teamName: string): string | null => {
-  if (teamName.startsWith('1 - ')) return '1';
-  if (teamName.startsWith('2 - ')) return '2';
-  return null; // No class prefix - could consider this as a default class if needed
-};
-
-interface StandingsRowProps {
-  team: Team;
-  isDarkMode: boolean;
-  isMyTeam: boolean;
-  isMonitored: boolean;
-  teamColor: string | undefined;
-  isUpdated: boolean;
-  selectedTrackId: number;
-  onToggleMonitor: (kartNum: string) => void;
-  onTriggerAlert: (kartNum: string, teamName: string, trackId: number) => Promise<void>;
-}
-
-// Memoized standings row: the teams array is rebuilt on every ~1s update, so
-// a custom comparator on the displayed fields keeps unchanged rows from
-// re-rendering with each broadcast.
-const StandingsRow = React.memo(function StandingsRow({
-  team, isDarkMode, isMyTeam, isMonitored, teamColor, isUpdated,
-  selectedTrackId, onToggleMonitor, onTriggerAlert,
-}: StandingsRowProps) {
-  return (
-    <tr
-      id={`team-${team.Kart}`}
-      className={`
-        transition-colors
-        ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}
-        ${isMyTeam ? (isDarkMode ? 'bg-blue-900 hover:bg-blue-800' : 'bg-blue-50 hover:bg-blue-100') : ''}
-        ${team.Status === 'Pit-in' ? (isDarkMode ? 'bg-red-900/40 hover:bg-red-800/40' : 'bg-red-50 hover:bg-red-100') : ''}
-        ${isMonitored && team.Status === 'Pit-in' ? 'pit-alert' : ''}
-        ${isUpdated ? 'row-updated' : ''}
-      `}
-      style={isMonitored ? {
-        borderLeft: `4px solid ${teamColor || 'transparent'}`
-      } : {}}
-    >
-      <td className="px-4 py-3">
-        <div className={`font-medium text-center rounded-full w-8 h-8 flex items-center justify-center ${parseInt(team.Position) <= 3 ? (isDarkMode ? 'bg-yellow-700 text-yellow-100' : 'bg-yellow-100 text-yellow-800') : (isDarkMode ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-800')}`}>
-          {team.Position}
-        </div>
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex flex-col">
-          <div className="font-medium truncate max-w-[200px] flex items-center">
-            {isMonitored && (
-              <div
-                className="w-3 h-3 rounded-full mr-2 flex-shrink-0"
-                style={{ backgroundColor: teamColor || 'transparent' }}
-              ></div>
-            )}
-            {team.Team}
-
-            {/* Add class badge if we can determine the class */}
-            {getTeamClass(team.Team) && (
-              <span
-                className={`ml-2 text-xs px-1.5 py-0.5 rounded ${
-                  getTeamClass(team.Team) === '1'
-                    ? (isDarkMode ? 'bg-purple-900 text-purple-100' : 'bg-purple-100 text-purple-800')
-                    : (isDarkMode ? 'bg-green-900 text-green-100' : 'bg-green-100 text-green-800')
-                }`}
-              >
-                Class {getTeamClass(team.Team)}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Kart #{team.Kart}</span>
-            {team.Status !== undefined && <StatusImageIndicator status={team.Status} size="sm" />}
-          </div>
-        </div>
-      </td>
-      <td className="px-4 py-3">{team['Last Lap']}</td>
-      <td className="px-4 py-3">{team['Best Lap']}</td>
-      <td className="px-4 py-3 text-right">{team.Gap}</td>
-      <td className="px-4 py-3 text-center">
-        <StarIcon
-          filled={isMonitored}
-          onClick={() => onToggleMonitor(team.Kart)}
-        />
-        {isMonitored &&
-         team.Status !== 'Pit-in' &&
-         team.Status !== 'Finished' &&
-         team.Status !== 'DNF' &&
-         team.Status !== 'DSQ' && (
-          <PitAlertButton
-            kartNum={team.Kart}
-            teamName={team.Team}
-            trackId={selectedTrackId}
-            onTriggerAlert={onTriggerAlert}
-          />
-        )}
-      </td>
-    </tr>
-  );
-}, (prev, next) => (
-  prev.team.Position === next.team.Position &&
-  prev.team.Team === next.team.Team &&
-  prev.team.Kart === next.team.Kart &&
-  prev.team.Status === next.team.Status &&
-  prev.team['Last Lap'] === next.team['Last Lap'] &&
-  prev.team['Best Lap'] === next.team['Best Lap'] &&
-  prev.team.Gap === next.team.Gap &&
-  prev.isDarkMode === next.isDarkMode &&
-  prev.isMyTeam === next.isMyTeam &&
-  prev.isMonitored === next.isMonitored &&
-  prev.teamColor === next.teamColor &&
-  prev.isUpdated === next.isUpdated &&
-  prev.selectedTrackId === next.selectedTrackId &&
-  prev.onToggleMonitor === next.onToggleMonitor &&
-  prev.onTriggerAlert === next.onTriggerAlert
-));
-
 const RaceDashboard = () => {
   const { user, logout, apiFetch } = useAuth();
   const router = useRouter();
@@ -496,11 +332,12 @@ const RaceDashboard = () => {
   const [myTeam, setMyTeam] = useState<string>('');
   const [monitoredTeams, setMonitoredTeams] = useState<string[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [deltaData, setDeltaData] = useState<Record<string, DeltaData>>({});
+  const [deltaData, setDeltaData] = useState<Record<string, DeltaData>>({}); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [gapHistory, setGapHistory] = useState<GapHistory>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const { isDark: isDarkMode } = useTheme();
+  const [trackSheetOpen, setTrackSheetOpen] = useState(false);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
   const [selectedClass, setSelectedClass] = useState<string>('all');
@@ -674,10 +511,6 @@ const RaceDashboard = () => {
   }, [defaultLapTime, schedulePrefs]);
 
 
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode);
-  };
-
   const checkPitStops = useCallback((currentTeams: Team[]) => {
     monitoredTeams.forEach(kartNum => {
       const team = currentTeams.find(t => t.Kart === kartNum);
@@ -697,17 +530,12 @@ const RaceDashboard = () => {
             teamKart: team.Kart, // Add team identifier
             // Adding extra data for styled rendering
             customContent: (
-              <div className="flex flex-col">
-                <div className="flex items-center">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img 
-                    src="https://www.apex-timing.com/live-timing/commonv2/images/st_in.png" 
-                    alt="Pit In" 
-                    className="w-5 h-5 mr-2" 
-                  />
-                  <span className="font-bold">{team.Team} (Kart #{team.Kart})</span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <StatusPill status="Pit-in" />
+                  <span className="font-bold truncate">{team.Team} (#{team.Kart})</span>
                 </div>
-                <div className="text-sm mt-1">Currently in the pits - Position: {team.Position}</div>
+                <div className="text-xs text-muted">In the pits from P{team.Position}</div>
               </div>
             )
           }]);
@@ -1186,234 +1014,245 @@ const RaceDashboard = () => {
 
   if (isLoading && connectionStatus === 'disconnected') {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50">
-        <div className="text-lg flex flex-col items-center">
-          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          Connecting to race data server...
+      <div className="flex items-center justify-center min-h-screen bg-canvas text-ink">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-[3px] border-accent border-t-transparent rounded-full animate-spin" />
+          <div className="text-sm text-muted">Connecting to the timing server…</div>
         </div>
       </div>
     );
   }
 
-  // Don't show error screen - we'll handle empty data gracefully in the UI
-  // if (error) { ... }
+  const selectedTrackName = availableTracks.find(t => t.id === selectedTrackId)?.track_name || '';
+  const sessionLabel = sessionInfo.title2 || sessionInfo.title1 || sessionInfo.title || '';
+  const sessionActive = sessionStatus ? sessionStatus.active : teams.length > 0;
+  const railTracks: RailTrack[] = allTracksStatus.length > 0
+    ? allTracksStatus
+    : availableTracks.map(t => ({ track_id: t.id, track_name: t.track_name, active: false }));
+
+  const locateTeam = (kart: string) => {
+    document.getElementById(`team-${kart}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
 
   const StandingsTab = (
-    <div className="p-4">
-      {/* Add class filter at the top */}
-      <ClassFilter
-        selectedClass={selectedClass}
-        onClassChange={setSelectedClass}
-        isDarkMode={isDarkMode}
-        teamCount={teamCounts}
-      />
-      
-      <table className="w-full table-fixed">
-        <thead className={`${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
-          <tr>
-            <th className="px-4 py-2 text-left w-16">Pos</th>
-            <th className="px-4 py-2 text-left">Team</th>
-            <th className="px-4 py-2 text-left w-28">Last Lap</th>
-            <th className="px-4 py-2 text-left w-28">Best Lap</th>
-            <th className="px-4 py-2 text-right w-20">Gap</th>
-            <th className="px-4 py-2 text-center w-20">Monitor</th>
-          </tr>
-        </thead>
-        <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
-          {/* Use filteredTeams instead of teams */}
-          {filteredTeams.length > 0 ? (
-            sortedTeams.map(team => (
-                <StandingsRow
-                  key={team.Kart}
-                  team={team}
-                  isDarkMode={isDarkMode}
-                  isMyTeam={team.Kart === myTeam}
-                  isMonitored={monitoredTeams.includes(team.Kart)}
-                  teamColor={teamColors[team.Kart]}
-                  isUpdated={updatedRows.has(team.Kart)}
-                  selectedTrackId={selectedTrackId}
-                  onToggleMonitor={toggleTeamMonitoring}
-                  onTriggerAlert={triggerPitAlert}
-                />
-              ))
-          ) : (
-            <tr className={`${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              <td colSpan={6} className="px-4 py-8 text-center">
-                <div className="flex flex-col items-center">
-                  {teams.length === 0 ? (
-                    // No data at all
-                    <>
-                      <svg className="w-16 h-16 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <p className="text-lg font-medium mb-2">No race data available</p>
-                      <p className="text-sm">Waiting for live race data from the timing system...</p>
-                    </>
-                  ) : (
-                    // No teams in selected class
-                    <>
-                      <svg className="w-12 h-12 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      </svg>
-                      <p className="text-lg font-medium">No teams found in this class</p>
-                      <button 
-                        onClick={() => setSelectedClass('all')}
-                        className={`mt-4 px-4 py-2 rounded-md transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'}`}
-                      >
-                        Show all teams
-                      </button>
-                    </>
-                  )}
-                </div>
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <ClassFilter
+          selectedClass={selectedClass}
+          onClassChange={setSelectedClass}
+          teamCount={teamCounts}
+        />
+        {lastUpdate && (
+          <span className="md:hidden text-[11px] text-muted">Updated {lastUpdate}</span>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-line bg-surface overflow-hidden" role="table" aria-label="Standings">
+        <div
+          role="row"
+          className={`${STANDINGS_GRID} hidden md:grid h-9 px-4 text-[11px] font-bold tracking-[.08em] uppercase text-muted border-b border-line bg-surface-2`}
+        >
+          <div>Pos</div>
+          <div>Team</div>
+          <div className="md:hidden" />
+          <div>Status</div>
+          <div>Last</div>
+          <div>Best</div>
+          <div className="text-right">Gap</div>
+          <div className="text-right">{isQualificationMode ? 'Laps' : 'Stops'}</div>
+          <div className="text-center">Watch</div>
+        </div>
+
+        {filteredTeams.length > 0 ? (
+          sortedTeams.map(team => (
+            <StandingsRow
+              key={team.Kart}
+              team={team}
+              isMyTeam={team.Kart === myTeam}
+              isMonitored={monitoredTeams.includes(team.Kart)}
+              teamColor={teamColors[team.Kart]}
+              isUpdated={updatedRows.has(team.Kart)}
+              selectedTrackId={selectedTrackId}
+              onToggleMonitor={toggleTeamMonitoring}
+              onTriggerAlert={triggerPitAlert}
+            />
+          ))
+        ) : (
+          <div className="px-4 py-12 flex flex-col items-center text-center text-muted">
+            {teams.length === 0 ? (
+              <>
+                <Clock size={40} className="opacity-30 mb-3" />
+                <p className="text-base font-semibold text-ink">No live data for {selectedTrackName || 'this track'}</p>
+                <p className="text-sm mt-1">Standings appear here as soon as the timing feed sends a session.</p>
+                <button
+                  type="button"
+                  onClick={() => setTrackSheetOpen(true)}
+                  className="mt-4 h-10 px-4 rounded-lg border border-line bg-surface-2 text-sm font-semibold text-ink"
+                >
+                  Pick a live track
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-base font-semibold text-ink">No teams in this class</p>
+                <button
+                  type="button"
+                  onClick={() => setSelectedClass('all')}
+                  className="mt-4 h-10 px-4 rounded-lg border border-line bg-surface-2 text-sm font-semibold text-ink"
+                >
+                  Show all teams
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 
   const MonitoredTeamsTab = (
-    <div className="p-4">
-      <div className={`rounded-lg border overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-        <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
-          <div className="flex justify-between items-center">
-            <h2 className="font-bold text-lg flex items-center gap-2">
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
-              </svg>
-              Monitored Teams
-            </h2>
-            
-            {/* Add gap mode toggle for monitored teams - only show in race mode */}
-            {!isQualificationMode && (
-              <div className="flex items-center space-x-2">
-                <span className={`text-xs ${showAdjustedGap ? (isDarkMode ? 'text-gray-400' : 'text-gray-500') : (isDarkMode ? 'text-blue-300' : 'text-blue-600')}`}>
-                  Regular
-                </span>
-                <button 
-                  onClick={() => setShowAdjustedGap(!showAdjustedGap)}
-                  className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors ${showAdjustedGap ? (isDarkMode ? 'bg-blue-600' : 'bg-blue-500') : (isDarkMode ? 'bg-gray-600' : 'bg-gray-300')}`}
-                >
-                  <span 
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${showAdjustedGap ? 'translate-x-5' : 'translate-x-1'}`} 
-                  />
-                </button>
-                <span className={`text-xs ${showAdjustedGap ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')}`}>
-                  Adjusted
-                </span>
-              </div>
-            )}
-          </div>
-        </div>
-        
-        <div className="p-4">
-          {Object.entries(frontendDeltaData)
-            .sort((a, b) => a[1].position - b[1].position)
-            .map(([kart, data]) => (
-            <div key={kart} className={`p-3 rounded-lg mb-3 transition-colors ${
-              teams.find(t => t.Kart === kart)?.Status === 'Pit-in' 
-                ? (isDarkMode ? 'bg-red-900/50 hover:bg-red-800/50 border border-red-700' : 'bg-red-50 hover:bg-red-100 border border-red-200')
-                : (isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-50 hover:bg-gray-100')
-              } ${hoveredTeam === kart ? 'ring-2 ring-blue-500' : ''}`}
-              style={{
-                borderLeft: `4px solid ${teamColors[kart] || 'transparent'}`
-              }}
-            >
-              <div className="flex justify-between items-center mb-1">
-                <div className="flex items-center gap-2">
-                  <div className={`text-center min-w-6 rounded-md px-2 py-1 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-200'}`}>
-                    <span className="font-bold text-sm">P{data.position}</span>
-                  </div>
-                  <span className="font-bold truncate max-w-[160px]">{data.team_name}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`font-bold ${(showAdjustedGap ? (data.adjusted_gap ?? data.gap) : data.gap) >= 0 ? 'text-red-600' : 'text-green-600'} flex items-center`}>
-                    <span className="w-16 text-right">
-                      {(showAdjustedGap ? (data.adjusted_gap ?? data.gap) : data.gap).toFixed(3)}s
-                      {showAdjustedGap && (
-                        <span className="ml-1 text-xs text-blue-500">*</span>
-                      )}
-                    </span>
-                    <div className="ml-1">
-                      {data.trends?.lap_1?.arrow > 0 ? (
-                        <TrendArrows trend={showAdjustedGap ? data.adjusted_trends?.lap_1 : data.trends.lap_1} />
-                      ) : data.trends?.lap_5?.arrow > 0 ? (
-                        <TrendArrows trend={showAdjustedGap ? data.adjusted_trends?.lap_5 : data.trends.lap_5} />
-                      ) : data.trends?.lap_10?.arrow > 0 ? (
-                        <TrendArrows trend={showAdjustedGap ? data.adjusted_trends?.lap_10 : data.trends.lap_10} />
-                      ) : (
-                        <span className="text-gray-400">~</span>
-                      )}
-                    </div>
-                  </span>
-                  <button 
-                    onClick={() => toggleTeamMonitoring(kart)}
-                    className="p-1 hover:bg-gray-200 rounded-full"
-                  >
-                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              
-              {/* Status indicator for monitored team */}
-              <div className="flex justify-between items-center">
-                <div>
-                  {teams.find(t => t.Kart === kart)?.Status !== undefined && (
-                    <StatusImageIndicator status={teams.find(t => t.Kart === kart)?.Status} />
-                  )}
-                </div>
-                
-                {/* Add pit stop indicator - only show in race mode */}
-                {!isQualificationMode && showAdjustedGap && data.remaining_stops !== undefined && (
-                  <div className={`text-xs rounded-full px-2 py-1 ${isDarkMode ? 'bg-blue-900 text-blue-100' : 'bg-blue-50 text-blue-800'}`}>
-                    {data.remaining_stops > 0 ? (
-                      <>Remaining stops: <span className="font-bold">{data.remaining_stops}</span></>
-                    ) : (
-                      <>All pit stops completed</>
-                    )}
-                  </div>
-                )}
-              </div>
-              
-              <div className={`text-sm grid grid-cols-3 gap-2 mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                <div className="flex flex-col">
-                  <span className="text-xs opacity-70">Last Lap</span>
-                  <span className="font-medium">{data.last_lap}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs opacity-70">Best Lap</span>
-                  <span className="font-medium">{data.best_lap}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-xs opacity-70">{isQualificationMode ? 'Laps' : 'Pit Stops'}</span>
-                  <span className="font-medium">{data.pit_stops}</span>
-                </div>
-              </div>
-            </div>
-          ))}
-          {Object.keys(frontendDeltaData).length === 0 && (
-            <div className={`text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              <svg className="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-              </svg>
-              <p>No teams monitored yet</p>
-              <p className="text-sm mt-2">Click the star icon next to a team in the standings table to monitor them</p>
+    <div className="flex flex-col gap-3">
+      {monitoredTeams.length > 0 && (
+        <PitStopConfig
+          pitStopTime={pitStopTime}
+          setPitStopTime={(newTime) => {
+            setPitStopTime(newTime);
+            updatePitStopConfig(newTime, requiredPitStops, defaultLapTime);
+          }}
+          requiredPitStops={requiredPitStops}
+          setRequiredPitStops={(newStops) => {
+            setRequiredPitStops(newStops);
+            updatePitStopConfig(pitStopTime, newStops, defaultLapTime);
+          }}
+          defaultLapTime={defaultLapTime}
+          setDefaultLapTime={(newTime) => {
+            setDefaultLapTime(newTime);
+            updatePitStopConfig(pitStopTime, requiredPitStops, newTime);
+          }}
+          isDarkMode={isDarkMode}
+        />
+      )}
+
+      <div className="rounded-xl border border-line bg-surface overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 h-12 border-b border-line bg-surface-2">
+          <h2 className="font-cond font-bold text-lg tracking-wide flex items-center gap-2">
+            <Eye size={18} className="text-accent" />
+            MONITORED
+            <span className="font-mono tabular text-xs px-1.5 py-px rounded-full bg-line text-muted">{monitoredTeams.length}</span>
+          </h2>
+          {!isQualificationMode && (
+            <div className="inline-flex gap-1 p-[3px] rounded-lg bg-surface border border-line" role="group" aria-label="Gap mode">
+              <button
+                type="button"
+                aria-pressed={!showAdjustedGap}
+                onClick={() => setShowAdjustedGap(false)}
+                className={`h-8 px-3 rounded-md text-xs font-semibold ${!showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
+              >
+                Raw
+              </button>
+              <button
+                type="button"
+                aria-pressed={showAdjustedGap}
+                onClick={() => setShowAdjustedGap(true)}
+                className={`h-8 px-3 rounded-md text-xs font-semibold ${showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
+              >
+                Adjusted
+              </button>
             </div>
           )}
         </div>
-        
-        {/* Add explanation for adjusted gap - only show in race mode */}
-        {!isQualificationMode && showAdjustedGap && Object.keys(deltaData).length > 0 && (
-          <div className={`px-4 py-2 text-xs border-t ${isDarkMode ? 'border-gray-700 bg-gray-700/50 text-gray-300' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
-            <div className="flex items-center">
-              <svg className="w-4 h-4 mr-1 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Adjusted gap accounts for remaining pit stops (2:38 per stop)
+
+        <div className="p-3 flex flex-col gap-2">
+          {Object.entries(frontendDeltaData)
+            .sort((a, b) => a[1].position - b[1].position)
+            .map(([kart, data]) => {
+              const team = teams.find(t => t.Kart === kart);
+              const inPit = team?.Status === 'Pit-in';
+              const gapValue = showAdjustedGap ? (data.adjusted_gap ?? data.gap) : data.gap;
+              const trend = data.trends?.lap_1?.arrow ? data.trends.lap_1
+                : data.trends?.lap_5?.arrow ? data.trends.lap_5
+                : data.trends?.lap_10?.arrow ? data.trends.lap_10 : undefined;
+              return (
+                <div
+                  key={kart}
+                  className={`rounded-lg border p-3 flex flex-col gap-2 transition-colors ${
+                    inPit ? 'border-alarm/50 bg-alarm/[.07]' : 'border-line bg-canvas'
+                  } ${hoveredTeam === kart ? 'ring-2 ring-info/60' : ''}`}
+                  style={{ boxShadow: teamColors[kart] ? `inset 3px 0 0 ${teamColors[kart]}` : undefined }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-surface-2 font-cond font-bold text-base flex items-center justify-center shrink-0">
+                      {data.position}
+                    </div>
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <span className="text-sm font-semibold truncate">{displayTeamName(data.team_name)}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono tabular text-[11px] text-muted">#{kart}</span>
+                        {team?.Status !== undefined && <StatusPill status={team.Status} variant="inline" />}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {team && !['Pit-in', 'Finished', 'DNF', 'DSQ'].includes(team.Status || '') && (
+                        <PitAlertButton kartNum={kart} teamName={team.Team} trackId={selectedTrackId} onTriggerAlert={triggerPitAlert} />
+                      )}
+                      <span className={`font-mono tabular text-lg font-semibold ${gapValue >= 0 ? 'text-live' : 'text-alarm'}`}>
+                        {gapValue >= 0 ? '+' : '−'}{Math.abs(gapValue).toFixed(3)}
+                      </span>
+                      {trend ? <TrendArrows trend={showAdjustedGap ? (data.adjusted_trends?.lap_1 ?? trend) : trend} /> : null}
+                      <button
+                        type="button"
+                        onClick={() => toggleTeamMonitoring(kart)}
+                        aria-label={`Stop monitoring ${data.team_name}`}
+                        className="w-9 h-9 rounded-lg flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-bold tracking-[.08em] uppercase text-muted">Last</span>
+                      <span className="font-mono tabular text-sm">{data.last_lap || '—'}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-bold tracking-[.08em] uppercase text-muted">Best</span>
+                      <span className="font-mono tabular text-sm">{data.best_lap || '—'}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-bold tracking-[.08em] uppercase text-muted">{isQualificationMode ? 'Laps' : 'Stops'}</span>
+                      <span className="font-mono tabular text-sm">
+                        {data.pit_stops || '0'}
+                        {!isQualificationMode && showAdjustedGap && data.remaining_stops !== undefined && (
+                          <span className="text-muted"> · {data.remaining_stops > 0 ? `${data.remaining_stops} to go` : 'done'}</span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          {Object.keys(frontendDeltaData).length === 0 && (
+            <div className="py-10 flex flex-col items-center text-center text-muted">
+              <Star size={36} className="opacity-30 mb-3" />
+              {!myTeam ? (
+                <>
+                  <p className="text-sm font-semibold text-ink">Pick your team first</p>
+                  <p className="text-xs mt-1">Gaps are measured from your team, so choose it in the card above.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-ink">No teams monitored yet</p>
+                  <p className="text-xs mt-1">Tap the star on a standings row to track its gap to you.</p>
+                </>
+              )}
             </div>
+          )}
+        </div>
+
+        {!isQualificationMode && showAdjustedGap && Object.keys(frontendDeltaData).length > 0 && (
+          <div className="px-4 py-2 text-xs text-muted border-t border-line bg-surface-2 flex items-center gap-1.5">
+            <Info size={14} className="text-info shrink-0" />
+            Adjusted gap accounts for remaining pit stops ({Math.floor(pitStopTime / 60)}:{String(pitStopTime % 60).padStart(2, '0')} per stop). Positive = they are behind you.
           </div>
         )}
       </div>
@@ -1421,408 +1260,145 @@ const RaceDashboard = () => {
   );
 
   const ChartTab = (
-    <div className="p-4">
-      {/* Time Delta Chart */}
-      <TimeDeltaChart 
-        gapHistory={gapHistory} 
-        teams={teams} 
-        monitoredTeams={monitoredTeams}
-        isDarkMode={isDarkMode}
-        onColorAssignment={handleColorAssignment}
-        onTeamHover={handleTeamHover}
-        pitStopTime={pitStopTime}
-        requiredPitStops={requiredPitStops}
-      />
-      
-      {/* Quick guide section for the chart */}
-      <div className={`mt-4 p-4 rounded-lg border ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'}`}>
-        <h3 className={`text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-          Chart Guide
-        </h3>
-        <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="flex items-center gap-2">
-              <div className="flex items-center">
-                <div className="h-px w-5 bg-gray-400"></div>
-                <div className="h-3 w-3 rounded-full bg-gray-400"></div>
-              </div>
-              <span>Teams on track</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center">
-                <div className="h-px w-5 bg-gray-400 dashed-line"></div>
-                <div className="h-3 w-3 rounded-full bg-red-400"></div>
-              </div>
-              <span>Teams in pits</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-green-500">▼</span>
-              <span>Getting closer to you</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-red-500">▲</span>
-              <span>Falling behind you</span>
-            </div>
+    <div className="flex flex-col gap-3">
+      <div className="rounded-xl border border-line bg-surface p-3 md:p-4">
+        <TimeDeltaChart
+          gapHistory={gapHistory}
+          teams={teams}
+          monitoredTeams={monitoredTeams}
+          isDarkMode={isDarkMode}
+          onColorAssignment={handleColorAssignment}
+          onTeamHover={handleTeamHover}
+          pitStopTime={pitStopTime}
+          requiredPitStops={requiredPitStops}
+        />
+      </div>
+      <div className="rounded-xl border border-line bg-surface p-4 text-xs text-muted">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="flex items-center gap-2">
+            <span className="h-px w-5 bg-muted" /><span className="h-3 w-3 rounded-full bg-muted" />
+            <span>Teams on track</span>
           </div>
+          <div className="flex items-center gap-2">
+            <span className="h-px w-5 border-t border-dashed border-muted" /><span className="h-3 w-3 rounded-full bg-alarm" />
+            <span>Teams in pits</span>
+          </div>
+          <div className="flex items-center gap-2"><span className="text-live">▼</span><span>Getting closer to you</span></div>
+          <div className="flex items-center gap-2"><span className="text-alarm">▲</span><span>Falling behind you</span></div>
         </div>
       </div>
     </div>
   );
 
+  const tabs = [
+    { id: 'standings', label: 'Standings', icon: <List size={18} />, count: teams.length },
+    { id: 'monitored', label: 'Monitored', icon: <Eye size={18} />, count: monitoredTeams.length },
+    { id: 'chart', label: 'Delta', icon: <LineChart size={18} /> },
+    { id: 'stints', label: 'Stints', icon: <Clock size={18} /> },
+    { id: 'fleet', label: 'Fleet', icon: <Car size={18} />, count: fleetBoard.length },
+    ...(user?.role === 'admin' ? [{ id: 'admin', label: 'Admin', icon: <Settings size={18} /> }] : []),
+  ];
+
   return (
-    <div className={`min-h-screen p-4 md:p-6 transition-colors duration-300 ${isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900'}`}>
-      <div className={`max-w-7xl mx-auto rounded-xl shadow-lg p-4 md:p-6 transition-colors duration-300 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6 border-b pb-4">
-          <h1 className="text-2xl font-bold flex items-center">
-            <svg className="w-8 h-8 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="8 12 10 14 16 8" />
-            </svg>
-            Race Analysis Dashboard
-          </h1>
-          
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push('/data')}
-              className={`px-3 py-1 text-sm rounded font-medium transition-colors ${isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'}`}
-            >
-              📊 Driver Stats
-            </button>
-            {user && (
-              <div className="flex items-center gap-4">
-                <span className="text-sm text-gray-500">
-                  {user.username}
-                  {user.role === 'admin' && (
-                    <span className="ml-2 px-2 py-1 text-xs bg-purple-600 text-white rounded">Admin</span>
-                  )}
-                </span>
-                <button
-                  onClick={logout}
-                  className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
-                >
-                  Logout
-                </button>
-              </div>
-            )}
-            <div className="text-sm flex items-center gap-1">
-              {teams.length > 0 ? (
-                <>
-                  <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse"></span>
-                  Last Update: {lastUpdate || 'N/A'}
-                </>
-              ) : (
-                <span className="text-gray-500">No active session</span>
-              )}
+    <div className="min-h-screen bg-canvas text-ink">
+      <AppBar
+        trackName={selectedTrackName}
+        sessionLabel={sessionLabel}
+        sessionActive={sessionActive}
+        flag={sessionInfo.light}
+        timers={[sessionInfo.dyn1 || '', sessionInfo.dyn2 || '']}
+        connectionStatus={connectionStatus}
+        lastUpdate={lastUpdate}
+        user={user ? { username: user.username, role: user.role } : null}
+        onLogout={logout}
+        onOpenTracks={() => setTrackSheetOpen(true)}
+        onOpenStats={() => router.push('/data')}
+      />
+
+      <div className="flex items-start">
+        {/* Desktop track rail */}
+        <aside className="hidden lg:block w-64 shrink-0 sticky top-14 h-[calc(100vh-56px)]">
+          <TrackRail
+            tracks={railTracks}
+            selectedTrackId={selectedTrackId}
+            onSelect={setSelectedTrackId}
+            variant="rail"
+            isAdmin={user?.role === 'admin'}
+            onOpenAdmin={() => router.push('/admin')}
+          />
+        </aside>
+
+        <main className="flex-1 min-w-0 p-3 md:p-5 pb-24 md:pb-8 flex flex-col gap-3 md:gap-4">
+          {!sessionActive && sessionStatus && (
+            <div className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2">
+              <AlertTriangle size={16} className="text-accent shrink-0" />
+              <span>{sessionStatus.trackName || selectedTrackName}: no active session right now.</span>
             </div>
-            <button 
-              onClick={toggleDarkMode}
-              className={`p-2 rounded-full transition-colors ${isDarkMode ? 'bg-gray-700 text-yellow-300' : 'bg-gray-100 text-gray-600'}`}
-              aria-label="Toggle dark mode"
-            >
-              {isDarkMode ? (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                </svg>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Two-column layout: Controls on left, Multi-track status on right */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 lg:items-start">
-          {/* Left Column: Track controls */}
-          <div className="space-y-6" id="left-column-controls">
-            {/* Track Selector */}
-            {availableTracks.length > 0 && (
-              <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
-                <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                  Select Track
-                </label>
-                <select
-                  value={selectedTrackId}
-                  onChange={(e) => setSelectedTrackId(parseInt(e.target.value))}
-                  className={`w-full p-2 border rounded-lg ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
-                >
-                  {availableTracks.map(track => (
-                    <option key={track.id} value={track.id}>
-                      {track.track_name}
-                    </option>
-                  ))}
-                </select>
-                <p className={`mt-2 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Real-time updates from selected track. Backend collects all tracks simultaneously.
-                </p>
-                {sessionStatus && (
-                  <div className={`mt-2 flex items-center gap-2 ${sessionStatus.active ? 'text-green-600' : 'text-yellow-600'}`}>
-                    <span className="text-sm font-medium">
-                      {sessionStatus.active ? '● Session Active' : '○ No Active Session'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-        {/* Pit Stop Config */}
-        {monitoredTeams.length > 0 && (
-          <PitStopConfig
-            pitStopTime={pitStopTime}
-            setPitStopTime={(newTime) => {
-              setPitStopTime(newTime);
-              updatePitStopConfig(newTime, requiredPitStops, defaultLapTime);
-            }}
-            requiredPitStops={requiredPitStops}
-            setRequiredPitStops={(newStops) => {
-              setRequiredPitStops(newStops);
-              updatePitStopConfig(pitStopTime, newStops, defaultLapTime);
-            }}
-            defaultLapTime={defaultLapTime}
-            setDefaultLapTime={(newTime) => {
-              setDefaultLapTime(newTime);
-              updatePitStopConfig(pitStopTime, requiredPitStops, newTime);
-            }}
-            isDarkMode={isDarkMode}
-          />
-        )}
-
-            {/* Team Selection */}
-            <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-blue-50'}`}>
-              <label className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                My Team
-              </label>
-              <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
-                <select
-                  value={myTeam}
-                  onChange={(e) => {
-                    setIsUserUpdate(true);
-                    setMyTeam(e.target.value);
-                  }}
-                  className={`w-full md:w-1/2 p-2 border rounded-lg ${isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
-                >
-                  <option value="">Select Your Team</option>
-                  {teams.length > 0 ? (
-                    teams.map(team => (
-                      <option key={team.Kart} value={team.Kart}>
-                        {team.Team} (Kart #{team.Kart})
-                      </option>
-                    ))
-                  ) : (
-                    <option value="" disabled>No teams available - Waiting for race data</option>
-                  )}
-                </select>
-
-                {myTeam && (
-                  <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                    {teams.find(t => t.Kart === myTeam)?.Team} - Position: {teams.find(t => t.Kart === myTeam)?.Position || 'N/A'}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Multi-track Status */}
-          <div className="lg:max-h-[400px]">
-            <MultiTrackStatus
-              tracks={allTracksStatus}
-              selectedTrackId={selectedTrackId}
-              onSelectTrack={(trackId) => setSelectedTrackId(trackId)}
-              isDarkMode={isDarkMode}
-            />
-          </div>
-        </div>
-
-        {/* Connection Status */}
-        <div className="mb-4">
-          <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-            connectionStatus === 'connected' 
-              ? isDarkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-700'
-              : connectionStatus === 'connecting'
-              ? isDarkMode ? 'bg-yellow-900 text-yellow-200' : 'bg-yellow-100 text-yellow-700'
-              : isDarkMode ? 'bg-red-900 text-red-200' : 'bg-red-100 text-red-700'
-          }`}>
-            <div className={`w-2 h-2 rounded-full mr-2 ${
-              connectionStatus === 'connected' ? 'bg-green-500' :
-              connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
-              'bg-red-500'
-            }`} />
-            {connectionStatus === 'connected' ? 'Connected' :
-             connectionStatus === 'connecting' ? 'Connecting...' :
-             connectionStatus === 'error' ? 'Connection Error' :
-             'Disconnected'}
-          </div>
-        </div>
-
-        {/* Alerts */}
-        {alerts.length > 0 && (
-          <div className="mb-6 space-y-2">
-            {alerts.map(alert => {
-              const bgColor = alert.type === 'error' ? (isDarkMode ? 'bg-red-900' : 'bg-red-50') :
-                             alert.type === 'warning' ? (isDarkMode ? 'bg-yellow-900' : 'bg-yellow-50') : 
-                             alert.type === 'success' ? (isDarkMode ? 'bg-green-900' : 'bg-green-50') :
-                             (isDarkMode ? 'bg-blue-900' : 'bg-blue-50');
-                             
-              const textColor = alert.type === 'error' ? (isDarkMode ? 'text-red-200' : 'text-red-700') :
-                               alert.type === 'warning' ? (isDarkMode ? 'text-yellow-200' : 'text-yellow-700') : 
-                               alert.type === 'success' ? (isDarkMode ? 'text-green-200' : 'text-green-700') :
-                               (isDarkMode ? 'text-blue-200' : 'text-blue-700');
-              
-              return (
-                <div key={alert.id} className={`${bgColor} ${textColor} p-4 rounded-lg flex justify-between items-center shadow-sm ${alert.message.includes('in the pits') ? 'pit-alert' : ''}`}>
-                  <div className="flex items-center">
-                    {alert.type === 'error' && !alert.customContent && (
-                      <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    )}
-                    {alert.type === 'warning' && !alert.customContent && (
-                      <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                    )}
-                    {alert.type === 'success' && !alert.customContent && (
-                      <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    )}
-                    {alert.type === 'info' && !alert.customContent && (
-                      <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    )}
-                    {alert.customContent || alert.message}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {alert.message.includes('in the pits') && (
-                      <button 
-                        onClick={() => {
-                          // Scroll to the team in the standings
-                          const kartNumber = alert.message.match(/Kart #(\d+)/)?.[1];
-                          if (kartNumber) {
-                            document.getElementById(`team-${kartNumber}`)?.scrollIntoView({ 
-                              behavior: 'smooth',
-                              block: 'center'
-                            });
-                          }
-                        }}
-                        className={`px-2 py-1 rounded text-xs font-medium ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'}`}
-                      >
-                        Locate
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => dismissAlert(alert.id)}
-                      className={`${isDarkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'} transition-colors`}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Main Content with Tabs */}
-        <TabbedInterface 
-          tabs={[
-            { 
-              id: 'standings', 
-              label: 'Standings', 
-              icon: (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              ),
-              count: teams.length 
-            },
-            { 
-              id: 'monitored', 
-              label: 'Monitored Teams', 
-              icon: (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
-                </svg>
-              ),
-              count: monitoredTeams.length 
-            },
-            { 
-              id: 'chart', 
-              label: 'Race Delta Analysis', 
-              icon: (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M8 13v-1m4 1v-3m4 3V8M12 21l9-9-9-9-9 9 9 9z" />
-                </svg>
-              )
-            },
-            {
-              id: 'stints',
-              label: 'Stint Planner',
-              icon: (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              )
-            },
-            {
-              id: 'fleet',
-              label: 'Fleet Tracker',
-              icon: (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
-                  <path d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 001 1h2m-3-1V8a1 1 0 011-1h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01.052.316V16a1 1 0 01-1 1h-1" />
-                </svg>
-              ),
-              count: fleetBoard.length
-            },
-            ...(user?.role === 'admin' ? [{
-              id: 'admin',
-              label: 'Admin',
-              icon: (
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              )
-            }] : [])
-          ]}
-          defaultTab="standings"
-          isDarkMode={isDarkMode}
-          onTabChange={setActiveTab}
-        >
-          {StandingsTab}
-          {MonitoredTeamsTab}
-          {ChartTab}
-          <StintPlanner
-            isDarkMode={isDarkMode}
-            myTeam={myTeam}
-            teams={teams}
-            isSimulating={true}
-            sessionInfo={sessionInfo}
-            trackId={selectedTrackId}
-            trackName={availableTracks.find(t => t.id === selectedTrackId)?.track_name}
-          />
-          <FleetTracker
-            isDarkMode={isDarkMode}
-            fleetBoard={fleetBoard}
-            registry={fleetRegistry}
-            trackId={selectedTrackId}
-            sessionId={currentSessionId}
-            isActive={activeTab === 'fleet'}
-            canEditRegistry={!!user}
-            onReassign={(kartId) => setAssignmentEntry({ open: true, defaultKartId: kartId })}
-            onAddAssignment={() => setAssignmentEntry({ open: true })}
-            onRegistryChange={refreshRegistry}
-          />
-          {user?.role === 'admin' && (
-            <AdminPanel isDarkMode={isDarkMode} />
           )}
-        </TabbedInterface>
+
+          <MyTeamStrip
+            teams={teams}
+            myTeam={myTeam}
+            onSelectMyTeam={(kart) => {
+              setIsUserUpdate(true);
+              setMyTeam(kart);
+            }}
+            isQualificationMode={isQualificationMode}
+            requiredPitStops={requiredPitStops}
+            onPitAlert={(kart, teamName) => triggerPitAlert(kart, teamName)}
+          />
+
+          <TabbedInterface tabs={tabs} defaultTab="standings" isDarkMode={isDarkMode} onTabChange={setActiveTab}>
+            {StandingsTab}
+            {MonitoredTeamsTab}
+            {ChartTab}
+            <div className="rounded-xl border border-line bg-surface overflow-hidden">
+              <StintPlanner
+                isDarkMode={isDarkMode}
+                myTeam={myTeam}
+                teams={teams}
+                isSimulating={true}
+                sessionInfo={sessionInfo}
+                trackId={selectedTrackId}
+                trackName={selectedTrackName}
+              />
+            </div>
+            <div className="rounded-xl border border-line bg-surface overflow-hidden">
+              <FleetTracker
+                isDarkMode={isDarkMode}
+                fleetBoard={fleetBoard}
+                registry={fleetRegistry}
+                trackId={selectedTrackId}
+                sessionId={currentSessionId}
+                isActive={activeTab === 'fleet'}
+                canEditRegistry={!!user}
+                onReassign={(kartId) => setAssignmentEntry({ open: true, defaultKartId: kartId })}
+                onAddAssignment={() => setAssignmentEntry({ open: true })}
+                onRegistryChange={refreshRegistry}
+              />
+            </div>
+            {user?.role === 'admin' && (
+              <div className="rounded-xl border border-line bg-surface overflow-hidden">
+                <AdminPanel isDarkMode={isDarkMode} />
+              </div>
+            )}
+          </TabbedInterface>
+        </main>
       </div>
+
+      {trackSheetOpen && (
+        <TrackRail
+          tracks={railTracks}
+          selectedTrackId={selectedTrackId}
+          onSelect={setSelectedTrackId}
+          variant="sheet"
+          onClose={() => setTrackSheetOpen(false)}
+          isAdmin={user?.role === 'admin'}
+          onOpenAdmin={() => router.push('/admin')}
+        />
+      )}
+
+      <AlertStack alerts={alerts} onDismiss={dismissAlert} onLocate={locateTeam} />
 
       {assignmentEntry?.open && (
         <KartAssignmentEntry

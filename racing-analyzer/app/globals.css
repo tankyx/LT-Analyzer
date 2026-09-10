@@ -2,85 +2,89 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Pit-wall design tokens. RGB triplets so Tailwind can apply alpha
+ * (`bg-live/15`). Light is the default; `.dark` on <html> flips the set.
+ * The ThemeProvider toggles the class; an inline script in layout.tsx
+ * applies it before first paint so there is no flash.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --c-canvas: 244 245 247;
+  --c-surface: 255 255 255;
+  --c-surface-2: 238 240 243;
+  --c-line: 221 226 233;
+  --c-ink: 20 24 31;
+  --c-muted: 95 106 122;
+  --c-accent: 200 140 0;
+  --c-accent-ink: 26 18 0;
+  --c-live: 22 148 80;
+  --c-alarm: 214 64 58;
+  --c-info: 42 111 214;
+  --c-class1: 42 111 214;
+  --c-class2: 139 63 209;
+
+  /* legacy aliases */
+  --background: rgb(var(--c-canvas));
+  --foreground: rgb(var(--c-ink));
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --c-canvas: 11 14 19;
+  --c-surface: 18 22 29;
+  --c-surface-2: 24 30 39;
+  --c-line: 36 44 56;
+  --c-ink: 233 237 242;
+  --c-muted: 138 148 166;
+  --c-accent: 242 182 50;
+  --c-accent-ink: 26 18 0;
+  --c-live: 67 209 122;
+  --c-alarm: 240 101 90;
+  --c-info: 90 169 255;
+  --c-class1: 90 169 255;
+  --c-class2: 192 132 252;
+
+  --background: rgb(var(--c-canvas));
+  --foreground: rgb(var(--c-ink));
+  color-scheme: dark;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: rgb(var(--c-ink));
+  background: rgb(var(--c-canvas));
+  font-family: var(--font-sans), "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
+/* Timing figures: fixed-width digits so a table doesn't jitter on refresh. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Monitored team currently in the pits: pulsing alarm ring. */
 @keyframes pit-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
-  }
-  70% {
-    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-  }
+  0% { box-shadow: 0 0 0 0 rgb(var(--c-alarm) / 0.45); }
+  70% { box-shadow: 0 0 0 10px rgb(var(--c-alarm) / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(var(--c-alarm) / 0); }
 }
-
 .pit-alert {
   animation: pit-pulse 1.5s infinite;
 }
 
-.dark .pit-alert {
-  animation: pit-pulse 1.5s infinite;
-}
-
+/* Row just updated by the live feed: brief breathe in the info tint. */
 @keyframes row-breathe {
-  0% {
-    background-color: rgba(59, 130, 246, 0);
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
-  }
-  50% {
-    background-color: rgba(59, 130, 246, 0.2);
-    box-shadow: 0 0 20px 5px rgba(59, 130, 246, 0.3);
-  }
-  100% {
-    background-color: rgba(59, 130, 246, 0);
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
-  }
+  0% { background-color: rgb(var(--c-info) / 0); }
+  50% { background-color: rgb(var(--c-info) / 0.16); }
+  100% { background-color: rgb(var(--c-info) / 0); }
 }
-
 .row-updated {
-  animation: row-breathe 1s ease-in-out 5;
+  animation: row-breathe 1s ease-in-out 3;
   position: relative;
   z-index: 1;
 }
 
-.dark .row-updated {
-  animation: row-breathe 1s ease-in-out 5;
-}
-
-/* Make the animation more visible in dark mode */
-.dark .row-updated {
-  animation-name: row-breathe-dark;
-}
-
-@keyframes row-breathe-dark {
-  0% {
-    background-color: rgba(96, 165, 250, 0);
-    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
-  }
-  50% {
-    background-color: rgba(96, 165, 250, 0.3);
-    box-shadow: 0 0 30px 10px rgba(96, 165, 250, 0.4);
-  }
-  100% {
-    background-color: rgba(96, 165, 250, 0);
-    box-shadow: 0 0 0 0 rgba(96, 165, 250, 0);
-  }
+/* Thin, theme-aware scrollbars for the rails and sheets. */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line)) transparent;
 }

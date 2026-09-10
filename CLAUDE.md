@@ -50,10 +50,12 @@ LT-Analyzer/
 ├── racing-analyzer/            # Next.js frontend application
 │   ├── app/
 │   │   ├── components/
-│   │   │   └── RaceDashboard/ # Main dashboard with track selector
-│   │   │       ├── index.tsx  # Main dashboard component with two-column layout
-│   │   │       ├── MultiTrackStatus.tsx  # Real-time multi-track status monitor
-│   │   │       └── ...        # Other dashboard components
+│   │   │   └── RaceDashboard/ # Main dashboard (app bar + track rail + my-team strip + tabs)
+│   │   │       ├── index.tsx  # Dashboard state/logic + layout composition
+│   │   │       ├── AppBar.tsx, TrackRail.tsx, MyTeamStrip.tsx, StandingsRow.tsx
+│   │   │       ├── TabbedInterface.tsx, StatusPill.tsx, ClassFilter.tsx, AlertStack.tsx
+│   │   │       └── ...        # StintPlanner, FleetTracker, TimeDeltaChart, PitStopConfig…
+│   │   ├── contexts/          # AuthContext, ThemeContext (+ themeKey.ts)
 │   │   ├── services/
 │   │   │   ├── ApiService.ts      # REST API client
 │   │   │   └── WebSocketService.ts # Socket.IO client with room management
@@ -285,20 +287,15 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
    - `auth.db` - User authentication for admin panel
      - Tables: `users`, `sessions`, `login_attempts`
 
-6. **Frontend Dashboard Layout**:
-   - **Two-column responsive layout** (stacks on mobile, side-by-side on desktop):
-     - **Left column**: Track selector dropdown and My Team selector
-     - **Right column**: Multi-Track Status panel showing all tracks simultaneously
-   - **Track selector** dropdown to choose which track's detailed data to view
-   - **Multi-Track Status panel** (`MultiTrackStatus.tsx`):
-     - Real-time status display for all configured tracks
-     - Shows active/inactive sessions with visual indicators (green pulsing = active)
-     - Displays team counts for active sessions
-     - Scrollable list (max height: 400px) when many tracks are configured
-     - Click any track to switch to it
-   - Automatically joins the selected track's Socket.IO room for detailed data
-   - Also joins `all_tracks` room for the multi-track status panel
-   - Efficient bandwidth usage: only receives detailed updates for selected track
+6. **Frontend Dashboard Layout** ("pit wall" redesign, Sept 2026):
+   - **Design tokens** live in `app/globals.css` as RGB triplets (`--c-canvas`, `--c-surface`, `--c-surface-2`, `--c-line`, `--c-ink`, `--c-muted`, `--c-accent`, `--c-live`, `--c-alarm`, `--c-info`, `--c-class1/2`) and are exposed through `tailwind.config.ts` as `bg-canvas`, `text-ink`, `border-line`, `bg-live/15`, etc. Light is the default; `.dark` on `<html>` flips the set. **Do not use `dark:` variants or `isDarkMode` ternaries in new components** — write token classes once. (Older components — StintPlanner, FleetTracker, TimeDeltaChart, PitStopConfig, AdminManager — still take an `isDarkMode` prop; the dashboard feeds it from the theme context.)
+   - **Theme switch**: `app/contexts/ThemeContext.tsx` (`useTheme()` → `{theme, isDark, toggleTheme}`), persisted in `localStorage['lt-theme']`, defaulting to the OS preference. `app/layout.tsx` inlines a pre-paint script (key from `app/contexts/themeKey.ts`, a plain module — importing the client context into the server layout would yield a stub) so there is no flash.
+   - **Fonts**: Barlow (UI), Barlow Condensed (position numerals / brand), JetBrains Mono (all timing figures, with `tabular-nums` via the `.tabular` class) — loaded with `next/font/google`, self-hosted at build time so the strict `font-src 'self'` CSP holds.
+   - **Shell** (`app/components/RaceDashboard/`): `AppBar` (brand, track-switcher button, flag chip, feed timers `dyn1/dyn2`, live/connection dot, Driver stats, theme toggle, account menu with logout) · `TrackRail` (desktop left rail ≥lg / full-screen sheet below; trie search; **Live now** vs **Idle** groups; provider label; admin link) · `MyTeamStrip` (pinned card: position, last/best lap, gap to the car ahead and behind with a per-lap closing/opening trend, stops or laps, pit-alert button; team picker when none chosen) · `TabbedInterface` (segmented tabs on desktop, fixed bottom tab bar with 44px targets on phones; panels stay mounted) · `StandingsRow` (one responsive CSS grid: 4 cells on phones — pos / team+kart+status / last-lap-over-gap / star — 8 cells on desktop; `STANDINGS_GRID` shared with the header row) · `StatusPill` (replaces the Apex-hotlinked status images) · `ClassFilter` (segmented) · `AlertStack` (toasts, top-right desktop / top edge phone, with Locate for pit alerts).
+   - `lib/teamName.ts` holds `getTeamClass` / `displayTeamName` (the "1 - " / "2 - " prefix is shown as a class chip, not in the name).
+   - **Standings are the hero**: nothing sits above them except the app bar and the My-team strip. Track selection lives in the rail/sheet, not in the content column.
+   - **Local preview without clobbering prod**: `NEXT_DIST_DIR=.next-dev npx next dev -p 3001` (see `next.config.ts`). A plain `next dev`/`next build` in `racing-analyzer/` writes into `.next`, which the pm2 frontend serves from — running one while pm2 is up breaks every chunk URL until you rebuild and `pm2 restart lt-analyzer-frontend`.
+   - Tests: `__tests__/redesign/` (theme provider, StatusPill, MyTeamStrip context math, TrackRail grouping/search/sheet, StandingsRow, tabs + class filter).
 
 7. **Pit Stop Detection**: The system detects pit stops by monitoring lap time thresholds and position changes. Configuration is done through `PitStopConfig` component.
 
@@ -495,10 +492,7 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
       - Top teams query: ~6s (complex aggregation, acceptable for one-time load)
 
 21. **Dashboard Navigation**:
-    - **Link to Data Page**: Blue button "📊 Team Data Analysis" in track selector section
-      - One-click access to team analysis features
-      - Positioned below session status indicator
-      - Themed styling (adapts to light/dark mode)
+    - **Driver stats** (`/data`) is reachable from the app bar on desktop and from the account menu on phones. The `/data` and `/team/[teamName]` pages still use the older hard-coded dark styling and have not been moved to the token system yet.
 
 22. **Fleet Tracker** (`racing-analyzer/app/components/RaceDashboard/FleetTracker.tsx`, `KartAssignmentEntry.tsx`, `race_ui.py`, `multi_track_manager.py`):
     - **Problem it solves**: in endurance races a team keeps its competition number but physically swaps karts every stint; the timing feed only ever exposes *team* identity (`no`/`dr`), never the physical machine. Fleet Tracker lets the operator track which physical kart each team is on, rank the fleet by pace, and spot fast/slow machines entering the pits.

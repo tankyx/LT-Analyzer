@@ -71,77 +71,91 @@ function LoginInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900">
-      <div className="max-w-md w-full space-y-6">
-        <h2 className="mt-6 text-center text-3xl font-extrabold text-white">
-          LT-Analyzer Login
-        </h2>
-
-        {justReset && (
-          <div className="rounded-md bg-green-900 p-3 text-sm text-green-200">
-            Password updated. You can log in below.
+    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink p-4">
+      <div className="w-full max-w-sm flex flex-col gap-6">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-[9px] bg-accent text-accent-ink font-cond font-bold text-lg flex items-center justify-center">
+            LT
           </div>
-        )}
-
-        <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
-          <div className="rounded-md shadow-sm -space-y-px">
-            <input
-              id="username"
-              name="username"
-              type="text"
-              autoComplete="username"
-              required
-              className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-700 placeholder-gray-500 text-white bg-gray-800 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-              placeholder="Username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-700 placeholder-gray-500 text-white bg-gray-800 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+          <div className="flex flex-col">
+            <span className="font-cond font-bold text-2xl tracking-wide leading-none">LT-ANALYZER</span>
+            <span className="text-xs text-muted mt-1">Live timing analysis</span>
           </div>
+        </div>
 
-          <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
+        <div className="rounded-2xl border border-line bg-surface p-5 md:p-6 flex flex-col gap-4">
+          <h1 className="text-lg font-semibold">Sign in</h1>
 
-          {error && (
-            <div className="rounded-md bg-red-900 p-3">
-              <p className="text-sm text-red-200">{error}</p>
-              {unverifiedEmail && (
-                <div className="mt-2 text-sm">
-                  <button
-                    type="button"
-                    onClick={resend}
-                    className="text-blue-300 underline"
-                  >
-                    Resend verification email
-                  </button>
-                  {resendStatus && <p className="mt-1 text-xs text-red-100">{resendStatus}</p>}
-                </div>
-              )}
+          {justReset && (
+            <div className="rounded-lg border border-live/50 bg-live/10 px-3 py-2 text-sm">
+              Password updated. You can log in below.
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-          >
-            {loading ? 'Logging in...' : 'Sign in'}
-          </button>
+          <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted">Username</span>
+              <input
+                id="username"
+                name="username"
+                type="text"
+                autoComplete="username"
+                required
+                className="h-11 px-3 rounded-lg border border-line bg-canvas text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50"
+                placeholder="Username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted">Password</span>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                className="h-11 px-3 rounded-lg border border-line bg-canvas text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
 
-          <div className="flex justify-between text-sm text-gray-400">
-            <Link href="/forgot-password" className="hover:text-blue-300">Forgot password?</Link>
-            <Link href="/register" className="hover:text-blue-300">Create account</Link>
-          </div>
-        </form>
+            <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
+
+            {error && (
+              <div className="rounded-lg border border-alarm/50 bg-alarm/10 px-3 py-2">
+                <p className="text-sm">{error}</p>
+                {unverifiedEmail && (
+                  <div className="mt-2 text-sm">
+                    <button
+                      type="button"
+                      onClick={resend}
+                      className="text-info underline"
+                    >
+                      Resend verification email
+                    </button>
+                    {resendStatus && <p className="mt-1 text-xs text-muted">{resendStatus}</p>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="h-11 rounded-lg bg-accent text-accent-ink font-bold text-sm hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-50"
+            >
+              {loading ? 'Logging in…' : 'Sign in'}
+            </button>
+
+            <div className="flex justify-between text-sm text-muted">
+              <Link href="/forgot-password" className="hover:text-ink">Forgot password?</Link>
+              <Link href="/register" className="hover:text-ink">Create account</Link>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );
@@ -149,7 +163,7 @@ function LoginInner() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-gray-900" />}>
+    <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
       <LoginInner />
     </Suspense>
   );

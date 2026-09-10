@@ -17,8 +17,8 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900">
-        <div className="text-white">Loading...</div>
+      <div className="flex items-center justify-center min-h-screen bg-canvas text-ink">
+        <div className="w-10 h-10 border-[3px] border-accent border-t-transparent rounded-full animate-spin" role="status" aria-label="Loading" />
       </div>
     );
   }
