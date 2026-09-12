@@ -229,4 +229,68 @@ describe('StintPlanner presets', () => {
     expect(storedPreset().id).toBe('legacy');
     expect(storedPreset().stintAssignments?.length).toBeGreaterThan(0);
   });
+
+  test('a preset can be renamed in place, without creating a second one', async () => {
+    renderPlanner();
+    await saveAsNew('6 Hour Race');
+    await waitFor(() => expect(getTrackPresets(TRACK_ID)!.presets).toHaveLength(1));
+    const originalId = storedPreset().id;
+    const originalStints = storedPreset().config.numStints;
+
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    const field = screen.getByLabelText('Preset name');
+    expect(field).toHaveValue('6 Hour Race');
+    await userEvent.clear(field);
+    await userEvent.type(field, '6h Endurance');
+    await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
+
+    const stored = getTrackPresets(TRACK_ID)!.presets;
+    expect(stored).toHaveLength(1);
+    expect(stored[0].id).toBe(originalId);
+    expect(stored[0].name).toBe('6h Endurance');
+    // The plan travels with it untouched.
+    expect(stored[0].config.numStints).toBe(originalStints);
+    expect(stored[0].driverNames?.length).toBeGreaterThan(0);
+  });
+
+  test('renaming onto another presets name is refused', async () => {
+    renderPlanner();
+    await saveAsNew('6 Hour Race');
+    await bumpStints('10');
+    await saveAsNew('24h Endurance');
+    await waitFor(() => expect(getTrackPresets(TRACK_ID)!.presets).toHaveLength(2));
+
+    // "24h Endurance" is selected after saving it; rename it onto the other.
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    const field = screen.getByLabelText('Preset name');
+    await userEvent.clear(field);
+    await userEvent.type(field, '6 HOUR RACE');
+    await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('"6 Hour Race" already exists');
+    expect(getTrackPresets(TRACK_ID)!.presets.map(p => p.name)).toEqual(['6 Hour Race', '24h Endurance']);
+  });
+
+  test('a preset can be recapitalised, and rename can be cancelled', async () => {
+    renderPlanner();
+    await saveAsNew('6 hour race');
+    await waitFor(() => expect(getTrackPresets(TRACK_ID)!.presets).toHaveLength(1));
+
+    // Its own name is not a clash with itself.
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    const field = screen.getByLabelText('Preset name');
+    await userEvent.clear(field);
+    await userEvent.type(field, '6 Hour Race');
+    await userEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    await waitFor(() => expect(storedPreset().name).toBe('6 Hour Race'));
+
+    // Cancelling leaves the name alone.
+    await userEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    await userEvent.clear(screen.getByLabelText('Preset name'));
+    await userEvent.type(screen.getByLabelText('Preset name'), 'Something else');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(storedPreset().name).toBe('6 Hour Race');
+    expect(screen.queryByLabelText('Preset name')).toBeNull();
+  });
 });

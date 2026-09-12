@@ -115,6 +115,10 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   const [clashingPresetId, setClashingPresetId] = useState<string | null>(null);
   // Auto-save feedback for the selected preset: idle → saving → saved.
   const [presetSaveState, setPresetSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  // Renaming the selected preset in place (its plan is untouched).
+  const [renamingPreset, setRenamingPreset] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   // --- Phase 2.5: cross-device sync ----------------------------------------
   // Mirror the four planner-related fields (config, presets, driverNames,
@@ -139,9 +143,19 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   // is not enough — state and the snapshot are not always in step within a
   // render — so edits are marked at their source instead.
   const userEditedRef = useRef<Set<string>>(new Set());
+  // When each field was last edited here. A snapshot fetched before that
+  // moment is stale for the field and must not be applied over the edit.
+  const lastLocalEditRef = useRef<Record<string, number>>({});
   const markUserEdit = (...fields: string[]) => {
-    fields.forEach(f => userEditedRef.current.add(f));
+    const now = Date.now();
+    fields.forEach(f => {
+      userEditedRef.current.add(f);
+      lastLocalEditRef.current[f] = now;
+    });
   };
+  /** True when the user touched `field` after `since` (epoch ms). */
+  const editedSince = (field: string, since: number) =>
+    (lastLocalEditRef.current[field] ?? 0) > since;
   /** Schedule a PUT for `field`, but only if the user actually changed it. */
   const schedulePref = (field: string, patch: Partial<UserTrackPrefs>) => {
     if (!userEditedRef.current.has(field)) return;
@@ -157,25 +171,38 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     setHasServerPrefsSynced(false);
 
     let cancelled = false;
+    const hydrationStartedAt = Date.now();
     (async () => {
       try {
         const prefs = await fetchUserPrefs(trackId);
         if (cancelled) return;
         // Apply server values when they're meaningful. If server has empties
         // (new account / new track), we keep whatever came from localStorage.
-        if (prefs.stint_planner_config && Object.keys(prefs.stint_planner_config).length > 0) {
+        if (
+          prefs.stint_planner_config && Object.keys(prefs.stint_planner_config).length > 0 &&
+          !editedSince('stint_planner_config', hydrationStartedAt)
+        ) {
           setConfig(prefs.stint_planner_config as unknown as StintConfig);
         }
-        if (Array.isArray(prefs.driver_names) && prefs.driver_names.length > 0) {
+        if (
+          Array.isArray(prefs.driver_names) && prefs.driver_names.length > 0 &&
+          !editedSince('driver_names', hydrationStartedAt)
+        ) {
           setDriverNames(prefs.driver_names);
         }
         if (typeof prefs.current_driver_index === 'number') {
           setCurrentDriverIndex(prefs.current_driver_index);
         }
-        if (Array.isArray(prefs.stint_planner_presets) && prefs.stint_planner_presets.length > 0) {
+        if (
+          Array.isArray(prefs.stint_planner_presets) && prefs.stint_planner_presets.length > 0 &&
+          !editedSince('stint_planner_presets', hydrationStartedAt)
+        ) {
           setAvailablePresets(prefs.stint_planner_presets as unknown as StintPreset[]);
         }
-        if (Array.isArray(prefs.stint_assignments) && prefs.stint_assignments.length > 0) {
+        if (
+          Array.isArray(prefs.stint_assignments) && prefs.stint_assignments.length > 0 &&
+          !editedSince('stint_assignments', hydrationStartedAt)
+        ) {
           setStintAssignments(prefs.stint_assignments as unknown as StintAssignment[]);
         }
       } catch (err) {
@@ -205,6 +232,12 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       if (event.updated_at && event.updated_at === getLastSeenUpdatedAt(trackId)) {
         return; // our own write coming back
       }
+      // The server emits this ping BEFORE its PUT response returns, so our
+      // own write can arrive here before setLastSeenUpdatedAt has recorded
+      // it and slip past the dedup above. Anything the user types while the
+      // fetch below is in flight would then be overwritten by the snapshot,
+      // which is why every apply is guarded on editedSince().
+      const fetchStartedAt = Date.now();
       try {
         await prefsDebouncerRef.current?.flush();
         const fresh = await fetchUserPrefs(trackId);
@@ -212,19 +245,35 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         // bounces false → true so the persist effects stay quiet during the
         // batch, and nothing here marks a field as user-edited.
         setHasServerPrefsSynced(false);
-        if (fresh.stint_planner_config && Object.keys(fresh.stint_planner_config).length > 0) {
+        if (
+          fresh.stint_planner_config &&
+          Object.keys(fresh.stint_planner_config).length > 0 &&
+          !editedSince('stint_planner_config', fetchStartedAt)
+        ) {
           setConfig(fresh.stint_planner_config as unknown as StintConfig);
         }
-        if (Array.isArray(fresh.driver_names) && fresh.driver_names.length > 0) {
+        if (
+          Array.isArray(fresh.driver_names) && fresh.driver_names.length > 0 &&
+          !editedSince('driver_names', fetchStartedAt)
+        ) {
           setDriverNames(fresh.driver_names);
         }
-        if (typeof fresh.current_driver_index === 'number') {
+        if (
+          typeof fresh.current_driver_index === 'number' &&
+          !editedSince('current_driver_index', fetchStartedAt)
+        ) {
           setCurrentDriverIndex(fresh.current_driver_index);
         }
-        if (Array.isArray(fresh.stint_planner_presets)) {
+        if (
+          Array.isArray(fresh.stint_planner_presets) &&
+          !editedSince('stint_planner_presets', fetchStartedAt)
+        ) {
           setAvailablePresets(fresh.stint_planner_presets as unknown as StintPreset[]);
         }
-        if (Array.isArray(fresh.stint_assignments)) {
+        if (
+          Array.isArray(fresh.stint_assignments) &&
+          !editedSince('stint_assignments', fetchStartedAt)
+        ) {
           setStintAssignments(fresh.stint_assignments as unknown as StintAssignment[]);
         }
         setTimeout(() => setHasServerPrefsSynced(true), 0);
@@ -837,6 +886,44 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     closeSaveDialog();
   };
 
+  const startRenamePreset = () => {
+    if (!selectedPreset) return;
+    setRenameValue(selectedPreset.name);
+    setRenameError(null);
+    setRenamingPreset(true);
+  };
+
+  const cancelRenamePreset = () => {
+    setRenamingPreset(false);
+    setRenameValue('');
+    setRenameError(null);
+  };
+
+  /**
+   * Rename the selected preset in place. Only the label changes — the plan
+   * stays as it is — and the id is kept, so this updates the preset instead
+   * of creating a second one under the new name.
+   */
+  const handleRenamePreset = () => {
+    const name = renameValue.trim();
+    if (!name || !selectedPreset || trackId === undefined || !trackName) return;
+
+    // Names stay unique per track. Excluding this preset lets the user fix
+    // the capitalisation or spacing of its own name.
+    const clash = findPresetByName(availablePresets, name, selectedPreset.id);
+    if (clash) {
+      setRenameError(`"${clash.name}" already exists for this track.`);
+      return;
+    }
+
+    const renamed: StintPreset = { ...selectedPreset, name };
+    markUserEdit('stint_planner_presets');
+    saveTrackPreset(trackId, trackName, renamed);
+    setAvailablePresets(prev => prev.map(p => (p.id === renamed.id ? renamed : p)));
+    setPresetSaveState('saved');
+    cancelRenamePreset();
+  };
+
   const handleDeletePreset = () => {
     if (!selectedPresetId || trackId === undefined) return;
 
@@ -896,43 +983,112 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
               {trackName} presets:
             </label>
 
-            <select
-              id="stint-preset-select"
-              value={selectedPresetId}
-              onChange={(e) => handlePresetSelect(e.target.value)}
-              className={`flex-1 min-w-[200px] p-2 rounded border ${
-                isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-              }`}
-              disabled={availablePresets.length === 0}
-            >
-              <option value="">-- No preset selected --</option>
-              {availablePresets.map(preset => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.name}
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={() => (showSavePresetDialog ? closeSaveDialog() : setShowSavePresetDialog(true))}
-              className={`px-4 py-2 rounded ${
-                isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
-              }`}
-            >
-              Save as new
-            </button>
-
-            {selectedPresetId && (
-              <button
-                onClick={handleDeletePreset}
-                className={`px-4 py-2 rounded ${
-                  isDarkMode ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-red-500 hover:bg-red-600 text-white'
+            {renamingPreset ? (
+              <input
+                type="text"
+                value={renameValue}
+                aria-label="Preset name"
+                aria-invalid={!!renameError}
+                autoFocus
+                onChange={(e) => {
+                  setRenameValue(e.target.value);
+                  setRenameError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleRenamePreset();
+                  if (e.key === 'Escape') cancelRenamePreset();
+                }}
+                className={`flex-1 min-w-[200px] p-2 rounded border ${
+                  renameError
+                    ? 'border-red-500'
+                    : isDarkMode ? 'border-gray-600' : 'border-gray-300'
+                } ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}
+              />
+            ) : (
+              <select
+                id="stint-preset-select"
+                value={selectedPresetId}
+                onChange={(e) => handlePresetSelect(e.target.value)}
+                className={`flex-1 min-w-[200px] p-2 rounded border ${
+                  isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
                 }`}
+                disabled={availablePresets.length === 0}
               >
-                Delete
-              </button>
+                <option value="">-- No preset selected --</option>
+                {availablePresets.map(preset => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {renamingPreset ? (
+              <>
+                <button
+                  onClick={handleRenamePreset}
+                  disabled={!renameValue.trim()}
+                  className={`px-4 py-2 rounded ${
+                    !renameValue.trim()
+                      ? 'bg-gray-400 cursor-not-allowed text-gray-200'
+                      : isDarkMode
+                      ? 'bg-green-600 hover:bg-green-700 text-white'
+                      : 'bg-green-500 hover:bg-green-600 text-white'
+                  }`}
+                >
+                  Save name
+                </button>
+                <button
+                  onClick={cancelRenamePreset}
+                  className={`px-4 py-2 rounded ${
+                    isDarkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-300 hover:bg-gray-400 text-gray-900'
+                  }`}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                {selectedPreset && (
+                  <button
+                    onClick={startRenamePreset}
+                    title={`Rename "${selectedPreset.name}" without creating a second preset`}
+                    className={`px-4 py-2 rounded ${
+                      isDarkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                    }`}
+                  >
+                    Rename
+                  </button>
+                )}
+
+                <button
+                  onClick={() => (showSavePresetDialog ? closeSaveDialog() : setShowSavePresetDialog(true))}
+                  className={`px-4 py-2 rounded ${
+                    isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
+                  }`}
+                >
+                  Save as new
+                </button>
+
+                {selectedPresetId && (
+                  <button
+                    onClick={handleDeletePreset}
+                    className={`px-4 py-2 rounded ${
+                      isDarkMode ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-red-500 hover:bg-red-600 text-white'
+                    }`}
+                  >
+                    Delete
+                  </button>
+                )}
+              </>
             )}
           </div>
+
+          {renameError && (
+            <div role="alert" className={`mt-2 text-xs ${isDarkMode ? 'text-red-300' : 'text-red-700'}`}>
+              {renameError} Pick another name.
+            </div>
+          )}
 
           {/* Auto-save status for the selected preset. */}
           {selectedPreset && (

@@ -141,4 +141,36 @@ describe('StintPlanner cross-device sync', () => {
     await waitFor(() => expect(scheduledFields()).toContain('stint_planner_config'));
     await waitFor(() => expect(scheduledFields()).toContain('stint_assignments'));
   });
+
+  test('a snapshot in flight never overwrites a name the user is still typing', async () => {
+    (getPrefs as jest.Mock).mockResolvedValue(prefsPayload());
+    render(<StintPlanner trackId={TRACK_ID} trackName="Mariembourg" />);
+    await waitFor(() => expect(prefsListener).not.toBeNull());
+
+    // The server emits prefs_updated BEFORE its PUT response returns, so our
+    // own write can slip past the updated_at dedup. Hold the fetch open to
+    // stand in for that window.
+    let releaseFetch: (() => void) | null = null;
+    (getPrefs as jest.Mock).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseFetch = () =>
+            resolve(prefsPayload({ driver_names: ['Tan', 'Driver 2', 'Driver 3', 'Driver 4'] }));
+        }),
+    );
+
+    const push = prefsListener!({ track_id: TRACK_ID, updated_at: '2026-09-12T11:00:00Z' });
+    await waitFor(() => expect(releaseFetch).not.toBeNull());
+
+    // The user keeps typing while that fetch is outstanding.
+    fireEvent.change(screen.getByLabelText('Driver 1'), { target: { value: 'Tanguy' } });
+    await waitFor(() => expect(screen.getByLabelText('Driver 1')).toHaveValue('Tanguy'));
+
+    releaseFetch!();
+    await push;
+
+    // The stale snapshot must not have reverted the field to "Tan".
+    await waitFor(() => expect(screen.getByLabelText('Driver 1')).toHaveValue('Tanguy'));
+    expect(screen.getByLabelText('Driver 1')).toHaveValue('Tanguy');
+  });
 });
