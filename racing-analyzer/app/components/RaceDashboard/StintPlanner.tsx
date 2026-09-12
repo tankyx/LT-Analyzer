@@ -15,12 +15,13 @@ import {
   setActivePreset,
   getActivePreset,
   findPresetByName,
-  isSameStintConfig
+  presetMatchesPlan
 } from '../../utils/persistence';
 import {
   getPrefs as fetchUserPrefs,
   makePrefsDebouncer,
   getLastSeenUpdatedAt,
+  UserTrackPrefs,
 } from '../../services/UserPrefsService';
 import webSocketService from '../../services/WebSocketService';
 
@@ -112,8 +113,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   // refuse to create a duplicate and offer to overwrite that one instead.
   const [presetNameError, setPresetNameError] = useState<string | null>(null);
   const [clashingPresetId, setClashingPresetId] = useState<string | null>(null);
-  // Transient "Saved" confirmation on the preset that was just written.
-  const [justSavedPresetId, setJustSavedPresetId] = useState<string | null>(null);
+  // Auto-save feedback for the selected preset: idle → saving → saved.
+  const [presetSaveState, setPresetSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   // --- Phase 2.5: cross-device sync ----------------------------------------
   // Mirror the four planner-related fields (config, presets, driverNames,
@@ -126,6 +127,27 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   // every initial setState would echo back to the server and we'd loop.
   const prefsDebouncerRef = useRef<ReturnType<typeof makePrefsDebouncer> | null>(null);
   const [hasServerPrefsSynced, setHasServerPrefsSynced] = useState(false);
+
+  // Only fields the USER changed here are pushed to the server.
+  //
+  // The persist effects below watch state, and state also changes when we
+  // apply a snapshot from the server or when a derived value recomputes. Left
+  // unguarded, applying a value pushed by another tab immediately schedules a
+  // PUT of that same value, which broadcasts again: two tabs on one account
+  // bounce values off each other forever, and a tab that had not yet re-
+  // rendered can push its stale copy over a teammate's edit. Comparing values
+  // is not enough — state and the snapshot are not always in step within a
+  // render — so edits are marked at their source instead.
+  const userEditedRef = useRef<Set<string>>(new Set());
+  const markUserEdit = (...fields: string[]) => {
+    fields.forEach(f => userEditedRef.current.add(f));
+  };
+  /** Schedule a PUT for `field`, but only if the user actually changed it. */
+  const schedulePref = (field: string, patch: Partial<UserTrackPrefs>) => {
+    if (!userEditedRef.current.has(field)) return;
+    userEditedRef.current.delete(field);
+    prefsDebouncerRef.current?.schedule(patch);
+  };
 
   useEffect(() => {
     if (trackId === undefined) return;
@@ -168,13 +190,14 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     };
   }, [trackId]);
 
-  // Phase 2.5 live-sync (partial): re-fetch driver_names / current_driver_index
-  // / stint_planner_presets when another tab/device writes. We DELIBERATELY
-  // skip stint_planner_config here — that field races with the local preset-
-  // selection flow (setConfig(preset.config) then debounced PUT), and an
-  // intermediate fetch would revert the just-applied preset to the stale
-  // server snapshot. Config still cross-device-syncs on track change / page
-  // reload via the hydration effect above.
+  // Phase 2.5 live-sync: re-fetch the planner fields when another tab or
+  // device writes them, so everyone signed into the account converges.
+  //
+  // stint_planner_config IS applied here. It used to be skipped because a
+  // fetch could land mid preset-selection and revert the just-applied config,
+  // but the pending PUT is flushed before the fetch below, and presets now
+  // auto-save: leaving config stale would make this tab write its old numbers
+  // back over a teammate's edit on the next auto-save.
   useEffect(() => {
     if (trackId === undefined) return;
     const unsubscribe = webSocketService.addPrefsListener(async (event) => {
@@ -185,11 +208,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       try {
         await prefsDebouncerRef.current?.flush();
         const fresh = await fetchUserPrefs(trackId);
-        // Suppress the state-watching effects from echoing back. The flag
-        // bounces false → true synchronously so the schedule() guards see
-        // false during the in-flight setState batch.
+        // Applying a snapshot must not look like a local edit: the flag
+        // bounces false → true so the persist effects stay quiet during the
+        // batch, and nothing here marks a field as user-edited.
         setHasServerPrefsSynced(false);
-        // NOTE: stint_planner_config deliberately NOT applied — see comment.
+        if (fresh.stint_planner_config && Object.keys(fresh.stint_planner_config).length > 0) {
+          setConfig(fresh.stint_planner_config as unknown as StintConfig);
+        }
         if (Array.isArray(fresh.driver_names) && fresh.driver_names.length > 0) {
           setDriverNames(fresh.driver_names);
         }
@@ -251,7 +276,16 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           // Apply the preset config
           setConfig(activePreset.config);
 
-          // Reinitialize stints based on preset config
+          // Restore the plan the preset carries (names + stint table).
+          if (activePreset.driverNames && activePreset.driverNames.length > 0) {
+            setDriverNames(activePreset.driverNames);
+          }
+          if (activePreset.stintAssignments && activePreset.stintAssignments.length > 0) {
+            setStintAssignments(activePreset.stintAssignments);
+            return;
+          }
+
+          // Legacy preset (config only): rebuild the stint table from it.
           const assignments: StintAssignment[] = [];
           let currentTime = 0;
           const totalPitTime = activePreset.config.pitDuration * (activePreset.config.numStints - 1);
@@ -537,7 +571,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   useEffect(() => {
     saveStintConfig(config);
     if (hasServerPrefsSynced) {
-      prefsDebouncerRef.current?.schedule({ stint_planner_config: config as unknown as Record<string, unknown> });
+      schedulePref('stint_planner_config',
+        { stint_planner_config: config as unknown as Record<string, unknown> });
     }
   }, [config, hasServerPrefsSynced]);
 
@@ -545,7 +580,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   useEffect(() => {
     saveDriverNames(driverNames);
     if (hasServerPrefsSynced) {
-      prefsDebouncerRef.current?.schedule({ driver_names: driverNames });
+      schedulePref('driver_names', { driver_names: driverNames });
     }
   }, [driverNames, hasServerPrefsSynced]);
 
@@ -555,7 +590,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   useEffect(() => {
     saveStintAssignments(stintAssignments);
     if (hasServerPrefsSynced) {
-      prefsDebouncerRef.current?.schedule({
+      schedulePref('stint_assignments', {
         stint_assignments: stintAssignments as unknown as Array<Record<string, unknown>>,
       });
     }
@@ -565,7 +600,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   useEffect(() => {
     saveCurrentDriverIndex(currentDriverIndex);
     if (hasServerPrefsSynced) {
-      prefsDebouncerRef.current?.schedule({ current_driver_index: currentDriverIndex });
+      schedulePref('current_driver_index',
+        { current_driver_index: currentDriverIndex });
     }
   }, [currentDriverIndex, hasServerPrefsSynced]);
 
@@ -574,7 +610,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   // whenever the in-memory list changes so they survive a device switch.
   useEffect(() => {
     if (hasServerPrefsSynced && trackId !== undefined) {
-      prefsDebouncerRef.current?.schedule({
+      schedulePref('stint_planner_presets', {
         stint_planner_presets: availablePresets as unknown as Array<Record<string, unknown>>,
       });
     }
@@ -615,16 +651,21 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   };
 
   const handleConfigChange = (field: keyof StintConfig, value: number) => {
+    // Changing the config also rebuilds the stint table and can resize the
+    // driver list, so all three become the user's to publish.
+    markUserEdit('stint_planner_config', 'stint_assignments', 'driver_names');
     setConfig(prev => ({ ...prev, [field]: value }));
   };
 
   const handleDriverNameChange = (index: number, name: string) => {
+    markUserEdit('driver_names');
     const newNames = [...driverNames];
     newNames[index] = name;
     setDriverNames(newNames);
   };
 
   const handleStintDurationChange = (stintIndex: number, duration: number) => {
+    markUserEdit('stint_assignments');
     const newAssignments = [...stintAssignments];
     const oldDuration = newAssignments[stintIndex].duration;
     const timeDifference = duration - oldDuration;
@@ -675,6 +716,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   };
 
   const handleStintDriverChange = (stintIndex: number, driverNum: number) => {
+    markUserEdit('stint_assignments');
     const newAssignments = [...stintAssignments];
     newAssignments[stintIndex].driver = driverNum;
     setStintAssignments(newAssignments);
@@ -682,12 +724,24 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
   // Preset handlers
   const handlePresetSelect = (presetId: string) => {
+    markUserEdit('stint_planner_config', 'driver_names', 'stint_assignments');
     setSelectedPresetId(presetId);
+    setPresetSaveState('idle');
     if (presetId && trackId !== undefined) {
       const preset = availablePresets.find(p => p.id === presetId);
       if (preset) {
         setConfig(preset.config);
         setActivePreset(trackId, presetId);
+
+        // A preset carries its driver line-up and stint table too. Presets
+        // saved before those existed fall through to the rebuild below.
+        if (preset.driverNames && preset.driverNames.length > 0) {
+          setDriverNames(preset.driverNames);
+        }
+        if (preset.stintAssignments && preset.stintAssignments.length > 0) {
+          setStintAssignments(preset.stintAssignments);
+          return;
+        }
 
         // Force recalculate stints based on new config
         const assignments: StintAssignment[] = [];
@@ -720,6 +774,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     }
   };
 
+  /** The plan as it stands in the form — what a preset stores. */
+  const currentPlan = () => ({
+    config: { ...config },
+    driverNames: [...driverNames],
+    stintAssignments: stintAssignments.map(a => ({ ...a })),
+  });
+
   const closeSaveDialog = () => {
     setShowSavePresetDialog(false);
     setNewPresetName('');
@@ -737,18 +798,14 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     const target = availablePresets.find(p => p.id === presetId);
     if (!target) return;
 
-    const updated: StintPreset = { ...target, config: { ...config } };
+    const updated: StintPreset = { ...target, ...currentPlan() };
+    markUserEdit('stint_planner_presets');
     saveTrackPreset(trackId, trackName, updated);
     setAvailablePresets(prev => prev.map(p => (p.id === presetId ? updated : p)));
     setSelectedPresetId(presetId);
     setActivePreset(trackId, presetId);
-    setJustSavedPresetId(presetId);
+    setPresetSaveState('saved');
     closeSaveDialog();
-  };
-
-  const handleUpdatePreset = () => {
-    if (!selectedPresetId) return;
-    overwritePreset(selectedPresetId);
   };
 
   const handleSavePreset = () => {
@@ -768,14 +825,15 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     const newPreset: StintPreset = {
       id: presetId,
       name,
-      config: { ...config }
+      ...currentPlan(),
     };
 
+    markUserEdit('stint_planner_presets');
     saveTrackPreset(trackId, trackName, newPreset);
     setAvailablePresets(prev => [...prev, newPreset]);
     setSelectedPresetId(presetId);
     setActivePreset(trackId, presetId);
-    setJustSavedPresetId(presetId);
+    setPresetSaveState('saved');
     closeSaveDialog();
   };
 
@@ -785,6 +843,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     const target = availablePresets.find(p => p.id === selectedPresetId);
     if (!confirm(`Delete the preset "${target?.name ?? ''}"? This cannot be undone.`)) return;
 
+    markUserEdit('stint_planner_presets');
     deleteTrackPreset(trackId, selectedPresetId);
     const updatedPresets = availablePresets.filter(p => p.id !== selectedPresetId);
     setAvailablePresets(updatedPresets);
@@ -792,16 +851,38 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   };
 
   const selectedPreset = availablePresets.find(p => p.id === selectedPresetId) || null;
-  // The planner's live config has drifted from the stored preset, so Update
-  // has something to write.
-  const isPresetDirty = !!selectedPreset && !isSameStintConfig(selectedPreset.config, config);
+  // The form has drifted from the stored preset, so auto-save has work to do.
+  const isPresetDirty =
+    !!selectedPreset &&
+    !presetMatchesPlan(selectedPreset, { config, driverNames, stintAssignments });
 
-  // Clear the transient "Saved" badge shortly after a write.
+  /**
+   * Auto-save. With a preset selected, every edit to the config, the driver
+   * names or the stint table is written into that preset after a short pause
+   * — no save button. The preset list then mirrors to /api/me/prefs, so
+   * everyone signed into the account converges on the same plan.
+   *
+   * Guarded on hasServerPrefsSynced so hydration (local, server, or a push
+   * from another device) never echoes straight back as a write.
+   */
   useEffect(() => {
-    if (!justSavedPresetId) return;
-    const timer = setTimeout(() => setJustSavedPresetId(null), 2500);
+    if (!isPresetDirty || !hasServerPrefsSynced) return;
+    if (trackId === undefined || !trackName || !selectedPresetId) return;
+
+    setPresetSaveState('saving');
+    const timer = setTimeout(() => overwritePreset(selectedPresetId), 700);
     return () => clearTimeout(timer);
-  }, [justSavedPresetId]);
+    // overwritePreset closes over the current plan; re-created every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPresetDirty, hasServerPrefsSynced, trackId, trackName, selectedPresetId,
+      config, driverNames, stintAssignments]);
+
+  // Let the "Saved" confirmation fade back to idle.
+  useEffect(() => {
+    if (presetSaveState !== 'saved') return;
+    const timer = setTimeout(() => setPresetSaveState('idle'), 2500);
+    return () => clearTimeout(timer);
+  }, [presetSaveState]);
 
   return (
     <div className={`p-6 ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
@@ -832,28 +913,6 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
               ))}
             </select>
 
-            {/* Overwrite the selected preset with the current settings. */}
-            {selectedPreset && (
-              <button
-                onClick={handleUpdatePreset}
-                disabled={!isPresetDirty}
-                title={
-                  isPresetDirty
-                    ? `Overwrite "${selectedPreset.name}" with the current settings`
-                    : `"${selectedPreset.name}" already matches the current settings`
-                }
-                className={`px-4 py-2 rounded ${
-                  !isPresetDirty
-                    ? 'bg-gray-400 cursor-not-allowed text-gray-200'
-                    : isDarkMode
-                    ? 'bg-green-600 hover:bg-green-700 text-white'
-                    : 'bg-green-500 hover:bg-green-600 text-white'
-                }`}
-              >
-                Update
-              </button>
-            )}
-
             <button
               onClick={() => (showSavePresetDialog ? closeSaveDialog() : setShowSavePresetDialog(true))}
               className={`px-4 py-2 rounded ${
@@ -875,19 +934,23 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             )}
           </div>
 
-          {/* Status line: unsaved changes / just-saved confirmation. */}
-          {(isPresetDirty || justSavedPresetId) && (
+          {/* Auto-save status for the selected preset. */}
+          {selectedPreset && (
             <div
               role="status"
               className={`mt-2 text-xs ${
-                isPresetDirty
+                presetSaveState === 'saving' || isPresetDirty
                   ? isDarkMode ? 'text-amber-300' : 'text-amber-700'
-                  : isDarkMode ? 'text-green-300' : 'text-green-700'
+                  : presetSaveState === 'saved'
+                  ? isDarkMode ? 'text-green-300' : 'text-green-700'
+                  : isDarkMode ? 'text-gray-400' : 'text-gray-600'
               }`}
             >
-              {isPresetDirty
-                ? `Unsaved changes to "${selectedPreset?.name}" — Update overwrites it, Save as new keeps both.`
-                : 'Preset saved.'}
+              {presetSaveState === 'saving' || isPresetDirty
+                ? `Saving to "${selectedPreset.name}"…`
+                : presetSaveState === 'saved'
+                ? `Saved to "${selectedPreset.name}".`
+                : `Changes save automatically to "${selectedPreset.name}" for everyone on this account.`}
             </div>
           )}
 
@@ -984,7 +1047,10 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         </label>
         <select
           value={currentDriverIndex}
-          onChange={(e) => setCurrentDriverIndex(parseInt(e.target.value))}
+          onChange={(e) => {
+            markUserEdit('current_driver_index');
+            setCurrentDriverIndex(parseInt(e.target.value));
+          }}
           className={`w-full md:w-64 p-2 rounded border ${
             isDarkMode ? 'border-gray-600' : 'border-gray-300'
           }`}
@@ -1142,10 +1208,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {driverNames.map((name, index) => (
             <div key={index}>
-              <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor={`stint-driver-name-${index}`} className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                 Driver {index + 1}
               </label>
               <input
+                id={`stint-driver-name-${index}`}
                 type="text"
                 value={name}
                 onChange={(e) => handleDriverNameChange(index, e.target.value)}

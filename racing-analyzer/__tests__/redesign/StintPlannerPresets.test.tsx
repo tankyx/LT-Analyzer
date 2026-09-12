@@ -46,6 +46,16 @@ const bumpStints = async (value: string) => {
   await waitFor(() => expect(screen.getByLabelText(/number of stints/i)).toHaveValue(Number(value)));
 };
 
+const renameDriver = async (index: number, name: string) => {
+  fireEvent.change(screen.getByLabelText(`Driver ${index}`), { target: { value: name } });
+  await waitFor(() => expect(screen.getByLabelText(`Driver ${index}`)).toHaveValue(name));
+};
+
+/** Wait for the debounced auto-save to land on the stored preset. */
+const storedPreset = () => getTrackPresets(TRACK_ID)!.presets[0];
+const waitForAutoSave = async (check: (p: ReturnType<typeof storedPreset>) => boolean) =>
+  waitFor(() => expect(check(storedPreset())).toBe(true), { timeout: 4000 });
+
 describe('StintPlanner presets', () => {
   let store: Record<string, string>;
 
@@ -59,37 +69,57 @@ describe('StintPlanner presets', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
-  test('Update overwrites the selected preset instead of creating another one', async () => {
+  test('editing the plan auto-saves into the selected preset, without cloning it', async () => {
     renderPlanner();
     await saveAsNew('6 Hour Race');
     await waitFor(() => expect(getTrackPresets(TRACK_ID)!.presets).toHaveLength(1));
-    const originalId = getTrackPresets(TRACK_ID)!.presets[0].id;
-    const originalStints = getTrackPresets(TRACK_ID)!.presets[0].config.numStints;
+    const originalId = storedPreset().id;
 
     await bumpStints('9');
-    expect(await screen.findByText(/Unsaved changes to "6 Hour Race"/)).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Update' }));
+    await waitForAutoSave(p => p.config.numStints === 9);
 
     const stored = getTrackPresets(TRACK_ID)!.presets;
     expect(stored).toHaveLength(1);
     expect(stored[0].id).toBe(originalId);
     expect(stored[0].name).toBe('6 Hour Race');
-    expect(stored[0].config.numStints).toBe(9);
-    expect(stored[0].config.numStints).not.toBe(originalStints);
-    expect(screen.getByRole('status')).toHaveTextContent('Preset saved.');
   });
 
-  test('Update is disabled while the preset already matches the current settings', async () => {
+  test('a preset stores the driver names, and auto-saves later edits to them', async () => {
+    renderPlanner();
+    await renameDriver(1, 'Tanguy');
+    await renameDriver(2, 'Céline');
+    await saveAsNew('6 Hour Race');
+
+    await waitFor(() => expect(storedPreset().driverNames).toEqual(
+      expect.arrayContaining(['Tanguy', 'Céline']),
+    ));
+
+    await renameDriver(3, 'Marc');
+    await waitForAutoSave(p => !!p.driverNames?.includes('Marc'));
+    expect(getTrackPresets(TRACK_ID)!.presets).toHaveLength(1);
+  });
+
+  test('a preset stores the stint table', async () => {
+    renderPlanner();
+    await saveAsNew('6 Hour Race');
+
+    await waitFor(() => expect(storedPreset().stintAssignments?.length).toBeGreaterThan(0));
+    const table = storedPreset().stintAssignments!;
+    expect(table[0]).toEqual(
+      expect.objectContaining({ stint: 1, driver: expect.any(Number), duration: expect.any(Number) }),
+    );
+  });
+
+  test('the status line reports auto-saving rather than offering a save button', async () => {
     renderPlanner();
     await saveAsNew('6 Hour Race');
     await waitFor(() => expect(getTrackPresets(TRACK_ID)!.presets).toHaveLength(1));
 
-    // Freshly saved: the stored config matches the form, nothing to overwrite.
-    expect(screen.getByRole('button', { name: 'Update' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Update' })).toBeNull();
 
     await bumpStints('13');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Update' })).toBeEnabled());
+    expect(await screen.findByText(/Saving to "6 Hour Race"/)).toBeInTheDocument();
+    expect(await screen.findByText(/Saved to "6 Hour Race"/, undefined, { timeout: 4000 })).toBeInTheDocument();
   });
 
   test('a duplicate name is refused and never creates a second preset', async () => {
@@ -133,5 +163,70 @@ describe('StintPlanner presets', () => {
 
     await waitFor(() => expect(getTrackPresets(TRACK_ID)!.presets).toHaveLength(2));
     expect(getTrackPresets(TRACK_ID)!.presets.map(p => p.name)).toEqual(['6 Hour Race', '12h Endurance']);
+  });
+
+  test('switching presets restores each ones names and stint table', async () => {
+    renderPlanner();
+
+    await renameDriver(1, 'Tanguy');
+    await bumpStints('6');
+    await saveAsNew('6 Hour Race');
+    await waitFor(() => expect(storedPreset().driverNames?.[0]).toBe('Tanguy'));
+
+    await renameDriver(1, 'Marc');
+    await bumpStints('14');
+    await saveAsNew('24h Endurance');
+    await waitFor(() => expect(getTrackPresets(TRACK_ID)!.presets).toHaveLength(2));
+
+    const picker = screen.getByLabelText(/presets:/i);
+    const sixHourId = getTrackPresets(TRACK_ID)!.presets[0].id;
+    const enduranceId = getTrackPresets(TRACK_ID)!.presets[1].id;
+
+    await userEvent.selectOptions(picker, sixHourId);
+    await waitFor(() => expect(screen.getByLabelText('Driver 1')).toHaveValue('Tanguy'));
+    expect(screen.getByLabelText(/number of stints/i)).toHaveValue(6);
+
+    await userEvent.selectOptions(picker, enduranceId);
+    await waitFor(() => expect(screen.getByLabelText('Driver 1')).toHaveValue('Marc'));
+    expect(screen.getByLabelText(/number of stints/i)).toHaveValue(14);
+
+    // Switching back and forth must not have multiplied or reordered them.
+    expect(getTrackPresets(TRACK_ID)!.presets.map(p => p.name)).toEqual(['6 Hour Race', '24h Endurance']);
+  });
+
+  test('a legacy config-only preset still loads, and the first edit captures the full plan', async () => {
+    // A preset saved before presets carried names or a stint table.
+    store['lt_analyzer_track_stint_presets'] = JSON.stringify([
+      {
+        trackId: TRACK_ID,
+        trackName: TRACK_NAME,
+        activePresetId: 'legacy',
+        presets: [
+          {
+            id: 'legacy',
+            name: 'Old Preset',
+            config: {
+              numStints: 5,
+              minStintTime: 25,
+              maxStintTime: 60,
+              pitDuration: 5,
+              numDrivers: 4,
+              totalRaceTime: 360,
+            },
+          },
+        ],
+      },
+    ]);
+
+    renderPlanner();
+
+    // Config applied, stint table rebuilt from it, names left alone.
+    await waitFor(() => expect(screen.getByLabelText(/number of stints/i)).toHaveValue(5));
+    expect(screen.getByLabelText('Driver 1')).toHaveValue('Driver 1');
+
+    await renameDriver(1, 'Tanguy');
+    await waitForAutoSave(p => p.driverNames?.[0] === 'Tanguy');
+    expect(storedPreset().id).toBe('legacy');
+    expect(storedPreset().stintAssignments?.length).toBeGreaterThan(0);
   });
 });

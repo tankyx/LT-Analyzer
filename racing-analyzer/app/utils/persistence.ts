@@ -14,6 +14,16 @@ const STORAGE_KEYS = {
 } as const;
 
 // Types for stint presets
+export interface StintPresetAssignment {
+  driver: number;
+  stint: number;
+  duration: number;
+  isJoker: boolean;
+  isLong: boolean;
+  startTime: number;
+  endTime: number;
+}
+
 export interface StintPreset {
   id: string;
   name: string;
@@ -25,6 +35,21 @@ export interface StintPreset {
     numDrivers: number;
     totalRaceTime: number;
   };
+  /**
+   * A preset is the whole plan, not just the numbers: the driver line-up and
+   * the per-stint table travel with it. Both are optional because presets
+   * saved before this existed only carried `config` — selecting one of those
+   * keeps the current names and rebuilds the stint table from the config.
+   */
+  driverNames?: string[];
+  stintAssignments?: StintPresetAssignment[];
+}
+
+/** The editable plan a preset holds. */
+export interface StintPresetPlan {
+  config: StintPreset['config'];
+  driverNames: string[];
+  stintAssignments: StintPresetAssignment[];
 }
 
 export interface TrackStintPresets {
@@ -214,6 +239,33 @@ export const isSameStintConfig = (
     a.numDrivers === b.numDrivers &&
     a.totalRaceTime === b.totalRaceTime
   );
+};
+
+const sameAssignment = (a: StintPresetAssignment, b: StintPresetAssignment): boolean =>
+  a.driver === b.driver &&
+  a.stint === b.stint &&
+  a.duration === b.duration &&
+  a.isJoker === b.isJoker &&
+  a.isLong === b.isLong &&
+  a.startTime === b.startTime &&
+  a.endTime === b.endTime;
+
+/**
+ * True when a preset already holds exactly this plan — config, driver names
+ * and stint table. Drives auto-save: a preset that matches is not rewritten.
+ * A preset predating driverNames/stintAssignments never matches, so the first
+ * edit after selecting it captures the full plan.
+ */
+export const presetMatchesPlan = (preset: StintPreset, plan: StintPresetPlan): boolean => {
+  if (!isSameStintConfig(preset.config, plan.config)) return false;
+
+  if (!preset.driverNames || !preset.stintAssignments) return false;
+
+  if (preset.driverNames.length !== plan.driverNames.length) return false;
+  if (preset.driverNames.some((n, i) => n !== plan.driverNames[i])) return false;
+
+  if (preset.stintAssignments.length !== plan.stintAssignments.length) return false;
+  return preset.stintAssignments.every((a, i) => sameAssignment(a, plan.stintAssignments[i]));
 };
 
 /**

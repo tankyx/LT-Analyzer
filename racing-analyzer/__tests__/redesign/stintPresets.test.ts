@@ -6,9 +6,11 @@ import {
   findPresetByName,
   isSameStintConfig,
   normalizePresetName,
+  presetMatchesPlan,
   getTrackPresets,
   saveTrackPreset,
   StintPreset,
+  StintPresetPlan,
 } from '@/app/utils/persistence';
 
 const cfg = (over: Partial<StintPreset['config']> = {}): StintPreset['config'] => ({
@@ -97,5 +99,51 @@ describe('saveTrackPreset', () => {
 
     expect(getTrackPresets(1)!.presets.map(p => p.id)).toEqual(['a']);
     expect(getTrackPresets(2)!.presets.map(p => p.id)).toEqual(['c']);
+  });
+});
+
+describe('presetMatchesPlan', () => {
+  const assignment = (stint: number) => ({
+    driver: 1,
+    stint,
+    duration: 45,
+    isJoker: false,
+    isLong: false,
+    startTime: 0,
+    endTime: 45,
+  });
+
+  const plan = (over: Partial<StintPresetPlan> = {}): StintPresetPlan => ({
+    config: cfg(),
+    driverNames: ['Tanguy', 'Marc'],
+    stintAssignments: [assignment(1), assignment(2)],
+    ...over,
+  });
+
+  const full = (over: Partial<StintPreset> = {}): StintPreset => ({
+    ...preset('a', '6 Hour Race'),
+    driverNames: ['Tanguy', 'Marc'],
+    stintAssignments: [assignment(1), assignment(2)],
+    ...over,
+  });
+
+  test('true when config, names and stint table all match', () => {
+    expect(presetMatchesPlan(full(), plan())).toBe(true);
+  });
+
+  test('false when any part differs', () => {
+    expect(presetMatchesPlan(full(), plan({ config: cfg({ numStints: 7 }) }))).toBe(false);
+    expect(presetMatchesPlan(full(), plan({ driverNames: ['Tanguy', 'Celine'] }))).toBe(false);
+    expect(presetMatchesPlan(full(), plan({ driverNames: ['Tanguy'] }))).toBe(false);
+    expect(presetMatchesPlan(full(), plan({ stintAssignments: [assignment(1)] }))).toBe(false);
+    expect(
+      presetMatchesPlan(full(), plan({ stintAssignments: [assignment(1), { ...assignment(2), duration: 50 }] })),
+    ).toBe(false);
+  });
+
+  test('a legacy preset without names or a stint table never matches, so the first edit captures them', () => {
+    expect(presetMatchesPlan(preset('a', '6 Hour Race'), plan())).toBe(false);
+    expect(presetMatchesPlan(full({ stintAssignments: undefined }), plan())).toBe(false);
+    expect(presetMatchesPlan(full({ driverNames: undefined }), plan())).toBe(false);
   });
 });
