@@ -13,7 +13,9 @@ import {
   saveTrackPreset,
   deleteTrackPreset,
   setActivePreset,
-  getActivePreset
+  getActivePreset,
+  findPresetByName,
+  isSameStintConfig
 } from '../../utils/persistence';
 import {
   getPrefs as fetchUserPrefs,
@@ -106,6 +108,12 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   const [selectedPresetId, setSelectedPresetId] = useState<string>('');
   const [showSavePresetDialog, setShowSavePresetDialog] = useState(false);
   const [newPresetName, setNewPresetName] = useState('');
+  // Name clash handling: when the typed name matches an existing preset we
+  // refuse to create a duplicate and offer to overwrite that one instead.
+  const [presetNameError, setPresetNameError] = useState<string | null>(null);
+  const [clashingPresetId, setClashingPresetId] = useState<string | null>(null);
+  // Transient "Saved" confirmation on the preset that was just written.
+  const [justSavedPresetId, setJustSavedPresetId] = useState<string | null>(null);
 
   // --- Phase 2.5: cross-device sync ----------------------------------------
   // Mirror the four planner-related fields (config, presets, driverNames,
@@ -712,13 +720,54 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     }
   };
 
+  const closeSaveDialog = () => {
+    setShowSavePresetDialog(false);
+    setNewPresetName('');
+    setPresetNameError(null);
+    setClashingPresetId(null);
+  };
+
+  /**
+   * Write the current config into an existing preset, keeping its id and name.
+   * This is the "overwrite" path — used by the Update button and by accepting
+   * an overwrite when a typed name clashes.
+   */
+  const overwritePreset = (presetId: string) => {
+    if (trackId === undefined || !trackName) return;
+    const target = availablePresets.find(p => p.id === presetId);
+    if (!target) return;
+
+    const updated: StintPreset = { ...target, config: { ...config } };
+    saveTrackPreset(trackId, trackName, updated);
+    setAvailablePresets(prev => prev.map(p => (p.id === presetId ? updated : p)));
+    setSelectedPresetId(presetId);
+    setActivePreset(trackId, presetId);
+    setJustSavedPresetId(presetId);
+    closeSaveDialog();
+  };
+
+  const handleUpdatePreset = () => {
+    if (!selectedPresetId) return;
+    overwritePreset(selectedPresetId);
+  };
+
   const handleSavePreset = () => {
-    if (!newPresetName.trim() || trackId === undefined || !trackName) return;
+    const name = newPresetName.trim();
+    if (!name || trackId === undefined || !trackName) return;
+
+    // Preset names are unique per track. On a clash, don't create a second
+    // preset with the same label — offer to overwrite the existing one.
+    const clash = findPresetByName(availablePresets, name);
+    if (clash) {
+      setPresetNameError(`"${clash.name}" already exists for this track.`);
+      setClashingPresetId(clash.id);
+      return;
+    }
 
     const presetId = `preset_${Date.now()}`;
     const newPreset: StintPreset = {
       id: presetId,
-      name: newPresetName.trim(),
+      name,
       config: { ...config }
     };
 
@@ -726,20 +775,33 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     setAvailablePresets(prev => [...prev, newPreset]);
     setSelectedPresetId(presetId);
     setActivePreset(trackId, presetId);
-    setNewPresetName('');
-    setShowSavePresetDialog(false);
+    setJustSavedPresetId(presetId);
+    closeSaveDialog();
   };
 
   const handleDeletePreset = () => {
     if (!selectedPresetId || trackId === undefined) return;
 
-    if (confirm('Are you sure you want to delete this preset?')) {
-      deleteTrackPreset(trackId, selectedPresetId);
-      const updatedPresets = availablePresets.filter(p => p.id !== selectedPresetId);
-      setAvailablePresets(updatedPresets);
-      setSelectedPresetId(updatedPresets[0]?.id || '');
-    }
+    const target = availablePresets.find(p => p.id === selectedPresetId);
+    if (!confirm(`Delete the preset "${target?.name ?? ''}"? This cannot be undone.`)) return;
+
+    deleteTrackPreset(trackId, selectedPresetId);
+    const updatedPresets = availablePresets.filter(p => p.id !== selectedPresetId);
+    setAvailablePresets(updatedPresets);
+    setSelectedPresetId(updatedPresets[0]?.id || '');
   };
+
+  const selectedPreset = availablePresets.find(p => p.id === selectedPresetId) || null;
+  // The planner's live config has drifted from the stored preset, so Update
+  // has something to write.
+  const isPresetDirty = !!selectedPreset && !isSameStintConfig(selectedPreset.config, config);
+
+  // Clear the transient "Saved" badge shortly after a write.
+  useEffect(() => {
+    if (!justSavedPresetId) return;
+    const timer = setTimeout(() => setJustSavedPresetId(null), 2500);
+    return () => clearTimeout(timer);
+  }, [justSavedPresetId]);
 
   return (
     <div className={`p-6 ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
@@ -749,11 +811,12 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       {trackName && (
         <div className={`mb-6 p-4 rounded-lg border ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-blue-50 border-gray-300'}`}>
           <div className="flex items-center gap-3 flex-wrap">
-            <label className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-              {trackName} Presets:
+            <label htmlFor="stint-preset-select" className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+              {trackName} presets:
             </label>
 
             <select
+              id="stint-preset-select"
               value={selectedPresetId}
               onChange={(e) => handlePresetSelect(e.target.value)}
               className={`flex-1 min-w-[200px] p-2 rounded border ${
@@ -769,13 +832,35 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
               ))}
             </select>
 
+            {/* Overwrite the selected preset with the current settings. */}
+            {selectedPreset && (
+              <button
+                onClick={handleUpdatePreset}
+                disabled={!isPresetDirty}
+                title={
+                  isPresetDirty
+                    ? `Overwrite "${selectedPreset.name}" with the current settings`
+                    : `"${selectedPreset.name}" already matches the current settings`
+                }
+                className={`px-4 py-2 rounded ${
+                  !isPresetDirty
+                    ? 'bg-gray-400 cursor-not-allowed text-gray-200'
+                    : isDarkMode
+                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    : 'bg-green-500 hover:bg-green-600 text-white'
+                }`}
+              >
+                Update
+              </button>
+            )}
+
             <button
-              onClick={() => setShowSavePresetDialog(!showSavePresetDialog)}
+              onClick={() => (showSavePresetDialog ? closeSaveDialog() : setShowSavePresetDialog(true))}
               className={`px-4 py-2 rounded ${
                 isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
               }`}
             >
-              Save Preset
+              Save as new
             </button>
 
             {selectedPresetId && (
@@ -790,43 +875,84 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             )}
           </div>
 
+          {/* Status line: unsaved changes / just-saved confirmation. */}
+          {(isPresetDirty || justSavedPresetId) && (
+            <div
+              role="status"
+              className={`mt-2 text-xs ${
+                isPresetDirty
+                  ? isDarkMode ? 'text-amber-300' : 'text-amber-700'
+                  : isDarkMode ? 'text-green-300' : 'text-green-700'
+              }`}
+            >
+              {isPresetDirty
+                ? `Unsaved changes to "${selectedPreset?.name}" — Update overwrites it, Save as new keeps both.`
+                : 'Preset saved.'}
+            </div>
+          )}
+
           {/* Save Preset Dialog */}
           {showSavePresetDialog && (
-            <div className="mt-4 flex items-center gap-3">
-              <input
-                type="text"
-                value={newPresetName}
-                onChange={(e) => setNewPresetName(e.target.value)}
-                placeholder="Preset name (e.g., 6 Hour Race)"
-                className={`flex-1 p-2 rounded border ${
-                  isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-                }`}
-                onKeyPress={(e) => e.key === 'Enter' && handleSavePreset()}
-              />
-              <button
-                onClick={handleSavePreset}
-                disabled={!newPresetName.trim()}
-                className={`px-4 py-2 rounded ${
-                  !newPresetName.trim()
-                    ? 'bg-gray-400 cursor-not-allowed text-gray-200'
-                    : isDarkMode
-                    ? 'bg-green-600 hover:bg-green-700 text-white'
-                    : 'bg-green-500 hover:bg-green-600 text-white'
-                }`}
-              >
-                Save
-              </button>
-              <button
-                onClick={() => {
-                  setShowSavePresetDialog(false);
-                  setNewPresetName('');
-                }}
-                className={`px-4 py-2 rounded ${
-                  isDarkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-300 hover:bg-gray-400 text-gray-900'
-                }`}
-              >
-                Cancel
-              </button>
+            <div className="mt-4 flex flex-col gap-2">
+              <div className="flex items-center gap-3">
+                <input
+                  type="text"
+                  value={newPresetName}
+                  onChange={(e) => {
+                    setNewPresetName(e.target.value);
+                    setPresetNameError(null);
+                    setClashingPresetId(null);
+                  }}
+                  placeholder="Preset name (e.g., 6 Hour Race)"
+                  aria-label="New preset name"
+                  aria-invalid={!!presetNameError}
+                  className={`flex-1 p-2 rounded border ${
+                    presetNameError
+                      ? 'border-red-500'
+                      : isDarkMode ? 'border-gray-600' : 'border-gray-300'
+                  } ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSavePreset()}
+                />
+                <button
+                  onClick={handleSavePreset}
+                  disabled={!newPresetName.trim()}
+                  className={`px-4 py-2 rounded ${
+                    !newPresetName.trim()
+                      ? 'bg-gray-400 cursor-not-allowed text-gray-200'
+                      : isDarkMode
+                      ? 'bg-green-600 hover:bg-green-700 text-white'
+                      : 'bg-green-500 hover:bg-green-600 text-white'
+                  }`}
+                >
+                  Save
+                </button>
+                <button
+                  onClick={closeSaveDialog}
+                  className={`px-4 py-2 rounded ${
+                    isDarkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-300 hover:bg-gray-400 text-gray-900'
+                  }`}
+                >
+                  Cancel
+                </button>
+              </div>
+
+              {/* Name clash: names are unique per track, so offer the overwrite. */}
+              {presetNameError && (
+                <div role="alert" className={`flex items-center gap-3 flex-wrap text-xs ${isDarkMode ? 'text-red-300' : 'text-red-700'}`}>
+                  <span>{presetNameError}</span>
+                  {clashingPresetId && (
+                    <button
+                      onClick={() => overwritePreset(clashingPresetId)}
+                      className={`px-2 py-1 rounded font-semibold ${
+                        isDarkMode ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-amber-500 hover:bg-amber-600 text-white'
+                      }`}
+                    >
+                      Overwrite it
+                    </button>
+                  )}
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>or pick another name.</span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -885,10 +1011,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       {/* Configuration Form */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-numStints" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Number of Stints
           </label>
           <input
+            id="stint-numStints"
             type="number"
             min="1"
             max="20"
@@ -901,10 +1028,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         </div>
 
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-minStintTime" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Min Stint Time (minutes)
           </label>
           <input
+            id="stint-minStintTime"
             type="number"
             min="1"
             max="120"
@@ -917,10 +1045,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         </div>
 
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-maxStintTime" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Max Stint Time (minutes)
           </label>
           <input
+            id="stint-maxStintTime"
             type="number"
             min="1"
             max="120"
@@ -933,10 +1062,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         </div>
 
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-pitDuration" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Pit Duration (minutes)
           </label>
           <input
+            id="stint-pitDuration"
             type="number"
             min="0.1"
             max="30"
@@ -950,10 +1080,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         </div>
 
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-numDrivers" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Number of Drivers
           </label>
           <input
+            id="stint-numDrivers"
             type="number"
             min="1"
             max="10"
@@ -966,10 +1097,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         </div>
 
         <div>
-          <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-totalRaceTime" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
             Total Race Time (minutes)
           </label>
           <input
+            id="stint-totalRaceTime"
             type="number"
             min="30"
             max="1440"

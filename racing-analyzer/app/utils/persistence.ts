@@ -178,7 +178,48 @@ export const getTrackPresets = (trackId: number): TrackStintPresets | null => {
 };
 
 /**
- * Save a new preset for a track
+ * Canonical form of a preset name for comparison: trimmed, whitespace
+ * collapsed, case-folded. "6 Hour  Race" and "6 hour race" are the same name.
+ */
+export const normalizePresetName = (name: string): string =>
+  name.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Find a preset whose name collides with `name` (see normalizePresetName).
+ * `excludeId` skips one preset, so renaming a preset to its own name is fine.
+ * Preset names are unique per track — the UI offers to overwrite on a clash
+ * rather than silently creating a second preset with the same label.
+ */
+export const findPresetByName = (
+  presets: StintPreset[],
+  name: string,
+  excludeId?: string
+): StintPreset | undefined => {
+  const target = normalizePresetName(name);
+  if (!target) return undefined;
+  return presets.find(p => p.id !== excludeId && normalizePresetName(p.name) === target);
+};
+
+/** True when two stint configs are field-for-field identical. */
+export const isSameStintConfig = (
+  a: StintPreset['config'] | undefined,
+  b: StintPreset['config'] | undefined
+): boolean => {
+  if (!a || !b) return false;
+  return (
+    a.numStints === b.numStints &&
+    a.minStintTime === b.minStintTime &&
+    a.maxStintTime === b.maxStintTime &&
+    a.pitDuration === b.pitDuration &&
+    a.numDrivers === b.numDrivers &&
+    a.totalRaceTime === b.totalRaceTime
+  );
+};
+
+/**
+ * Save a preset for a track. Matching is by `id`, so passing a preset that
+ * already exists OVERWRITES it in place (name, config and list position are
+ * preserved); an unknown id is appended.
  */
 export const saveTrackPreset = (
   trackId: number,
