@@ -184,6 +184,16 @@ sqlite3 tracks.db "SELECT id, track_name, websocket_url FROM tracks"
   - Deletes all laps faster than threshold (useful for removing data errors)
   - Requires admin authentication
 
+### Team Pace (live pace tracking)
+- `GET /api/track/<id>/pace/team` - pace report for one team (`?team=<name>`, optional `?session_id=`; defaults to the track's live session). Login required.
+  - Each stint's mean minus the median of the **field during that stint's window** (leave-one-out, so a team never anchors its own reference; widens the window once, then falls back to the session median). Track conditions cancel, so stints hours apart compare.
+  - `verdict` is `keep` / `watch` / `consider_switch` / `switch` / `insufficient`, judged against the team's OWN earlier stints (median + MAD band, floor 0.25s) — that cancels the driver squad's level and leaves the machine. Under 5 clean laps it reads `insufficient`.
+  - Also returns per-stint rows, last-5-lap pace, a fading/holding/improving trend (each half residualised separately), the team's own norm, and the physical kart when a fleet is configured.
+  - Caveat surfaced in the UI: cancels conditions, **not** driver differences.
+  - Frontend: the **Pace** tab (`PaceMonitor.tsx`), refetched from `track_update` on a ~5s throttle.
+  - `"G - "` ghost rows are excluded from every field reference and median (`_is_ghost_team`).
+  - Tests: `tests/test_pace/`, `racing-analyzer/__tests__/redesign/PaceMonitor.test.tsx`.
+
 ### Fleet Tracker (endurance physical-machine tracking)
 All endpoints are **per-user** (scoped to the logged-in user) and require login. Reads + writes are all `@login_required` — there is no admin gate (any logged-in user manages their own fleet).
 - `GET /api/track/<id>/fleet/karts` - List the caller's physical-kart registry (`?active=0` to include retired)
