@@ -24,6 +24,15 @@ import {
   UserTrackPrefs,
 } from '../../services/UserPrefsService';
 import webSocketService from '../../services/WebSocketService';
+import {
+  StintConfig,
+  StintAssignment,
+  buildStintTable,
+  planFitsConfig,
+  planSignature,
+  plannedSpan,
+  drivingTime,
+} from './lib/stintPlan';
 
 interface StintPlannerProps {
   isDarkMode?: boolean;
@@ -38,25 +47,6 @@ interface StintPlannerProps {
   };
   trackId?: number;
   trackName?: string;
-}
-
-interface StintConfig {
-  numStints: number;
-  minStintTime: number;
-  maxStintTime: number;
-  pitDuration: number;
-  numDrivers: number;
-  totalRaceTime: number;
-}
-
-interface StintAssignment {
-  driver: number;
-  stint: number;
-  duration: number;
-  isJoker: boolean;
-  isLong: boolean;
-  startTime: number;
-  endTime: number;
 }
 
 interface DriverStats {
@@ -101,6 +91,16 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   const [activeStint, setActiveStint] = useState<ActiveStint | null>(null);
   const [stintHistory, setStintHistory] = useState<{driver: number, duration: number, timestamp: Date}[]>([]);
   const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
+  // Race parameters the on-screen stint table was built for.
+  const planSignatureRef = useRef<string>('');
+  /**
+   * Record that the current table belongs to `cfg`. A restored table that no
+   * longer fits its own config (saved before the schedule maths was fixed)
+   * leaves the signature empty, so the effect above rebuilds it once.
+   */
+  const rememberPlan = (cfg: StintConfig, assignments: StintAssignment[]) => {
+    planSignatureRef.current = planFitsConfig(assignments, cfg) ? planSignature(cfg) : '';
+  };
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastPitStatusRef = useRef<string>('');
 
@@ -203,7 +203,12 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           Array.isArray(prefs.stint_assignments) && prefs.stint_assignments.length > 0 &&
           !editedSince('stint_assignments', hydrationStartedAt)
         ) {
-          setStintAssignments(prefs.stint_assignments as unknown as StintAssignment[]);
+          const restored = prefs.stint_assignments as unknown as StintAssignment[];
+          rememberPlan(
+            (prefs.stint_planner_config as unknown as StintConfig) || config,
+            restored,
+          );
+          setStintAssignments(restored);
         }
       } catch (err) {
         console.warn('StintPlanner: failed to fetch prefs', err);
@@ -274,7 +279,12 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           Array.isArray(fresh.stint_assignments) &&
           !editedSince('stint_assignments', fetchStartedAt)
         ) {
-          setStintAssignments(fresh.stint_assignments as unknown as StintAssignment[]);
+          const incoming = fresh.stint_assignments as unknown as StintAssignment[];
+          rememberPlan(
+            (fresh.stint_planner_config as unknown as StintConfig) || config,
+            incoming,
+          );
+          setStintAssignments(incoming);
         }
         setTimeout(() => setHasServerPrefsSynced(true), 0);
       } catch (err) {
@@ -301,6 +311,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         setDriverNames(savedDriverNames);
       }
       if (savedStintAssignments && savedStintAssignments.length > 0) {
+        rememberPlan(savedConfig || config, savedStintAssignments);
         setStintAssignments(savedStintAssignments);
       }
       setCurrentDriverIndex(savedDriverIndex);
@@ -330,37 +341,15 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             setDriverNames(activePreset.driverNames);
           }
           if (activePreset.stintAssignments && activePreset.stintAssignments.length > 0) {
+            rememberPlan(activePreset.config, activePreset.stintAssignments);
             setStintAssignments(activePreset.stintAssignments);
             return;
           }
 
           // Legacy preset (config only): rebuild the stint table from it.
-          const assignments: StintAssignment[] = [];
-          let currentTime = 0;
-          const totalPitTime = activePreset.config.pitDuration * (activePreset.config.numStints - 1);
-          const availableRaceTime = activePreset.config.totalRaceTime - totalPitTime;
-          const baseStintTime = Math.round(availableRaceTime / activePreset.config.numStints);
-
-          for (let stint = 1; stint <= activePreset.config.numStints; stint++) {
-            const driverIndex = (stint - 1) % activePreset.config.numDrivers;
-
-            assignments.push({
-              driver: driverIndex + 1,
-              stint,
-              duration: baseStintTime,
-              isJoker: false,
-              isLong: false,
-              startTime: currentTime,
-              endTime: currentTime + baseStintTime,
-            });
-
-            currentTime += baseStintTime;
-            if (stint < activePreset.config.numStints) {
-              currentTime += activePreset.config.pitDuration;
-            }
-          }
-
-          setStintAssignments(assignments);
+          const rebuilt = buildStintTable(activePreset.config);
+          rememberPlan(activePreset.config, rebuilt);
+          setStintAssignments(rebuilt);
         } else {
           setSelectedPresetId('');
         }
@@ -472,56 +461,28 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     };
   }, [config]);
 
-  // Initialize stints with base stint time duration
-  const initializeStints = useMemo(() => {
-    const assignments: StintAssignment[] = [];
-    let currentTime = 0;
-    
-    // Calculate base stint time
-    const totalPitTime = config.pitDuration * (config.numStints - 1);
-    const availableRaceTime = config.totalRaceTime - totalPitTime;
-    const baseStintTime = Math.round(availableRaceTime / config.numStints);
-    
-    for (let stint = 1; stint <= config.numStints; stint++) {
-      // Assign driver in rotation
-      const driverIndex = (stint - 1) % config.numDrivers;
-      
-      assignments.push({
-        driver: driverIndex + 1,
-        stint,
-        duration: baseStintTime, // Initialize with base stint time
-        isJoker: false,
-        isLong: false,
-        startTime: currentTime,
-        endTime: currentTime + baseStintTime,
-      });
-      
-      currentTime += baseStintTime;
-      
-      // Add pit stop time (except for last stint)
-      if (stint < config.numStints) {
-        currentTime += config.pitDuration;
-      }
-    }
-    
-    return assignments;
-  }, [config]);
+  // A fresh table for the current config (fills the race exactly).
+  const initializeStints = useMemo(() => buildStintTable(config), [config]);
 
-  // Reinitialize stints when config changes significantly (numStints or numDrivers)
+  // Rebuild the stint table when the race it describes changes.
+  //
+  // This used to fire only when the stint COUNT changed, so setting a race to
+  // 358 minutes left the previous schedule untouched and the planner went on
+  // planning the old race length. It now watches every parameter the table is
+  // built from, via planSignature. Manual per-stint edits survive: they don't
+  // change the signature, and handleStintDurationChange compensates within
+  // the same total.
   useEffect(() => {
-    // Skip on initial mount before loading from storage
-    if (!hasLoadedFromStorage) {
-      return;
-    }
+    if (!hasLoadedFromStorage) return;
 
-    // Check if config has changed significantly
-    const configStintsChanged = stintAssignments.length > 0 && stintAssignments.length !== config.numStints;
+    const signature = planSignature(config);
+    const stale = planSignatureRef.current !== signature;
+    const wrongShape = stintAssignments.length === 0 || stintAssignments.length !== config.numStints;
+    if (!stale && !wrongShape) return;
 
-    if (configStintsChanged || stintAssignments.length === 0) {
-      // Reinitialize stint assignments
-      setStintAssignments(initializeStints);
-    }
-  }, [config.numStints, config.numDrivers, initializeStints, hasLoadedFromStorage, stintAssignments.length]);
+    planSignatureRef.current = signature;
+    setStintAssignments(initializeStints);
+  }, [config, initializeStints, hasLoadedFromStorage, stintAssignments.length]);
 
   // Update driver names array when number of drivers changes
   useEffect(() => {
@@ -788,37 +749,15 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           setDriverNames(preset.driverNames);
         }
         if (preset.stintAssignments && preset.stintAssignments.length > 0) {
+          rememberPlan(preset.config, preset.stintAssignments);
           setStintAssignments(preset.stintAssignments);
           return;
         }
 
-        // Force recalculate stints based on new config
-        const assignments: StintAssignment[] = [];
-        let currentTime = 0;
-        const totalPitTime = preset.config.pitDuration * (preset.config.numStints - 1);
-        const availableRaceTime = preset.config.totalRaceTime - totalPitTime;
-        const baseStintTime = Math.round(availableRaceTime / preset.config.numStints);
-
-        for (let stint = 1; stint <= preset.config.numStints; stint++) {
-          const driverIndex = (stint - 1) % preset.config.numDrivers;
-
-          assignments.push({
-            driver: driverIndex + 1,
-            stint,
-            duration: baseStintTime,
-            isJoker: false,
-            isLong: false,
-            startTime: currentTime,
-            endTime: currentTime + baseStintTime,
-          });
-
-          currentTime += baseStintTime;
-          if (stint < preset.config.numStints) {
-            currentTime += preset.config.pitDuration;
-          }
-        }
-
-        setStintAssignments(assignments);
+        // Legacy preset (config only): rebuild the stint table from it.
+        const rebuilt = buildStintTable(preset.config);
+        rememberPlan(preset.config, rebuilt);
+        setStintAssignments(rebuilt);
       }
     }
   };
@@ -936,6 +875,10 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     setAvailablePresets(updatedPresets);
     setSelectedPresetId(updatedPresets[0]?.id || '');
   };
+
+  // How long the current table actually occupies, against the race length.
+  const currentSpan = plannedSpan(stintAssignments, config);
+  const scheduleFits = stintAssignments.length === 0 || Math.abs(currentSpan - config.totalRaceTime) < 0.05;
 
   const selectedPreset = availablePresets.find(p => p.id === selectedPresetId) || null;
   // The form has drifted from the stored preset, so auto-save has work to do.
@@ -1336,6 +1279,37 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         </div>
       </div>
 
+      {/* Schedule summary — makes the plan/race mismatch visible rather than
+          silent, and spells out stints vs pit stops. */}
+      <div
+        role="status"
+        className={`mb-6 p-3 rounded-lg text-sm flex flex-wrap items-center gap-x-6 gap-y-1 ${
+          scheduleFits
+            ? isDarkMode ? 'bg-gray-700' : 'bg-gray-100'
+            : isDarkMode ? 'bg-amber-900/40 border border-amber-700' : 'bg-amber-50 border border-amber-300'
+        }`}
+      >
+        <span>
+          <span className="font-semibold">{config.numStints}</span> stints
+          {' · '}
+          <span className="font-semibold">{Math.max(0, config.numStints - 1)}</span> pit stops
+        </span>
+        <span>
+          Driving <span className="font-semibold">{formatTime(drivingTime(config))}</span>
+          {' · '}
+          in pits <span className="font-semibold">{formatTime(config.pitDuration * Math.max(0, config.numStints - 1))}</span>
+        </span>
+        <span className={scheduleFits ? '' : isDarkMode ? 'text-amber-300' : 'text-amber-800'}>
+          Planned <span className="font-semibold">{formatTime(currentSpan)}</span> of{' '}
+          <span className="font-semibold">{formatTime(config.totalRaceTime)}</span>
+          {!scheduleFits && (
+            <span className="ml-1">
+              ({currentSpan > config.totalRaceTime ? 'over' : 'short'} by {formatTime(Math.abs(currentSpan - config.totalRaceTime))})
+            </span>
+          )}
+        </span>
+      </div>
+
       {/* Available Special Stints */}
       <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
         <h3 className="text-lg font-semibold mb-3">Available Special Stints</h3>
@@ -1471,6 +1445,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     type="number"
                     min="0"
                     max="120"
+                    aria-label={`Stint ${assignment.stint} duration in minutes`}
                     value={assignment.duration}
                     onChange={(e) => handleStintDurationChange(index, parseInt(e.target.value) || 0)}
                     className={`w-full p-1 rounded border text-center ${
