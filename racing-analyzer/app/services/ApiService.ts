@@ -783,6 +783,26 @@ export const ApiService = {
   // --- Fleet Tracker ---------------------------------------------------------
   // Mutations need the CSRF header (the backend guards all unsafe /api/* calls).
 
+  /** Live pace report for one team: pace against the field, stint by stint. */
+  getTeamPace: async (trackId: number, team: string, sessionId?: number) => {
+    try {
+      const params = new URLSearchParams({ team });
+      if (sessionId != null) params.set('session_id', String(sessionId));
+      const response = await fetch(
+        `${API_BASE_URL}/api/track/${trackId}/pace/team?${params.toString()}`,
+        { credentials: 'include' },
+      );
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to load team pace');
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error loading team pace:', error);
+      throw error;
+    }
+  },
+
   getFleetState: async (trackId: number, sessionId?: number) => {
     try {
       const qs = sessionId != null ? `?session_id=${sessionId}` : '';

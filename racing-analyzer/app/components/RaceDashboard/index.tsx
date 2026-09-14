@@ -16,8 +16,9 @@ import AlertStack from './AlertStack';
 import StandingsRow, { STANDINGS_GRID, PitAlertButton } from './StandingsRow';
 import { getTeamClass, displayTeamName } from './lib/teamName';
 import { useTheme } from '../../contexts/ThemeContext';
-import { AlertTriangle, Car, Clock, Eye, Info, LineChart, List, Settings, Star, X } from 'lucide-react';
+import { AlertTriangle, Car, Clock, Eye, Gauge, Info, LineChart, List, Settings, Star, X } from 'lucide-react';
 import FleetTracker, { FleetKart } from './FleetTracker';
+import PaceMonitor from './PaceMonitor';
 import KartAssignmentEntry from './KartAssignmentEntry';
 import { useAuth } from '../../contexts/AuthContext';
 import { saveSelectedTrack, loadSelectedTrack } from '../../utils/persistence';
@@ -370,6 +371,8 @@ const RaceDashboard = () => {
   } | null>(null);
   const [alertedFleetPits, setAlertedFleetPits] = useState<Set<number>>(new Set());
   const [activeTab, setActiveTab] = useState<string>('standings');
+  // Bumped on every standings update so PaceMonitor can refetch (throttled).
+  const [liveUpdateTick, setLiveUpdateTick] = useState(0);
   // Ref mirrors so callbacks can read current state without re-subscribing.
   const fleetRegistryRef = useRef<FleetKart[]>([]);
   useEffect(() => { fleetRegistryRef.current = fleetRegistry; }, [fleetRegistry]);
@@ -742,6 +745,7 @@ const RaceDashboard = () => {
         console.log('Received full race data update');
         detectChanges(data.teams);
         setTeams(data.teams || []);
+        setLiveUpdateTick(t => t + 1);
         setSessionInfo(data.session_info || {});
         setLastUpdate(data.last_update || '');
         // Phase 2: my_team / monitored_teams / pit_config / delta_times /
@@ -759,6 +763,7 @@ const RaceDashboard = () => {
         console.log('Received teams update');
         detectChanges(data.teams);
         setTeams(data.teams || []);
+        setLiveUpdateTick(t => t + 1);
         setLastUpdate(data.last_update || '');
         if (data.teams && data.teams.length > 0) {
           checkPitStops(data.teams);
@@ -1024,6 +1029,8 @@ const RaceDashboard = () => {
   }
 
   const selectedTrackName = availableTracks.find(t => t.id === selectedTrackId)?.track_name || '';
+  // The pace API keys on the team name as the feed spells it, not the kart number.
+  const myTeamName = teams.find(t => t.Kart === myTeam)?.Team || '';
   const sessionLabel = sessionInfo.title2 || sessionInfo.title1 || sessionInfo.title || '';
   const sessionActive = sessionStatus ? sessionStatus.active : teams.length > 0;
   const railTracks: RailTrack[] = allTracksStatus.length > 0
@@ -1293,6 +1300,7 @@ const RaceDashboard = () => {
   const tabs = [
     { id: 'standings', label: 'Standings', icon: <List size={18} />, count: teams.length },
     { id: 'monitored', label: 'Monitored', icon: <Eye size={18} />, count: monitoredTeams.length },
+    { id: 'pace', label: 'Pace', icon: <Gauge size={18} /> },
     { id: 'chart', label: 'Delta', icon: <LineChart size={18} /> },
     { id: 'stints', label: 'Stints', icon: <Clock size={18} /> },
     { id: 'fleet', label: 'Fleet', icon: <Car size={18} />, count: fleetBoard.length },
@@ -1351,6 +1359,13 @@ const RaceDashboard = () => {
           <TabbedInterface tabs={tabs} defaultTab="standings" isDarkMode={isDarkMode} onTabChange={setActiveTab}>
             {StandingsTab}
             {MonitoredTeamsTab}
+            <PaceMonitor
+              trackId={selectedTrackId}
+              teamName={myTeamName}
+              sessionId={currentSessionId}
+              updateTick={liveUpdateTick}
+              isActive={activeTab === 'pace'}
+            />
             {ChartTab}
             <div className="rounded-xl border border-line bg-surface overflow-hidden">
               <StintPlanner

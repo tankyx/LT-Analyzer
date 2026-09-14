@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from datetime import datetime, timedelta
 from collections import deque
 import random
+import bisect
 import math
 import hashlib
 import hmac
@@ -3774,6 +3775,26 @@ def _analyze_sprint_session(cur, session_id, session_date, history_names, times_
     return samples
 
 
+GHOST_TEAM_PREFIX = 'G - '
+
+
+def _is_ghost_team(team_name):
+    """Timing systems emit "G - ..." placeholder rows that are not real cars.
+
+    They must be excluded from every field reference and median, or the field
+    looks slower than it is and every real team reads as fast.
+    """
+    return (team_name or '').strip().upper().startswith(GHOST_TEAM_PREFIX.upper())
+
+
+def _epoch_seconds(ts):
+    """ISO timestamp -> epoch seconds, or None when it cannot be parsed."""
+    try:
+        return datetime.fromisoformat(ts).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
 def _segment_stints(laps):
     """Group chronologically-sorted lap rows into stints.
 
@@ -3804,12 +3825,13 @@ def _segment_stints(laps):
         # the opening one) when we have enough samples to spare.
         clean = st[1:] if len(st) > 2 else st
         # Hard ceiling to eliminate remaining pit laps that slipped through
-        values = [s for _, s in clean]
-        if len(values) >= 3:
-            sorted_v = sorted(values)
+        pairs = list(clean)
+        if len(pairs) >= 3:
+            sorted_v = sorted(s for _, s in pairs)
             median_v = sorted_v[len(sorted_v) // 2]
             ceiling = max(180.0, median_v * 2.0)
-            values = [v for v in values if v <= ceiling] or values
+            pairs = [(t, s) for t, s in pairs if s <= ceiling] or list(clean)
+        values = [s for _, s in pairs]
         if not values:
             continue
         out.append({
@@ -3818,6 +3840,9 @@ def _segment_stints(laps):
             'lap_count': len(values),
             'best': min(values),
             'mean': sum(values) / len(values),
+            # The clean laps behind those stats, so callers can look inside a
+            # stint (trend, last-N pace) without re-deriving the filtering.
+            'laps': pairs,
         })
     return out
 
@@ -3986,6 +4011,314 @@ def _live_standings_df(track_id):
     return None
 
 
+# --- Team pace tracking ----------------------------------------------------
+# Position is a poor read on how a team is actually going: it moves with pit
+# strategy, lapped traffic and other teams' problems. Pace against the field
+# *at the same moment* is the honest measure, and it is what tells a crew
+# whether the kart under them is worth keeping.
+
+PACE_MIN_STINT_LAPS = 5        # below this a stint's pace is not worth reading
+PACE_RECENT_LAPS = 5           # window for the "right now" number
+PACE_MIN_FIELD_LAPS = 3        # fewer field laps than this -> no comparison
+PACE_MIN_BAND_SECONDS = 0.25   # floor for "meaningfully off our own norm"
+PACE_TREND_BAND_SECONDS = 0.30  # floor for calling a stint fading or improving
+PACE_WINDOW_PAD_SECONDS = 300  # widen a thin stint window by this before giving up
+
+
+def _field_median_in_window(field_series, start_epoch, end_epoch, exclude_team=None):
+    """Median lap of the field between two moments, leaving our own team out.
+
+    Leaving the team out matters on small grids: comparing a team against a
+    median it dominates flatters it. Returns (median, sample_size).
+    """
+    if not field_series:
+        return None, 0
+    lo = bisect.bisect_left(field_series, (start_epoch,))
+    hi = bisect.bisect_right(field_series, (end_epoch, float('inf'), chr(0x10FFFF)))
+    window = field_series[lo:hi]
+    values = sorted(secs for _, secs, team in window if team != exclude_team)
+    if len(values) < PACE_MIN_FIELD_LAPS:
+        return None, len(values)
+    return _quantile(values, 0.5), len(values)
+
+
+def _field_reference_for(field_series, start_epoch, end_epoch, exclude_team=None):
+    """Field median for a stint window, widening once before falling back.
+
+    A short stint (or a quiet moment on track) can hold too few field laps to
+    take a median from; widening keeps the comparison contemporaneous instead
+    of silently reaching for the whole session.
+    """
+    median, n = _field_median_in_window(field_series, start_epoch, end_epoch, exclude_team)
+    if median is not None:
+        return median, n, 'stint_window'
+
+    median, n = _field_median_in_window(
+        field_series,
+        start_epoch - PACE_WINDOW_PAD_SECONDS,
+        end_epoch + PACE_WINDOW_PAD_SECONDS,
+        exclude_team,
+    )
+    if median is not None:
+        return median, n, 'widened_window'
+
+    values = sorted(secs for _, secs, team in field_series if team != exclude_team)
+    if len(values) >= PACE_MIN_FIELD_LAPS:
+        return _quantile(values, 0.5), len(values), 'session'
+    return None, len(values), 'none'
+
+
+def _confidence_for(lap_count):
+    if lap_count >= 10:
+        return 'high'
+    if lap_count >= PACE_MIN_STINT_LAPS:
+        return 'medium'
+    return 'low'
+
+
+def _stint_pace_rows(stints, field_series, team_name):
+    """Residualise each stint against the field during that stint."""
+    rows = []
+    for idx, st in enumerate(stints):
+        start = _epoch_seconds(st['start_ts'])
+        end = _epoch_seconds(st['end_ts'])
+        residual = field_median = None
+        field_laps = 0
+        basis = 'none'
+        if start is not None and end is not None:
+            field_median, field_laps, basis = _field_reference_for(
+                field_series, start, end, exclude_team=team_name)
+            if field_median is not None:
+                residual = st['mean'] - field_median
+        rows.append({
+            'stint_index': idx,
+            'start_ts': st['start_ts'],
+            'end_ts': st['end_ts'],
+            'lap_count': st['lap_count'],
+            'mean': round(st['mean'], 3),
+            'best': round(st['best'], 3),
+            'field_median': round(field_median, 3) if field_median is not None else None,
+            'field_laps': field_laps,
+            'field_basis': basis,
+            'residual': round(residual, 3) if residual is not None else None,
+            'confidence': _confidence_for(st['lap_count']),
+        })
+    return rows
+
+
+def _stint_trend(stint, field_series, team_name):
+    """Is the current stint holding, fading or coming to us?
+
+    Each half is compared against the field during that half, so a track that
+    is rubbering in (or cooling) does not read as the kart going away.
+    """
+    laps = stint.get('laps') or []
+    if len(laps) < 2 * PACE_MIN_STINT_LAPS // 2 or len(laps) < 4:
+        return 'unknown', None
+
+    half = len(laps) // 2
+    out = []
+    for chunk in (laps[:half], laps[half:]):
+        secs = [s for _, s in chunk]
+        start = _epoch_seconds(chunk[0][0])
+        end = _epoch_seconds(chunk[-1][0])
+        if start is None or end is None:
+            return 'unknown', None
+        field_median, _, _ = _field_reference_for(field_series, start, end, exclude_team=team_name)
+        if field_median is None:
+            return 'unknown', None
+        out.append(sum(secs) / len(secs) - field_median)
+
+    drift = out[1] - out[0]
+    if drift > PACE_TREND_BAND_SECONDS:
+        return 'fading', round(drift, 3)
+    if drift < -PACE_TREND_BAND_SECONDS:
+        return 'improving', round(drift, 3)
+    return 'stable', round(drift, 3)
+
+
+def _recent_pace(stint, field_series, team_name, n=PACE_RECENT_LAPS):
+    """Pace over the last few laps, against the field during those laps."""
+    laps = (stint.get('laps') or [])[-n:]
+    if len(laps) < 2:
+        return None
+    start = _epoch_seconds(laps[0][0])
+    end = _epoch_seconds(laps[-1][0])
+    if start is None or end is None:
+        return None
+    field_median, _, _ = _field_reference_for(field_series, start, end, exclude_team=team_name)
+    if field_median is None:
+        return None
+    mean = sum(s for _, s in laps) / len(laps)
+    return {
+        'laps': len(laps),
+        'mean': round(mean, 3),
+        'residual': round(mean - field_median, 3),
+    }
+
+
+def _pace_verdict(current, prior_residuals, trend):
+    """Keep this kart or take another one at the next stop?
+
+    Judged against the team's OWN previous stints first: that cancels the
+    driver squad's general level and leaves the machine. With no history to
+    compare against, it falls back to the field.
+    """
+    if current is None or current['lap_count'] < PACE_MIN_STINT_LAPS:
+        return {
+            'verdict': 'insufficient',
+            'reason': f"Fewer than {PACE_MIN_STINT_LAPS} clean laps on this kart so far.",
+            'delta_vs_own_norm': None,
+            'band': None,
+        }
+    if current['residual'] is None:
+        return {
+            'verdict': 'insufficient',
+            'reason': 'Not enough field laps to compare against yet.',
+            'delta_vs_own_norm': None,
+            'band': None,
+        }
+
+    usable = [r for r in prior_residuals if r is not None]
+    if not usable:
+        band = PACE_MIN_BAND_SECONDS
+        if current['residual'] > band:
+            return {
+                'verdict': 'watch',
+                'reason': (f"{abs(current['residual']):.2f}s a lap slower than the field, "
+                           'with no earlier stint to compare against.'),
+                'delta_vs_own_norm': None,
+                'band': round(band, 3),
+            }
+        return {
+            'verdict': 'keep',
+            'reason': ('Matching or beating the field, and this is your first '
+                       'measured stint.'),
+            'delta_vs_own_norm': None,
+            'band': round(band, 3),
+        }
+
+    own_norm = _quantile(sorted(usable), 0.5)
+    mad = _quantile(sorted(abs(r - own_norm) for r in usable), 0.5) if len(usable) > 1 else 0.0
+    band = max(PACE_MIN_BAND_SECONDS, mad or 0.0)
+    delta = current['residual'] - own_norm
+
+    if delta > band:
+        reason = (f"{delta:.2f}s a lap off your own normal pace"
+                  + (' and still fading.' if trend == 'fading' else '.'))
+        verdict = 'switch' if delta > 2 * band else 'consider_switch'
+    elif delta < -band:
+        verdict = 'keep'
+        reason = f"{abs(delta):.2f}s a lap better than your own normal pace."
+    else:
+        verdict = 'keep'
+        reason = 'Running at your normal pace.'
+        if trend == 'fading':
+            verdict = 'consider_switch'
+            reason = 'At your normal pace overall, but the second half of this stint is slower.'
+
+    return {
+        'verdict': verdict,
+        'reason': reason,
+        'delta_vs_own_norm': round(delta, 3),
+        'band': round(band, 3),
+    }
+
+
+def _compute_team_pace(conn, session_id, team_name, user_id=None, stint_data=None):
+    """Pace report for one team: how it is going against the field, stint by
+    stint, and whether the kart under it is worth keeping.
+
+    Pure with respect to its inputs so it can be unit-tested without a feed.
+    """
+    if stint_data is None:
+        stint_data = _compute_session_stint_data(conn, session_id)
+
+    team_stints = stint_data['team_stints']
+    resolved = team_name if team_name in team_stints else None
+    if resolved is None:  # tolerate case/spacing drift between feed and prefs
+        wanted = (team_name or '').strip().lower()
+        for candidate in team_stints:
+            if candidate.strip().lower() == wanted:
+                resolved = candidate
+                break
+
+    field_series = stint_data.get('field_series') or []
+    if resolved is None:
+        return {
+            'team': team_name,
+            'matched_team': None,
+            'session_id': session_id,
+            'stints': [],
+            'current': None,
+            'recent': None,
+            'trend': 'unknown',
+            'trend_drift': None,
+            'field_ref_seconds': round(stint_data['field_ref'], 3) if stint_data.get('field_ref') else None,
+            'own_norm_residual': None,
+            'kart': None,
+            'verdict': {
+                'verdict': 'insufficient',
+                'reason': 'No laps recorded for this team in the current session.',
+                'delta_vs_own_norm': None,
+                'band': None,
+            },
+        }
+
+    stints = team_stints[resolved]
+    rows = _stint_pace_rows(stints, field_series, resolved)
+    current_row = rows[-1] if rows else None
+    current_stint = stints[-1] if stints else None
+
+    trend, drift = ('unknown', None)
+    recent = None
+    if current_stint is not None:
+        trend, drift = _stint_trend(current_stint, field_series, resolved)
+        recent = _recent_pace(current_stint, field_series, resolved)
+
+    prior = [r['residual'] for r in rows[:-1] if r['lap_count'] >= PACE_MIN_STINT_LAPS]
+    verdict = _pace_verdict(current_row, prior, trend)
+    usable_prior = [r for r in prior if r is not None]
+    own_norm = _quantile(sorted(usable_prior), 0.5) if usable_prior else None
+
+    # Which physical kart is under the team for this stint, when the user runs
+    # a fleet. Without one the report is still complete, just team-shaped.
+    kart = None
+    if user_id is not None and rows:
+        try:
+            cur = conn.cursor()
+            amap = _fleet_assignment_map(cur, session_id, user_id).get(resolved, {})
+            kid = (amap or {}).get(len(rows) - 1)
+            if kid is not None:
+                cur.execute('SELECT label FROM fleet_karts WHERE id = ? AND user_id = ?', (kid, user_id))
+                row = cur.fetchone()
+                if row:
+                    kart = {'fleet_kart_id': kid, 'label': row[0]}
+        except sqlite3.Error:
+            kart = None
+
+    # A stint's laps are only needed for the live one, as a sparkline.
+    current_laps = []
+    if current_stint is not None:
+        current_laps = [round(s, 3) for _, s in (current_stint.get('laps') or [])][-30:]
+
+    return {
+        'team': team_name,
+        'matched_team': resolved,
+        'session_id': session_id,
+        'stints': rows,
+        'current': current_row,
+        'current_laps': current_laps,
+        'recent': recent,
+        'trend': trend,
+        'trend_drift': drift,
+        'field_ref_seconds': round(stint_data['field_ref'], 3) if stint_data.get('field_ref') else None,
+        'own_norm_residual': round(own_norm, 3) if own_norm is not None else None,
+        'kart': kart,
+        'verdict': verdict,
+    }
+
+
 def _fleet_assignment_map(cur, session_id, user_id):
     """team_name -> {stint_index: fleet_kart_id} for this user, using the newest
     non-superseded row per (team, stint_index)."""
@@ -4034,6 +4367,7 @@ def _compute_session_stint_data(conn, session_id):
     per_team = {}
     prev_raw = {}
     all_clean = []  # (ts, secs) across the whole field
+    field_series = []  # (epoch_seconds, lap_secs, team) for contemporaneous medians
     for team, ts, lt, pit in cur.fetchall():
         if lt == prev_raw.get(team):
             continue
@@ -4042,7 +4376,14 @@ def _compute_session_stint_data(conn, session_id):
         if secs == float('inf') or secs <= 0 or secs > LAP_MAX_SECONDS:
             continue
         per_team.setdefault(team, []).append((ts, secs, int(pit) if pit is not None else 0))
+        # "G - " rows are timing-system ghosts, not cars on track: they must
+        # never enter a field reference or a median.
+        if _is_ghost_team(team):
+            continue
         all_clean.append((ts, secs))
+        epoch = _epoch_seconds(ts)
+        if epoch is not None:
+            field_series.append((epoch, secs, team))
 
     # Rolling field reference (cancels track conditions). Median of clean laps
     # in the last FLEET_FIELD_WINDOW_SECONDS; fall back to session-wide median.
@@ -4064,10 +4405,15 @@ def _compute_session_stint_data(conn, session_id):
         if field_ref is None:
             field_ref = _quantile(sorted(s for _, s in all_clean), 0.5)
 
+    field_series.sort(key=lambda r: r[0])
+
     return {
         'team_stints': {team: _segment_stints(laps) for team, laps in per_team.items()},
         'field_ref': field_ref,
         'teams': list(per_team.keys()),
+        # Chronological clean field laps, so a caller can take the median of
+        # the field *during* any window rather than only right now.
+        'field_series': field_series,
     }
 
 
@@ -4408,6 +4754,7 @@ from race_app.blueprints.driver_consistency_routes import driver_consistency_bp 
 from race_app.blueprints.driver_fairness_routes import driver_fairness_bp  # noqa: E402
 from race_app.blueprints.fleet_routes import fleet_bp  # noqa: E402
 from race_app.blueprints.kart_fairness_routes import kart_fairness_bp  # noqa: E402
+from race_app.blueprints.pace_routes import pace_bp  # noqa: E402
 from race_app.blueprints.me_routes import me_bp  # noqa: E402
 from race_app.blueprints.pit_alert_routes import pit_alert_bp  # noqa: E402
 from race_app.blueprints.session_configs_routes import session_configs_bp  # noqa: E402
@@ -4421,6 +4768,7 @@ app.register_blueprint(driver_consistency_bp)
 app.register_blueprint(driver_fairness_bp)
 app.register_blueprint(fleet_bp)
 app.register_blueprint(kart_fairness_bp)
+app.register_blueprint(pace_bp)
 app.register_blueprint(me_bp)
 app.register_blueprint(pit_alert_bp)
 app.register_blueprint(session_configs_bp)
