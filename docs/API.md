@@ -2,6 +2,11 @@
 
 REST + Socket.IO catalog for the `race_ui.py` backend.
 
+Writing an external client (datalogger, tablet, script)? Start with
+[`DATALOGGER_API.md`](DATALOGGER_API.md) — the same API as an integration
+guide: login with Turnstile, keeping the session, the live rooms to join, and
+the data formats. This file is the endpoint-by-endpoint reference.
+
 ## Conventions
 
 - All paths are prefixed with `/api/` (REST) or are Socket.IO events.
@@ -205,6 +210,30 @@ and cached server-side (60s TTL, invalidated by admin writes).
 | `POST /api/admin/invite-codes` | `{max_uses, expires_at?, note?}` — code returned in plaintext **once** |
 | `DELETE /api/admin/invite-codes/<id>` | Revoke |
 | `GET /api/admin/audit-log?action=&actor=&limit=200&offset=0` | Paged read |
+
+---
+
+## Team pace (live)
+
+### `GET /api/track/<int:track_id>/pace/team` (login)
+
+Query: `team` (required, ≤128 chars, as the feed spells it), `session_id`
+(optional — defaults to the track's live session).
+
+Each stint's mean lap minus the median of the **field during that stint's
+window** (leave-one-out, widened once, then the session median), so track
+conditions cancel and stints hours apart compare. Returns `current`, `recent`
+(last 5 laps), `stints[]`, `trend` (`improving`/`stable`/`fading`/`unknown`),
+`own_norm_residual`, `field_ref_seconds`, `kart` (when a fleet is configured)
+and `verdict`.
+
+`verdict.verdict` is `keep` / `watch` / `consider_switch` / `switch` /
+`insufficient`, judged against the team's own earlier stints (median + MAD
+band, floor 0.25s). Negative residuals are faster. Under 5 clean laps it
+reads `insufficient`. It cancels conditions, **not** driver differences.
+
+Errors: `400 team_required`, `400 invalid_team`, `400 invalid_session_id`,
+`404 unknown_track`, `404 no_active_session`.
 
 ---
 

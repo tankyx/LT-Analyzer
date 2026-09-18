@@ -146,6 +146,9 @@ nginx terminates TLS and proxies `/` to `:3000` (Next.js) and
 ## API reference
 
 REST + WebSocket events documented in [`docs/API.md`](docs/API.md).
+Building an external client (datalogger, tablet, script)? See
+[`docs/DATALOGGER_API.md`](docs/DATALOGGER_API.md) for the integration
+guide: authentication, the live Socket.IO rooms, and the data formats.
 
 ## Testing
 
