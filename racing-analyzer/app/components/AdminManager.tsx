@@ -204,18 +204,18 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
   if (!user || user.role !== 'admin') {
     return (
       <div className="p-6 text-center">
-        <p className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>Admin access required</p>
+        <p className={'text-muted'}>Admin access required</p>
       </div>
     );
   }
 
-  const th = `px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-500'} uppercase tracking-wider`;
-  const field = `w-full px-3 py-2 rounded border ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'} focus:border-blue-500 focus:outline-none`;
+  const th = `px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-ink' : 'text-muted'} uppercase tracking-wider`;
+  const field = 'w-full px-3 py-2 rounded border border-line bg-canvas text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60';
 
   return (
     <div className="p-6">
       {/* Sub-tabs */}
-      <div className={`border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} mb-6`}>
+      <div className={`border-b border-line mb-6`}>
         <nav className="-mb-px flex space-x-8">
           {(['users', 'tracks'] as const).map(tab => (
             <button
@@ -223,8 +223,8 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
               onClick={() => setActiveSubTab(tab)}
               className={`py-2 px-1 border-b-2 font-medium text-sm capitalize ${
                 activeSubTab === tab
-                  ? 'border-blue-500 text-blue-500'
-                  : `border-transparent ${isDarkMode ? 'text-gray-400 hover:text-gray-300' : 'text-gray-500 hover:text-gray-700'}`
+                  ? 'border-info text-info'
+                  : `border-transparent text-muted hover:text-ink`
               }`}
             >
               {tab}
@@ -244,15 +244,15 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                 setUserForm({ username: '', password: '', email: '', role: 'user' });
                 setShowUserModal(true);
               }}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              className="px-4 py-2 bg-info text-white rounded hover:bg-info"
             >
               Add User
             </button>
           </div>
 
-          <div className={`${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg overflow-hidden shadow`}>
+          <div className={`bg-surface rounded-lg overflow-hidden shadow`}>
             <table className="min-w-full">
-              <thead className={isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+              <thead className={'bg-surface-2'}>
                 <tr>
                   <th className={th}>Username</th>
                   <th className={th}>Email</th>
@@ -261,18 +261,18 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                   <th className={th}>Actions</th>
                 </tr>
               </thead>
-              <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+              <tbody className={`divide-y divide-line`}>
                 {users.map((u) => (
                   <tr key={u.id}>
                     <td className="px-6 py-4 whitespace-nowrap">{u.username}</td>
                     <td className="px-6 py-4 whitespace-nowrap">{u.email || '-'}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${u.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${u.role === 'admin' ? 'bg-class2/15 text-class2' : 'bg-live/15 text-live'}`}>
                         {u.role}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${u.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${u.is_active ? 'bg-live/15 text-live' : 'bg-alarm/15 text-alarm'}`}>
                         {u.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
@@ -283,12 +283,12 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                           setUserForm({ username: u.username, password: '', email: u.email || '', role: u.role });
                           setShowUserModal(true);
                         }}
-                        className="text-blue-500 hover:text-blue-400 mr-4"
+                        className="text-info hover:text-info mr-4"
                       >
                         Edit
                       </button>
                       {u.id !== 1 && (
-                        <button onClick={() => handleDeleteUser(u.id)} className="text-red-500 hover:text-red-400">
+                        <button onClick={() => handleDeleteUser(u.id)} className="text-alarm hover:text-alarm">
                           Delete
                         </button>
                       )}
@@ -312,15 +312,15 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                 setTrackForm({ name: '', location: '', length_meters: '', description: '', timing_url: '', websocket_url: '', is_active: true });
                 setShowTrackModal(true);
               }}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+              className="px-4 py-2 bg-info text-white rounded hover:bg-info"
             >
               Add Track
             </button>
           </div>
 
-          <div className={`${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg overflow-hidden shadow`}>
+          <div className={`bg-surface rounded-lg overflow-hidden shadow`}>
             <table className="min-w-full">
-              <thead className={isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}>
+              <thead className={'bg-surface-2'}>
                 <tr>
                   <th className={th}>Name</th>
                   <th className={th}>Location</th>
@@ -329,14 +329,14 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                   <th className={th}>Actions</th>
                 </tr>
               </thead>
-              <tbody className={`divide-y ${isDarkMode ? 'divide-gray-700' : 'divide-gray-200'}`}>
+              <tbody className={`divide-y divide-line`}>
                 {tracks.map((track) => (
                   <tr key={track.id}>
                     <td className="px-6 py-4 whitespace-nowrap">{track.name}</td>
                     <td className="px-6 py-4 whitespace-nowrap">{track.location || '-'}</td>
                     <td className="px-6 py-4 whitespace-nowrap">{track.length_meters ? `${track.length_meters}m` : '-'}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${track.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${track.is_active ? 'bg-live/15 text-live' : 'bg-alarm/15 text-alarm'}`}>
                         {track.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
@@ -355,14 +355,14 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                           });
                           setShowTrackModal(true);
                         }}
-                        className="text-blue-500 hover:text-blue-400 mr-4"
+                        className="text-info hover:text-info mr-4"
                       >
                         Edit
                       </button>
-                      <button onClick={() => setLayoutsFor(track)} className="text-green-500 hover:text-green-400 mr-4">
+                      <button onClick={() => setLayoutsFor(track)} className="text-live hover:text-live mr-4">
                         Layouts
                       </button>
-                      <button onClick={() => handleDeleteTrack(track.id)} className="text-red-500 hover:text-red-400">
+                      <button onClick={() => handleDeleteTrack(track.id)} className="text-alarm hover:text-alarm">
                         Delete
                       </button>
                     </td>
@@ -377,29 +377,29 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
       {/* User Modal */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg p-6 max-w-md w-full`}>
+          <div className={`bg-surface rounded-lg p-6 max-w-md w-full`}>
             <h3 className="text-lg font-semibold mb-4">{editingUser ? 'Edit User' : 'Create User'}</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Username</label>
-                <input type="text" value={userForm.username} disabled={!!editingUser}
+                <label htmlFor="user-username" className="block text-sm font-medium mb-1">Username</label>
+                <input id="user-username" type="text" value={userForm.username} disabled={!!editingUser}
                   onChange={(e) => setUserForm({ ...userForm, username: e.target.value })} className={field} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">
+                <label htmlFor="user-password" className="block text-sm font-medium mb-1">
                   {editingUser ? 'New Password (leave blank to keep current)' : 'Password'}
                 </label>
-                <input type="password" value={userForm.password} required={!editingUser}
+                <input id="user-password" type="password" value={userForm.password} required={!editingUser}
                   onChange={(e) => setUserForm({ ...userForm, password: e.target.value })} className={field} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Email</label>
-                <input type="email" value={userForm.email}
+                <label htmlFor="user-email" className="block text-sm font-medium mb-1">Email</label>
+                <input id="user-email" type="email" value={userForm.email}
                   onChange={(e) => setUserForm({ ...userForm, email: e.target.value })} className={field} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Role</label>
-                <select value={userForm.role}
+                <label htmlFor="user-role" className="block text-sm font-medium mb-1">Role</label>
+                <select id="user-role" value={userForm.role}
                   onChange={(e) => setUserForm({ ...userForm, role: e.target.value })} className={field}>
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
@@ -408,11 +408,11 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
             </div>
             <div className="flex justify-end space-x-3 mt-6">
               <button onClick={() => setShowUserModal(false)}
-                className={`px-4 py-2 rounded ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}>
+                className={`px-4 py-2 rounded ${isDarkMode ? 'bg-surface-2 hover:bg-line' : 'bg-line hover:bg-line'}`}>
                 Cancel
               </button>
               <button onClick={editingUser ? handleUpdateUser : handleCreateUser}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                className="px-4 py-2 bg-info text-white rounded hover:bg-info">
                 {editingUser ? 'Update' : 'Create'}
               </button>
             </div>
@@ -423,37 +423,37 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
       {/* Track Modal */}
       {showTrackModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto`}>
+          <div className={`bg-surface rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto`}>
             <h3 className="text-lg font-semibold mb-4">{editingTrack ? 'Edit Track' : 'Create Track'}</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1">Name</label>
-                <input type="text" value={trackForm.name} required
+                <label htmlFor="track-name" className="block text-sm font-medium mb-1">Name</label>
+                <input id="track-name" type="text" value={trackForm.name} required
                   onChange={(e) => setTrackForm({ ...trackForm, name: e.target.value })} className={field} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Location</label>
-                <input type="text" value={trackForm.location}
+                <label htmlFor="track-location" className="block text-sm font-medium mb-1">Location</label>
+                <input id="track-location" type="text" value={trackForm.location}
                   onChange={(e) => setTrackForm({ ...trackForm, location: e.target.value })} className={field} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Length (meters)</label>
-                <input type="number" value={trackForm.length_meters}
+                <label htmlFor="track-length" className="block text-sm font-medium mb-1">Length (meters)</label>
+                <input id="track-length" type="number" value={trackForm.length_meters}
                   onChange={(e) => setTrackForm({ ...trackForm, length_meters: e.target.value })} className={field} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Description</label>
-                <textarea value={trackForm.description} rows={3}
+                <label htmlFor="track-description" className="block text-sm font-medium mb-1">Description</label>
+                <textarea id="track-description" value={trackForm.description} rows={3}
                   onChange={(e) => setTrackForm({ ...trackForm, description: e.target.value })} className={field} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Timing URL</label>
-                <input type="text" value={trackForm.timing_url}
+                <label htmlFor="track-timing-url" className="block text-sm font-medium mb-1">Timing URL</label>
+                <input id="track-timing-url" type="text" value={trackForm.timing_url}
                   onChange={(e) => setTrackForm({ ...trackForm, timing_url: e.target.value })} className={field} />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">WebSocket URL</label>
-                <input type="text" value={trackForm.websocket_url}
+                <label htmlFor="track-websocket-url" className="block text-sm font-medium mb-1">WebSocket URL</label>
+                <input id="track-websocket-url" type="text" value={trackForm.websocket_url}
                   onChange={(e) => setTrackForm({ ...trackForm, websocket_url: e.target.value })} className={field} />
               </div>
               <div>
@@ -466,11 +466,11 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
             </div>
             <div className="flex justify-end space-x-3 mt-6">
               <button onClick={() => setShowTrackModal(false)}
-                className={`px-4 py-2 rounded ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}>
+                className={`px-4 py-2 rounded ${isDarkMode ? 'bg-surface-2 hover:bg-line' : 'bg-line hover:bg-line'}`}>
                 Cancel
               </button>
               <button onClick={editingTrack ? handleUpdateTrack : handleCreateTrack}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                className="px-4 py-2 bg-info text-white rounded hover:bg-info">
                 {editingTrack ? 'Update' : 'Create'}
               </button>
             </div>

@@ -82,23 +82,23 @@ export default function RegisterPage() {
 
   if (submitted) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-        <div className="max-w-md p-6 bg-gray-800 rounded-md text-center space-y-4">
+      <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">
+        <div className="max-w-md p-6 bg-surface rounded-md text-center space-y-4">
           <h2 className="text-2xl font-bold">Check your inbox</h2>
-          <p className="text-sm text-gray-300">
+          <p className="text-sm text-ink">
             We sent a verification link to <strong>{email}</strong>. Click the link to activate your account.
           </p>
-          <p className="text-xs text-gray-400">It can take a minute to arrive. Don&apos;t see it? Check your spam folder.</p>
-          <Link href="/login" className="text-blue-300 underline">Back to sign in</Link>
+          <p className="text-xs text-muted">It can take a minute to arrive. Don&apos;t see it? Check your spam folder.</p>
+          <Link href="/login" className="text-info underline">Back to sign in</Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12">
+    <div className="min-h-screen flex items-center justify-center bg-canvas py-12">
       <div className="max-w-md w-full space-y-4 px-4">
-        <h2 className="text-center text-3xl font-extrabold text-white">Create an account</h2>
+        <h2 className="text-center text-3xl font-extrabold text-ink">Create an account</h2>
         <form className="space-y-3" onSubmit={submit}>
           <input
             type="text"
@@ -106,7 +106,7 @@ export default function RegisterPage() {
             placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="block w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-500"
+            className="block w-full px-3 py-2 bg-surface border border-line rounded-md text-ink placeholder:text-muted"
           />
           <input
             type="email"
@@ -114,7 +114,7 @@ export default function RegisterPage() {
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="block w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-500"
+            className="block w-full px-3 py-2 bg-surface border border-line rounded-md text-ink placeholder:text-muted"
           />
           <input
             type="password"
@@ -122,10 +122,10 @@ export default function RegisterPage() {
             placeholder="Password (min 12 characters)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="block w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-500"
+            className="block w-full px-3 py-2 bg-surface border border-line rounded-md text-ink placeholder:text-muted"
           />
           {password && (
-            <div className="h-1 w-full bg-gray-700 rounded overflow-hidden">
+            <div className="h-1 w-full bg-surface-2 rounded overflow-hidden">
               <div
                 className={`h-1 ${strengthColor(score)}`}
                 style={{ width: `${(score / 4) * 100}%` }}
@@ -138,7 +138,7 @@ export default function RegisterPage() {
             placeholder="Confirm password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            className="block w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-500"
+            className="block w-full px-3 py-2 bg-surface border border-line rounded-md text-ink placeholder:text-muted"
           />
           {INVITE_REQUIRED && (
             <input
@@ -147,11 +147,11 @@ export default function RegisterPage() {
               placeholder="Invite code"
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
-              className="block w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-500"
+              className="block w-full px-3 py-2 bg-surface border border-line rounded-md text-ink placeholder:text-muted"
             />
           )}
 
-          <label className="flex items-start space-x-2 text-sm text-gray-300">
+          <label className="flex items-start space-x-2 text-sm text-ink">
             <input
               type="checkbox"
               checked={acceptTerms}
@@ -160,28 +160,28 @@ export default function RegisterPage() {
             />
             <span>
               I accept the{' '}
-              <Link href="/terms" className="text-blue-300 underline">terms</Link> and{' '}
-              <Link href="/privacy" className="text-blue-300 underline">privacy policy</Link>.
+              <Link href="/terms" className="text-info underline">terms</Link> and{' '}
+              <Link href="/privacy" className="text-info underline">privacy policy</Link>.
             </span>
           </label>
 
           <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
 
           {error && (
-            <div className="rounded-md bg-red-900 p-3 text-sm text-red-200">{error}</div>
+            <div className="rounded-md bg-alarm/15 p-3 text-sm text-alarm">{error}</div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md disabled:opacity-50"
+            className="w-full py-2 px-4 bg-info hover:bg-info text-white rounded-md disabled:opacity-50"
           >
             {loading ? 'Creating account...' : 'Create account'}
           </button>
 
-          <p className="text-center text-sm text-gray-400">
+          <p className="text-center text-sm text-muted">
             Already have an account?{' '}
-            <Link href="/login" className="text-blue-300 hover:underline">Sign in</Link>
+            <Link href="/login" className="text-info hover:underline">Sign in</Link>
           </p>
         </form>
       </div>
@@ -199,8 +199,8 @@ function passwordScore(pw: string): number {
 }
 
 function strengthColor(score: number): string {
-  if (score <= 1) return 'bg-red-500';
-  if (score === 2) return 'bg-yellow-500';
-  if (score === 3) return 'bg-blue-500';
-  return 'bg-green-500';
+  if (score <= 1) return 'bg-alarm';
+  if (score === 2) return 'bg-accent';
+  if (score === 3) return 'bg-info';
+  return 'bg-live';
 }

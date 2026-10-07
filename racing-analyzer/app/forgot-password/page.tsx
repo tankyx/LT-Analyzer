@@ -29,15 +29,15 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-      <div className="max-w-md w-full p-6 bg-gray-800 rounded-md space-y-4">
+    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">
+      <div className="max-w-md w-full p-6 bg-surface rounded-md space-y-4">
         <h2 className="text-center text-2xl font-bold">Reset your password</h2>
         {sent ? (
           <>
-            <p className="text-sm text-gray-300">
+            <p className="text-sm text-ink">
               If that email exists in our system, we sent a reset link. The link is good for 1 hour.
             </p>
-            <Link href="/login" className="text-blue-300 underline">Back to sign in</Link>
+            <Link href="/login" className="text-info underline">Back to sign in</Link>
           </>
         ) : (
           <form className="space-y-3" onSubmit={submit}>
@@ -47,18 +47,18 @@ export default function ForgotPasswordPage() {
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md placeholder-gray-500"
+              className="block w-full px-3 py-2 bg-canvas border border-line rounded-md placeholder:text-muted"
             />
             <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
             <button
               type="submit"
               disabled={loading || !turnstileToken}
-              className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
+              className="w-full py-2 px-4 bg-info hover:bg-info rounded-md disabled:opacity-50"
             >
               {loading ? 'Sending…' : 'Send reset link'}
             </button>
-            <p className="text-sm text-gray-400 text-center">
-              <Link href="/login" className="text-blue-300 hover:underline">Cancel</Link>
+            <p className="text-sm text-muted text-center">
+              <Link href="/login" className="text-info hover:underline">Cancel</Link>
             </p>
           </form>
         )}

@@ -57,7 +57,7 @@ const TrackSelector: React.FC<TrackSelectorProps> = ({ onSelectTrack, selectedTr
 
   if (loading) {
     return (
-      <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+      <div className={`text-sm ${'text-muted'}`}>
         Loading tracks...
       </div>
     );
@@ -65,14 +65,14 @@ const TrackSelector: React.FC<TrackSelectorProps> = ({ onSelectTrack, selectedTr
 
   return (
     <div>
-      <label className={`block text-xs mb-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+      <label className={`block text-xs mb-2 ${'text-muted'}`}>
         Select Track (will start data collection):
       </label>
       <div className={`max-h-48 overflow-y-auto rounded border ${
-        isDarkMode ? 'border-gray-600' : 'border-gray-300'
+        'border-line'
       }`}>
         {tracks.length === 0 ? (
-          <div className={`p-3 text-sm text-center ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+          <div className={`p-3 text-sm text-center ${'text-muted'}`}>
             No tracks available
           </div>
         ) : (
@@ -83,18 +83,18 @@ const TrackSelector: React.FC<TrackSelectorProps> = ({ onSelectTrack, selectedTr
               className={`px-3 py-2 cursor-pointer transition-colors text-sm border-b last:border-b-0
                 ${selectedTrackId === track.id 
                   ? (isDarkMode 
-                      ? 'bg-blue-900/50 text-blue-300 border-blue-800' 
-                      : 'bg-blue-100 text-blue-800 border-blue-200')
+                      ? 'bg-info/50 text-info border-info' 
+                      : 'bg-info/15 text-info border-info')
                   : (isDarkMode 
-                      ? 'bg-gray-800 hover:bg-gray-700 text-gray-100 border-gray-700' 
-                      : 'bg-white hover:bg-gray-50 text-gray-900 border-gray-200')
+                      ? 'bg-surface hover:bg-surface-2 text-ink border-line' 
+                      : 'bg-surface hover:bg-surface-2 text-ink border-line')
                 }
               `}
             >
               <div className="flex items-center justify-between">
                 <span className="font-medium">{track.track_name}</span>
                 {track.websocket_url && (
-                  <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                  <span className={`text-xs ${'text-muted'}`}>
                     WS
                   </span>
                 )}

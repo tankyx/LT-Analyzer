@@ -74,7 +74,7 @@ function LoginInner() {
     <div className="min-h-screen flex items-center justify-center bg-canvas text-ink p-4">
       <div className="w-full max-w-sm flex flex-col gap-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-[9px] bg-accent text-accent-ink font-cond font-bold text-lg flex items-center justify-center">
+          <div className="w-10 h-10 rounded-[9px] accent-gradient text-accent-ink font-cond font-bold text-lg flex items-center justify-center">
             LT
           </div>
           <div className="flex flex-col">
@@ -145,7 +145,7 @@ function LoginInner() {
             <button
               type="submit"
               disabled={loading}
-              className="h-11 rounded-lg bg-accent text-accent-ink font-bold text-sm hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-50"
+              className="h-11 rounded-lg accent-gradient text-accent-ink font-bold text-sm hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-50"
             >
               {loading ? 'Logging in…' : 'Sign in'}
             </button>

@@ -441,7 +441,7 @@ export default function TeamProfilePage() {
 
   if (authLoading || loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
+      <div className="dark min-h-screen bg-gradient-to-br from-canvas via-surface to-canvas flex items-center justify-center">
         <div className="text-white text-xl">Loading team profile...</div>
       </div>
     );
@@ -449,13 +449,13 @@ export default function TeamProfilePage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center">
-        <div className="bg-red-900 text-red-200 p-6 rounded-lg max-w-md">
+      <div className="dark min-h-screen bg-gradient-to-br from-canvas via-surface to-canvas flex items-center justify-center">
+        <div className="bg-alarm/15 text-alarm p-6 rounded-lg max-w-md">
           <h2 className="text-xl font-bold mb-2">Error</h2>
           <p>{error}</p>
           <button
             onClick={() => router.push('/data')}
-            className="mt-4 px-4 py-2 bg-red-700 hover:bg-red-600 rounded-lg transition-colors"
+            className="mt-4 px-4 py-2 bg-alarm hover:bg-alarm rounded-lg transition-colors"
           >
             Back to Data Page
           </button>
@@ -469,8 +469,8 @@ export default function TeamProfilePage() {
       onClick={() => setActiveTab(tab)}
       className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
         activeTab === tab
-          ? 'text-white border-blue-400'
-          : 'text-gray-400 border-transparent hover:text-gray-200'
+          ? 'text-white border-info'
+          : 'text-muted border-transparent hover:text-ink'
       }`}
     >
       {label}
@@ -478,39 +478,39 @@ export default function TeamProfilePage() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
+    <div className="dark min-h-screen bg-gradient-to-br from-canvas via-surface to-canvas p-6">
       <div className="max-w-7xl mx-auto">
         <div className="mb-6">
           <button
             onClick={() => router.push('/data')}
-            className="text-blue-400 hover:text-blue-300 mb-4 flex items-center gap-2"
+            className="text-info hover:text-info mb-4 flex items-center gap-2"
           >
             ← Back to Data Page
           </button>
           <h1 className="text-4xl font-bold text-white capitalize">{teamName}</h1>
-          <p className="text-gray-400 mt-2">Complete racing history across all tracks</p>
+          <p className="text-muted mt-2">Complete racing history across all tracks</p>
         </div>
 
         {overallStats && (
-          <div className="bg-gray-800 rounded-lg p-6 mb-6">
+          <div className="bg-surface rounded-lg p-6 mb-6">
             <h2 className="text-2xl font-semibold text-white mb-4">Overall Statistics</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <StatCard label="Total Sessions" value={overallStats.total_sessions} color="text-blue-400" />
-              <StatCard label="Total Laps" value={overallStats.total_laps} color="text-green-400" />
-              <StatCard label="Tracks Raced" value={overallStats.tracks_raced} color="text-yellow-400" />
+              <StatCard label="Total Sessions" value={overallStats.total_sessions} color="text-info" />
+              <StatCard label="Total Laps" value={overallStats.total_laps} color="text-live" />
+              <StatCard label="Tracks Raced" value={overallStats.tracks_raced} color="text-accent" />
             </div>
             {overallStats.bests_by_track && overallStats.bests_by_track.length > 0 && (
               <div>
-                <h3 className="text-sm uppercase tracking-wide text-gray-400 mb-2">Best Lap by Track</h3>
+                <h3 className="text-sm uppercase tracking-wide text-muted mb-2">Best Lap by Track</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {overallStats.bests_by_track.map(b => (
-                    <div key={b.track_id} className="bg-gray-700 rounded-lg px-3 py-2">
-                      <div className="text-xs text-gray-400">{b.track_name}</div>
-                      <div className="text-lg font-bold text-purple-300">{b.best_lap || 'N/A'}</div>
+                    <div key={b.track_id} className="bg-surface-2 rounded-lg px-3 py-2">
+                      <div className="text-xs text-muted">{b.track_name}</div>
+                      <div className="text-lg font-bold text-class2">{b.best_lap || 'N/A'}</div>
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-gray-500 mt-2">
+                <p className="text-xs text-muted mt-2">
                   Laps on different tracks aren&apos;t comparable, so best times are shown per track.
                 </p>
               </div>
@@ -554,7 +554,7 @@ export default function TeamProfilePage() {
           }}
         />
 
-        <div className="border-b border-gray-700 mb-4 flex gap-2">
+        <div className="border-b border-line mb-4 flex gap-2">
           <TabButton tab="sessions" label="Sessions" />
           <TabButton tab="consistency" label="Consistency" />
           <TabButton tab="fairness" label="Kart Fairness" />
@@ -679,24 +679,24 @@ function AliasPanel({
   ]);
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4 mb-6">
+    <div className="bg-surface rounded-lg p-4 mb-6">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-semibold text-gray-200 uppercase tracking-wide">Aliases</h3>
+        <h3 className="text-sm font-semibold text-ink uppercase tracking-wide">Aliases</h3>
         {aliases && !viewingIsCanonical && (
-          <span className="text-xs text-gray-400">
-            Canonical: <span className="text-blue-300">{canonical}</span>
+          <span className="text-xs text-muted">
+            Canonical: <span className="text-info">{canonical}</span>
           </span>
         )}
       </div>
 
-      {error && <div className="text-xs text-red-300 mb-2">{error}</div>}
+      {error && <div className="text-xs text-alarm mb-2">{error}</div>}
 
       {hasGroup ? (
         <div className="flex flex-wrap gap-2 mb-2">
           {aliases!.aliases.map(a => (
             <span
               key={a.id}
-              className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-gray-700 text-xs text-gray-200"
+              className="inline-flex items-center gap-2 px-2 py-1 rounded-full bg-surface-2 text-xs text-ink"
               title={a.added_by ? `added by ${a.added_by}` : undefined}
             >
               {a.alias_name}
@@ -704,7 +704,7 @@ function AliasPanel({
                 <button
                   onClick={() => onDelete(a.id)}
                   disabled={busy}
-                  className="text-red-400 hover:text-red-300 disabled:opacity-50"
+                  className="text-alarm hover:text-alarm disabled:opacity-50"
                   aria-label={`Remove alias ${a.alias_name}`}
                 >
                   ✕
@@ -714,7 +714,7 @@ function AliasPanel({
           ))}
         </div>
       ) : (
-        <div className="text-xs text-gray-500 mb-2">
+        <div className="text-xs text-muted mb-2">
           No aliases configured{isAdmin ? '. Search the database below to merge a driver record (e.g. "SIMON R4B" → "DELVENNE Simon").' : '.'}
         </div>
       )}
@@ -733,26 +733,26 @@ function AliasPanel({
                 onFocus={() => setShowSuggestions(true)}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                 placeholder={`Search for a name to alias to "${canonical}"`}
-                className="w-full px-3 py-1.5 bg-gray-700 text-white text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-1.5 bg-surface-2 text-white text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !showSuggestions) onAdd();
                 }}
               />
               {searching && (
-                <span className="absolute right-3 top-1.5 text-xs text-gray-400">...</span>
+                <span className="absolute right-3 top-1.5 text-xs text-muted">...</span>
               )}
             </div>
             <button
               onClick={onAdd}
               disabled={busy || !newAlias.trim()}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm rounded-lg"
+              className="px-3 py-1.5 bg-info hover:bg-info disabled:opacity-50 text-white text-sm rounded-lg"
             >
               {busy ? '...' : 'Add'}
             </button>
           </div>
 
           {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute z-10 left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-lg max-h-72 overflow-y-auto shadow-xl">
+            <div className="absolute z-10 left-0 right-0 mt-1 bg-canvas border border-line rounded-lg max-h-72 overflow-y-auto shadow-xl">
               {suggestions.map((s) => {
                 const already = existingAliasNames.has(s.name.toLowerCase());
                 return (
@@ -761,23 +761,23 @@ function AliasPanel({
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => pickSuggestion(s)}
                     disabled={already}
-                    className={`w-full text-left px-3 py-2 text-sm border-b border-gray-800 last:border-b-0 ${
-                      already ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-800 cursor-pointer'
+                    className={`w-full text-left px-3 py-2 text-sm border-b border-line last:border-b-0 ${
+                      already ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface cursor-pointer'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-white">{s.name}</span>
-                      <span className="text-xs text-gray-500">
+                      <span className="text-xs text-muted">
                         {s.via_alias && !s.track_count ? 'alias record' : `${s.track_count} track${s.track_count === 1 ? '' : 's'}`}
                       </span>
                     </div>
                     {s.track_names.length > 0 && (
-                      <div className="text-xs text-gray-500 mt-0.5">
+                      <div className="text-xs text-muted mt-0.5">
                         {s.track_names.join(' · ')}
                         {s.classes && <span className="ml-2">· Classes: {s.classes}</span>}
                       </div>
                     )}
-                    {already && <div className="text-xs text-yellow-400 mt-0.5">already in this group</div>}
+                    {already && <div className="text-xs text-accent mt-0.5">already in this group</div>}
                   </button>
                 );
               })}
@@ -785,7 +785,7 @@ function AliasPanel({
           )}
 
           {showSuggestions && !searching && newAlias.trim().length >= 2 && suggestions.length === 0 && (
-            <div className="absolute z-10 left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-500">
+            <div className="absolute z-10 left-0 right-0 mt-1 bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-muted">
               No matches. You can still add it as a free-form alias.
             </div>
           )}
@@ -797,8 +797,8 @@ function AliasPanel({
 
 function StatCard({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
-    <div className="bg-gray-700 rounded-lg p-4">
-      <div className="text-gray-400 text-sm mb-1">{label}</div>
+    <div className="bg-surface-2 rounded-lg p-4">
+      <div className="text-muted text-sm mb-1">{label}</div>
       <div className={`text-3xl font-bold ${color}`}>{value}</div>
     </div>
   );
@@ -834,15 +834,15 @@ function SessionsTab({
   onToggle: (trackId: number, sessionId: number) => void;
 }) {
   return (
-    <div className="bg-gray-800 rounded-lg p-6">
+    <div className="bg-surface rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-semibold text-white">Session History</h2>
         <div className="flex items-center gap-2">
-          <label className="text-gray-400 text-sm">Filter by Track:</label>
+          <label className="text-muted text-sm">Filter by Track:</label>
           <select
             value={selectedTrack || ''}
             onChange={e => setSelectedTrack(e.target.value ? parseInt(e.target.value) : null)}
-            className="px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
           >
             <option value="">All Tracks</option>
             {uniqueTracks.map(track => (
@@ -855,22 +855,22 @@ function SessionsTab({
       {sessions.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-700">
-              <tr className="text-left border-b border-gray-600">
-                <th className="px-4 py-3 text-gray-300 cursor-pointer hover:text-white" onClick={() => onSort('date')}>
+            <thead className="bg-surface-2">
+              <tr className="text-left border-b border-line">
+                <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('date')}>
                   Date {sortBy === 'date' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-gray-300 cursor-pointer hover:text-white" onClick={() => onSort('track')}>
+                <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('track')}>
                   Track {sortBy === 'track' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-gray-300">Session</th>
-                <th className="px-4 py-3 text-gray-300 cursor-pointer hover:text-white" onClick={() => onSort('laps')}>
+                <th className="px-4 py-3 text-ink">Session</th>
+                <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('laps')}>
                   Total Laps {sortBy === 'laps' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-gray-300 cursor-pointer hover:text-white" onClick={() => onSort('best_lap')}>
+                <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('best_lap')}>
                   Best Lap {sortBy === 'best_lap' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-gray-300">Avg Lap</th>
+                <th className="px-4 py-3 text-ink">Avg Lap</th>
               </tr>
             </thead>
             <tbody>
@@ -880,50 +880,50 @@ function SessionsTab({
                   <>
                     <tr
                       key={`${session.track_id}-${session.session_id}-${index}`}
-                      className="border-b border-gray-700 hover:bg-gray-700 transition-colors cursor-pointer"
+                      className="border-b border-line hover:bg-surface-2 transition-colors cursor-pointer"
                       onClick={() => onToggle(session.track_id, session.session_id)}
                     >
-                      <td className="px-4 py-3 text-gray-400">
+                      <td className="px-4 py-3 text-muted">
                         <span className="mr-2">{isExpanded ? '▼' : '▶'}</span>
                         {session.session_date
                           ? new Date(session.session_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
                           : 'N/A'}
                       </td>
-                      <td className="px-4 py-3 text-blue-300">{session.track_name}</td>
+                      <td className="px-4 py-3 text-info">{session.track_name}</td>
                       <td className="px-4 py-3 text-white">{session.session_name}</td>
-                      <td className="px-4 py-3 text-yellow-300">{session.total_laps}</td>
-                      <td className="px-4 py-3 text-green-300">{session.best_lap || 'N/A'}</td>
-                      <td className="px-4 py-3 text-purple-300">{session.avg_lap || 'N/A'}</td>
+                      <td className="px-4 py-3 text-accent">{session.total_laps}</td>
+                      <td className="px-4 py-3 text-live">{session.best_lap || 'N/A'}</td>
+                      <td className="px-4 py-3 text-class2">{session.avg_lap || 'N/A'}</td>
                     </tr>
                     {isExpanded && (
                       <tr key={`laps-${session.track_id}-${session.session_id}`}>
-                        <td colSpan={6} className="px-4 py-4 bg-gray-750">
+                        <td colSpan={6} className="px-4 py-4 bg-surface">
                           {loadingLaps ? (
-                            <div className="text-center text-gray-400 py-4">Loading laps...</div>
+                            <div className="text-center text-muted py-4">Loading laps...</div>
                           ) : sessionLaps.length > 0 ? (
                             <div className="max-h-96 overflow-y-auto">
                               <h4 className="text-white font-semibold mb-2">Lap Details ({sessionLaps.length} laps)</h4>
                               <table className="w-full text-xs">
-                                <thead className="bg-gray-700 sticky top-0">
+                                <thead className="bg-surface-2 sticky top-0">
                                   <tr className="text-left">
-                                    <th className="px-3 py-2 text-gray-300">Lap #</th>
-                                    <th className="px-3 py-2 text-gray-300">Lap Time</th>
-                                    <th className="px-3 py-2 text-gray-300">Position</th>
-                                    <th className="px-3 py-2 text-gray-300">Pit Stop</th>
-                                    <th className="px-3 py-2 text-gray-300">Timestamp</th>
+                                    <th className="px-3 py-2 text-ink">Lap #</th>
+                                    <th className="px-3 py-2 text-ink">Lap Time</th>
+                                    <th className="px-3 py-2 text-ink">Position</th>
+                                    <th className="px-3 py-2 text-ink">Pit Stop</th>
+                                    <th className="px-3 py-2 text-ink">Timestamp</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {sessionLaps.map((lap) => (
                                     <tr
                                       key={lap.lap_number}
-                                      className={`border-b border-gray-700 ${lap.pit_this_lap ? 'bg-orange-900 bg-opacity-20' : ''}`}
+                                      className={`border-b border-line ${lap.pit_this_lap ? 'bg-accent/15 bg-opacity-20' : ''}`}
                                     >
-                                      <td className="px-3 py-2 text-gray-300">{lap.lap_number}</td>
+                                      <td className="px-3 py-2 text-ink">{lap.lap_number}</td>
                                       <td className="px-3 py-2 text-white">{lap.lap_time}</td>
-                                      <td className="px-3 py-2 text-yellow-300">{lap.position_after_lap || 'N/A'}</td>
-                                      <td className="px-3 py-2 text-orange-300">{lap.pit_this_lap ? '🔧 Pit' : ''}</td>
-                                      <td className="px-3 py-2 text-gray-400">
+                                      <td className="px-3 py-2 text-accent">{lap.position_after_lap || 'N/A'}</td>
+                                      <td className="px-3 py-2 text-accent">{lap.pit_this_lap ? '🔧 Pit' : ''}</td>
+                                      <td className="px-3 py-2 text-muted">
                                         {lap.timestamp ? new Date(lap.timestamp).toLocaleTimeString() : 'N/A'}
                                       </td>
                                     </tr>
@@ -932,7 +932,7 @@ function SessionsTab({
                               </table>
                             </div>
                           ) : (
-                            <div className="text-center text-gray-400 py-4">No lap data available for this session</div>
+                            <div className="text-center text-muted py-4">No lap data available for this session</div>
                           )}
                         </td>
                       </tr>
@@ -944,7 +944,7 @@ function SessionsTab({
           </table>
         </div>
       ) : (
-        <div className="text-center text-gray-400 py-8">
+        <div className="text-center text-muted py-8">
           {selectedTrack ? 'No sessions found for this track.' : 'No sessions found for this team.'}
         </div>
       )}
@@ -966,13 +966,13 @@ function ConsistencyTab({
   data: ConsistencyResponse | null;
 }) {
   if (loading) {
-    return <div className="bg-gray-800 rounded-lg p-6 text-gray-300">Loading consistency stats...</div>;
+    return <div className="bg-surface rounded-lg p-6 text-ink">Loading consistency stats...</div>;
   }
   if (error) {
-    return <div className="bg-red-900 rounded-lg p-6 text-red-200">{error}</div>;
+    return <div className="bg-alarm/15 rounded-lg p-6 text-alarm">{error}</div>;
   }
   if (!data || data.sessions.length === 0) {
-    return <div className="bg-gray-800 rounded-lg p-6 text-gray-400">No consistency data available.</div>;
+    return <div className="bg-surface rounded-lg p-6 text-muted">No consistency data available.</div>;
   }
 
   const trendData = data.trend.map(t => ({
@@ -990,32 +990,32 @@ function ConsistencyTab({
 
   return (
     <div className="space-y-6">
-      <div className="bg-gray-800 rounded-lg p-6">
+      <div className="bg-surface rounded-lg p-6">
         <h3 className="text-xl font-semibold text-white mb-4">Career Consistency</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             label="Career σ (s)"
             value={data.overall.career_stddev_seconds !== null ? data.overall.career_stddev_seconds.toFixed(2) : 'N/A'}
-            color="text-blue-300"
+            color="text-info"
           />
           <StatCard
             label="Career CoV"
             value={data.overall.career_cov !== null ? `${(data.overall.career_cov * 100).toFixed(2)}%` : 'N/A'}
-            color="text-green-300"
+            color="text-live"
           />
           <StatCard
             label="Career Mean (s)"
             value={data.overall.career_mean_seconds !== null ? data.overall.career_mean_seconds.toFixed(2) : 'N/A'}
-            color="text-yellow-300"
+            color="text-accent"
           />
-          <StatCard label="Sessions" value={data.overall.total_sessions} color="text-purple-300" />
+          <StatCard label="Sessions" value={data.overall.total_sessions} color="text-class2" />
         </div>
-        <p className="text-xs text-gray-500 mt-3">
+        <p className="text-xs text-muted mt-3">
           Lower σ / CoV = steadier pace. Pit-in laps and clear outliers (&gt;3× median or &gt;3&nbsp;min) are excluded.
         </p>
       </div>
 
-      <div className="bg-gray-800 rounded-lg p-6">
+      <div className="bg-surface rounded-lg p-6">
         <h3 className="text-xl font-semibold text-white mb-4">σ Over Time (older → newer)</h3>
         {trendData.length > 1 ? (
           <div className="h-64">
@@ -1031,11 +1031,11 @@ function ConsistencyTab({
             </ResponsiveContainer>
           </div>
         ) : (
-          <div className="text-gray-400 text-sm">Not enough sessions to plot a trend yet.</div>
+          <div className="text-muted text-sm">Not enough sessions to plot a trend yet.</div>
         )}
       </div>
 
-      <div className="bg-gray-800 rounded-lg p-6">
+      <div className="bg-surface rounded-lg p-6">
         <h3 className="text-xl font-semibold text-white mb-4">Per-Session σ (last 20)</h3>
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
@@ -1050,37 +1050,37 @@ function ConsistencyTab({
         </div>
       </div>
 
-      <div className="bg-gray-800 rounded-lg p-6">
+      <div className="bg-surface rounded-lg p-6">
         <h3 className="text-xl font-semibold text-white mb-4">Session Detail</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-700">
+            <thead className="bg-surface-2">
               <tr className="text-left">
-                <th className="px-3 py-2 text-gray-300">Date</th>
-                <th className="px-3 py-2 text-gray-300">Track</th>
-                <th className="px-3 py-2 text-gray-300">Clean Laps</th>
-                <th className="px-3 py-2 text-gray-300">Best</th>
-                <th className="px-3 py-2 text-gray-300">σ (s)</th>
-                <th className="px-3 py-2 text-gray-300">CoV</th>
-                <th className="px-3 py-2 text-gray-300">Within 0.5s</th>
-                <th className="px-3 py-2 text-gray-300">Within 1s</th>
-                <th className="px-3 py-2 text-gray-300">Within 2s</th>
+                <th className="px-3 py-2 text-ink">Date</th>
+                <th className="px-3 py-2 text-ink">Track</th>
+                <th className="px-3 py-2 text-ink">Clean Laps</th>
+                <th className="px-3 py-2 text-ink">Best</th>
+                <th className="px-3 py-2 text-ink">σ (s)</th>
+                <th className="px-3 py-2 text-ink">CoV</th>
+                <th className="px-3 py-2 text-ink">Within 0.5s</th>
+                <th className="px-3 py-2 text-ink">Within 1s</th>
+                <th className="px-3 py-2 text-ink">Within 2s</th>
               </tr>
             </thead>
             <tbody>
               {data.sessions.map(s => (
-                <tr key={`${s.track_id}-${s.session_id}`} className="border-b border-gray-700 hover:bg-gray-700">
-                  <td className="px-3 py-2 text-gray-400">
+                <tr key={`${s.track_id}-${s.session_id}`} className="border-b border-line hover:bg-surface-2">
+                  <td className="px-3 py-2 text-muted">
                     {s.session_date ? new Date(s.session_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) : ''}
                   </td>
-                  <td className="px-3 py-2 text-blue-300">{s.track_name}</td>
-                  <td className="px-3 py-2 text-gray-300">{s.clean_laps} / {s.total_laps}</td>
-                  <td className="px-3 py-2 text-green-300">{s.best_lap || 'N/A'}</td>
-                  <td className="px-3 py-2 text-yellow-300">{s.stddev_seconds.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-yellow-300">{(s.cov * 100).toFixed(2)}%</td>
-                  <td className="px-3 py-2 text-purple-300">{(s.pct_within_0_5s * 100).toFixed(0)}%</td>
-                  <td className="px-3 py-2 text-purple-300">{(s.pct_within_1s * 100).toFixed(0)}%</td>
-                  <td className="px-3 py-2 text-purple-300">{(s.pct_within_2s * 100).toFixed(0)}%</td>
+                  <td className="px-3 py-2 text-info">{s.track_name}</td>
+                  <td className="px-3 py-2 text-ink">{s.clean_laps} / {s.total_laps}</td>
+                  <td className="px-3 py-2 text-live">{s.best_lap || 'N/A'}</td>
+                  <td className="px-3 py-2 text-accent">{s.stddev_seconds.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-accent">{(s.cov * 100).toFixed(2)}%</td>
+                  <td className="px-3 py-2 text-class2">{(s.pct_within_0_5s * 100).toFixed(0)}%</td>
+                  <td className="px-3 py-2 text-class2">{(s.pct_within_1s * 100).toFixed(0)}%</td>
+                  <td className="px-3 py-2 text-class2">{(s.pct_within_2s * 100).toFixed(0)}%</td>
                 </tr>
               ))}
             </tbody>
@@ -1122,34 +1122,34 @@ function FairnessTab({
 }) {
   return (
     <div className="space-y-6">
-      <div className="bg-gray-800 rounded-lg p-4 flex items-center gap-3 flex-wrap">
-        <label className="text-gray-300 text-sm">Track:</label>
+      <div className="bg-surface rounded-lg p-4 flex items-center gap-3 flex-wrap">
+        <label className="text-ink text-sm">Track:</label>
         <select
           value={trackId || ''}
           onChange={e => setTrackId(parseInt(e.target.value))}
-          className="px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
         >
           {tracks.map(t => (
             <option key={t.id} value={t.id}>{t.track_name}</option>
           ))}
         </select>
-        <label className="text-gray-300 text-sm ml-2">Layout:</label>
+        <label className="text-ink text-sm ml-2">Layout:</label>
         <select
           value={layoutId ?? ''}
           onChange={e => setLayoutId(e.target.value === '' ? null : parseInt(e.target.value))}
           disabled={layouts.length === 0}
-          className="px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+          className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info disabled:opacity-50"
         >
           <option value="">{layouts.length === 0 ? 'no layouts' : 'all layouts'}</option>
           {layouts.map(l => (
             <option key={l.id} value={l.id}>{l.name}{l.is_default ? ' ★' : ''}</option>
           ))}
         </select>
-        <label className="text-gray-300 text-sm ml-2">Window:</label>
+        <label className="text-ink text-sm ml-2">Window:</label>
         <select
           value={windowMonths}
           onChange={e => setWindowMonths(parseInt(e.target.value))}
-          className="px-4 py-2 bg-gray-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
         >
           <option value={3}>3 mo</option>
           <option value={6}>6 mo</option>
@@ -1157,13 +1157,13 @@ function FairnessTab({
           <option value={24}>24 mo</option>
           <option value={0}>all</option>
         </select>
-        <p className="text-xs text-gray-500 ml-3">
+        <p className="text-xs text-muted ml-3">
           Aggregates appear at ≥ {data?.min_sessions_threshold ?? 5} sessions; the random-draw verdict requires ≥ {data?.min_sessions_verdict ?? 20} kart samples.
         </p>
       </div>
 
-      {loading && <div className="bg-gray-800 rounded-lg p-6 text-gray-300">Loading fairness analysis...</div>}
-      {error && <div className="bg-red-900 rounded-lg p-6 text-red-200">{error}</div>}
+      {loading && <div className="bg-surface rounded-lg p-6 text-ink">Loading fairness analysis...</div>}
+      {error && <div className="bg-alarm/15 rounded-lg p-6 text-alarm">{error}</div>}
 
       {data && !loading && (
         <>
@@ -1186,26 +1186,26 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
   });
 
   return (
-    <div className="bg-gray-800 rounded-lg p-6">
+    <div className="bg-surface rounded-lg p-6">
       <div className="flex items-baseline justify-between mb-4">
         <h3 className="text-xl font-semibold text-white">Sprint — Kart Draw Fairness</h3>
-        <span className={`text-xs px-2 py-1 rounded ${block.enabled ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-200'}`}>
+        <span className={`text-xs px-2 py-1 rounded ${block.enabled ? 'bg-live/15 text-live' : 'bg-accent/15 text-accent'}`}>
           {block.enabled ? 'Aggregate enabled' : `Needs ≥ ${threshold} sprint sessions`}
         </span>
       </div>
 
-      <p className="text-sm text-gray-400 mb-4">
+      <p className="text-sm text-muted mb-4">
         For each sprint race at this track, a <b>kart factor</b> is computed: kart’s best lap ÷ session median. &lt; 1.00 = fast kart,
         &gt; 1.00 = slow. A fair draw produces a factor distribution centred on 1.00. Consistently &lt;1.00 = suspiciously good karts.
       </p>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-        <StatCard label="Sessions" value={block.session_count} color="text-blue-300" />
-        <StatCard label="Kart samples" value={block.sample_count} color="text-green-300" />
+        <StatCard label="Sessions" value={block.session_count} color="text-info" />
+        <StatCard label="Kart samples" value={block.sample_count} color="text-live" />
         <StatCard
           label="Mean factor"
           value={block.mean_factor !== null ? block.mean_factor.toFixed(4) : 'N/A'}
-          color="text-yellow-300"
+          color="text-accent"
         />
         <StatCard
           label="Top-quartile karts"
@@ -1214,7 +1214,7 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
               ? `${block.top_quartile_count} / ${block.top_quartile_expected.toFixed(1)} expected`
               : 'N/A'
           }
-          color="text-purple-300"
+          color="text-class2"
         />
       </div>
 
@@ -1237,33 +1237,33 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-700">
+              <thead className="bg-surface-2">
                 <tr className="text-left">
-                  <th className="px-3 py-2 text-gray-300">Date</th>
-                  <th className="px-3 py-2 text-gray-300">Kart #</th>
-                  <th className="px-3 py-2 text-gray-300">Rank</th>
-                  <th className="px-3 py-2 text-gray-300">Factor</th>
-                  <th className="px-3 py-2 text-gray-300">Kart best (s)</th>
-                  <th className="px-3 py-2 text-gray-300">Session median (s)</th>
+                  <th className="px-3 py-2 text-ink">Date</th>
+                  <th className="px-3 py-2 text-ink">Kart #</th>
+                  <th className="px-3 py-2 text-ink">Rank</th>
+                  <th className="px-3 py-2 text-ink">Factor</th>
+                  <th className="px-3 py-2 text-ink">Kart best (s)</th>
+                  <th className="px-3 py-2 text-ink">Session median (s)</th>
                 </tr>
               </thead>
               <tbody>
                 {samples.map((s, i) => {
                   const topQ = s.kart_rank <= Math.max(1, Math.floor(s.karts_in_session / 4));
                   return (
-                    <tr key={`${s.session_id}-${s.kart_number}-${i}`} className="border-b border-gray-700 hover:bg-gray-700">
-                      <td className="px-3 py-2 text-gray-400">
+                    <tr key={`${s.session_id}-${s.kart_number}-${i}`} className="border-b border-line hover:bg-surface-2">
+                      <td className="px-3 py-2 text-muted">
                         {s.session_date ? new Date(s.session_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) : ''}
                       </td>
                       <td className="px-3 py-2 text-white">{s.kart_number}</td>
-                      <td className={`px-3 py-2 ${topQ ? 'text-green-300 font-bold' : 'text-gray-300'}`}>
+                      <td className={`px-3 py-2 ${topQ ? 'text-live font-bold' : 'text-ink'}`}>
                         {s.kart_rank} / {s.karts_in_session}
                       </td>
-                      <td className={`px-3 py-2 ${s.kart_factor < 0.99 ? 'text-green-300' : s.kart_factor > 1.01 ? 'text-red-300' : 'text-gray-300'}`}>
+                      <td className={`px-3 py-2 ${s.kart_factor < 0.99 ? 'text-live' : s.kart_factor > 1.01 ? 'text-alarm' : 'text-ink'}`}>
                         {s.kart_factor.toFixed(4)}
                       </td>
-                      <td className="px-3 py-2 text-gray-300">{s.kart_best_seconds.toFixed(3)}</td>
-                      <td className="px-3 py-2 text-gray-300">{s.session_median_seconds.toFixed(3)}</td>
+                      <td className="px-3 py-2 text-ink">{s.kart_best_seconds.toFixed(3)}</td>
+                      <td className="px-3 py-2 text-ink">{s.session_median_seconds.toFixed(3)}</td>
                     </tr>
                   );
                 })}
@@ -1274,7 +1274,7 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
       )}
 
       {samples.length === 0 && (
-        <div className="text-gray-400 text-sm">No sprint sessions for this driver at this track.</div>
+        <div className="text-muted text-sm">No sprint sessions for this driver at this track.</div>
       )}
     </div>
   );
@@ -1287,31 +1287,31 @@ function RandomnessVerdictPanel({ block }: { block: FairnessResponse['sprint'] }
 
   let label = '';
   let explanation = '';
-  let color = 'bg-gray-800 text-gray-300';
+  let color = 'bg-surface text-ink';
   if (verdict === 'insufficient_data') {
     label = `Verdict: insufficient data (${n}/${minN} kart samples)`;
     explanation =
       `A binomial/χ² test on ${n} samples doesn't have enough power to distinguish a biased draw from chance. ` +
       `Come back once this driver has at least ${minN} sprint kart samples at this track.`;
-    color = 'bg-gray-800 text-gray-300 border border-gray-700';
+    color = 'bg-surface text-ink border border-line';
   } else if (verdict === 'non_random') {
     label = 'Verdict: NOT consistent with a random kart draw';
     explanation =
       `The distribution of kart ranks across the driver's sessions fails a χ² goodness-of-fit test (p=${block.chi2_p_value?.toFixed(4)}). ` +
       `Either the venue isn't assigning karts randomly for this driver, or the driver skill is moving field median in a way the leave-one-out doesn't fully cancel.`;
-    color = 'bg-red-900 bg-opacity-40 text-red-200 border border-red-700';
+    color = 'bg-alarm/15 bg-opacity-40 text-alarm border border-alarm';
   } else if (verdict === 'non_random_top_heavy') {
     label = 'Verdict: draw leans top-heavy';
     explanation =
       `Overall rank distribution is compatible with random, but the driver has more top-quartile karts than expected (p=${block.top_quartile_p_value?.toFixed(4)}). ` +
       `Suggests a mild bias toward good karts rather than a fully non-random assignment.`;
-    color = 'bg-yellow-900 bg-opacity-40 text-yellow-200 border border-yellow-700';
+    color = 'bg-accent/15 bg-opacity-40 text-accent border border-accent';
   } else {
     label = 'Verdict: consistent with a random kart draw';
     explanation =
       `The driver's rank distribution matches what a uniform random assignment would produce (χ² p=${block.chi2_p_value?.toFixed(4)}, ` +
       `top-quartile p=${block.top_quartile_p_value?.toFixed(4)}).`;
-    color = 'bg-green-900 bg-opacity-30 text-green-200 border border-green-700';
+    color = 'bg-live/15 bg-opacity-30 text-live border border-live';
   }
 
   return (
@@ -1341,15 +1341,15 @@ function RandomnessVerdictPanel({ block }: { block: FairnessResponse['sprint'] }
 
 function EnduranceFairnessPanel({ block, threshold }: { block: FairnessResponse['endurance']; threshold: number }) {
   return (
-    <div className="bg-gray-800 rounded-lg p-6">
+    <div className="bg-surface rounded-lg p-6">
       <div className="flex items-baseline justify-between mb-4">
         <h3 className="text-xl font-semibold text-white">Endurance — Stint-Pace Stability</h3>
-        <span className={`text-xs px-2 py-1 rounded ${block.enabled ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-200'}`}>
+        <span className={`text-xs px-2 py-1 rounded ${block.enabled ? 'bg-live/15 text-live' : 'bg-accent/15 text-accent'}`}>
           {block.enabled ? 'Aggregate enabled' : `Needs ≥ ${threshold} endurance sessions`}
         </span>
       </div>
 
-      <p className="text-sm text-gray-400 mb-4">
+      <p className="text-sm text-muted mb-4">
         In endurance the kart number is the team&apos;s transponder, not the physical kart — so we can&apos;t measure physical-kart luck directly.
         Instead we compare this team&apos;s per-stint pace to the field. Low σ of stint gaps combined with a small mean gap = suspiciously stable
         (either excellent driving or consistently good karts). Suggestive, not diagnostic. Data may be sparse: the parser writes one lap row per
@@ -1357,46 +1357,46 @@ function EnduranceFairnessPanel({ block, threshold }: { block: FairnessResponse[
       </p>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-        <StatCard label="Sessions analyzed" value={block.session_count} color="text-blue-300" />
-        <StatCard label="Flagged sessions" value={block.flagged_count} color={block.flagged_count > 0 ? 'text-red-300' : 'text-green-300'} />
+        <StatCard label="Sessions analyzed" value={block.session_count} color="text-info" />
+        <StatCard label="Flagged sessions" value={block.flagged_count} color={block.flagged_count > 0 ? 'text-alarm' : 'text-live'} />
         <StatCard
           label="Flag rate"
           value={block.session_count > 0 ? `${Math.round((block.flagged_count / block.session_count) * 100)}%` : 'N/A'}
-          color="text-yellow-300"
+          color="text-accent"
         />
       </div>
 
       {block.sessions.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-700">
+            <thead className="bg-surface-2">
               <tr className="text-left">
-                <th className="px-3 py-2 text-gray-300">Date</th>
-                <th className="px-3 py-2 text-gray-300">Stints</th>
-                <th className="px-3 py-2 text-gray-300">Mean gap (s)</th>
-                <th className="px-3 py-2 text-gray-300">σ gap (s)</th>
-                <th className="px-3 py-2 text-gray-300">Mean percentile</th>
-                <th className="px-3 py-2 text-gray-300">σ percentile</th>
-                <th className="px-3 py-2 text-gray-300">Flag</th>
+                <th className="px-3 py-2 text-ink">Date</th>
+                <th className="px-3 py-2 text-ink">Stints</th>
+                <th className="px-3 py-2 text-ink">Mean gap (s)</th>
+                <th className="px-3 py-2 text-ink">σ gap (s)</th>
+                <th className="px-3 py-2 text-ink">Mean percentile</th>
+                <th className="px-3 py-2 text-ink">σ percentile</th>
+                <th className="px-3 py-2 text-ink">Flag</th>
               </tr>
             </thead>
             <tbody>
               {block.sessions.map(s => (
-                <tr key={s.session_id} className={`border-b border-gray-700 ${s.flagged ? 'bg-red-900 bg-opacity-30' : 'hover:bg-gray-700'}`}>
-                  <td className="px-3 py-2 text-gray-400">
+                <tr key={s.session_id} className={`border-b border-line ${s.flagged ? 'bg-alarm/15 bg-opacity-30' : 'hover:bg-surface-2'}`}>
+                  <td className="px-3 py-2 text-muted">
                     {s.session_date ? new Date(s.session_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) : ''}
                   </td>
-                  <td className="px-3 py-2 text-gray-300">{s.stint_count}</td>
-                  <td className="px-3 py-2 text-yellow-300">{s.mean_gap.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-yellow-300">{s.stddev_gap.toFixed(2)}</td>
-                  <td className="px-3 py-2 text-purple-300">
+                  <td className="px-3 py-2 text-ink">{s.stint_count}</td>
+                  <td className="px-3 py-2 text-accent">{s.mean_gap.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-accent">{s.stddev_gap.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-class2">
                     {s.mean_percentile !== null ? `${s.mean_percentile.toFixed(0)}%` : 'N/A'}
                   </td>
-                  <td className="px-3 py-2 text-purple-300">
+                  <td className="px-3 py-2 text-class2">
                     {s.stddev_percentile !== null ? `${s.stddev_percentile.toFixed(0)}%` : 'N/A'}
                   </td>
                   <td className="px-3 py-2">
-                    {s.flagged ? <span className="text-red-300">⚠️ investigate</span> : <span className="text-green-300">ok</span>}
+                    {s.flagged ? <span className="text-alarm">⚠️ investigate</span> : <span className="text-live">ok</span>}
                   </td>
                 </tr>
               ))}
@@ -1404,7 +1404,7 @@ function EnduranceFairnessPanel({ block, threshold }: { block: FairnessResponse[
           </table>
         </div>
       ) : (
-        <div className="text-gray-400 text-sm">No endurance sessions for this driver at this track.</div>
+        <div className="text-muted text-sm">No endurance sessions for this driver at this track.</div>
       )}
     </div>
   );

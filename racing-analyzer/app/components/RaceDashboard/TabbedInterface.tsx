@@ -35,17 +35,37 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
     onTabChange?.(tabId);
   };
 
+  const panelId = (id: string) => `tab-panel-${id}`;
+  const tabId = (id: string) => `tab-${id}`;
+
+  const onTablistKeyDown = (e: React.KeyboardEvent) => {
+    const idx = tabs.findIndex((t) => t.id === activeTab);
+    let next: number | null = null;
+    if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = tabs.length - 1;
+    if (next === null) return;
+    e.preventDefault();
+    const target = tabs[next];
+    handleTabChange(target.id);
+    document.getElementById(tabId(target.id))?.focus();
+  };
+
   return (
     <div className="flex flex-col gap-3">
       {/* Desktop: segmented tab bar */}
-      <div role="tablist" aria-label="Dashboard sections" className="hidden md:flex items-center gap-1.5">
+      <div role="tablist" aria-label="Dashboard sections" className="hidden md:flex items-center gap-1.5" onKeyDown={onTablistKeyDown}>
         {tabs.map((tab) => {
           const active = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               role="tab"
+              id={tabId(tab.id)}
               aria-selected={active}
+              aria-controls={panelId(tab.id)}
+              tabIndex={active ? 0 : -1}
               onClick={() => handleTabChange(tab.id)}
               className={`flex items-center gap-2 h-10 px-3.5 rounded-lg text-sm font-semibold border transition-colors ${
                 active
@@ -75,7 +95,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
           const tab = tabs[index];
           if (!tab) return null;
           return (
-            <div key={tab.id} role="tabpanel" hidden={activeTab !== tab.id}>
+            <div key={tab.id} role="tabpanel" id={panelId(tab.id)} aria-labelledby={tabId(tab.id)} hidden={activeTab !== tab.id}>
               {child}
             </div>
           );
@@ -84,6 +104,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
 
       {/* Phone: fixed bottom tab bar */}
       <nav
+        role="tablist"
         aria-label="Dashboard sections"
         className="md:hidden fixed bottom-0 inset-x-0 z-40 flex items-stretch border-t border-line bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
       >
@@ -92,8 +113,11 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
           return (
             <button
               key={tab.id}
+              role="tab"
+              aria-selected={active}
+              aria-controls={panelId(tab.id)}
+              tabIndex={active ? 0 : -1}
               onClick={() => handleTabChange(tab.id)}
-              aria-current={active ? 'page' : undefined}
               className={`relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 text-[11px] font-semibold ${
                 active ? 'text-accent' : 'text-muted'
               }`}

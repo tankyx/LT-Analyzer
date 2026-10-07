@@ -4,11 +4,11 @@ export const metadata = { title: 'Terms — LT-Analyzer' };
 
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200">
+    <div className="min-h-screen bg-canvas text-ink">
       <main className="max-w-3xl mx-auto px-4 py-10 space-y-6">
-        <Link href="/" className="text-sm text-blue-300 hover:underline">← Home</Link>
+        <Link href="/" className="text-sm text-info hover:underline">← Home</Link>
         <h1 className="text-3xl font-bold">Terms of Use</h1>
-        <p className="text-sm text-gray-400">Last updated: 2026-05-26</p>
+        <p className="text-sm text-muted">Last updated: 2026-05-26</p>
 
         <section className="space-y-3 text-sm leading-6">
           <h2 className="text-xl font-semibold">Closed beta</h2>
@@ -45,7 +45,7 @@ export default function TermsPage() {
 
           <h2 className="text-xl font-semibold">Contact</h2>
           <p>
-            Questions: <a className="text-blue-300 underline" href="mailto:tanguy.pedrazzoli@gmail.com">tanguy.pedrazzoli@gmail.com</a>
+            Questions: <a className="text-info underline" href="mailto:tanguy.pedrazzoli@gmail.com">tanguy.pedrazzoli@gmail.com</a>
           </p>
         </section>
       </main>

@@ -187,11 +187,11 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
 
   return (
     <section
-      className={`rounded-xl border bg-surface p-3.5 md:p-4 flex flex-col gap-3 ${inPit ? 'border-alarm/60 pit-alert' : 'border-line'}`}
+      className={`rounded-xl border bg-surface p-3.5 md:p-4 flex flex-col gap-3 panel ${inPit ? 'border-alarm/60 pit-alert' : 'border-line'}`}
       aria-label="My team"
     >
       <div className="flex items-center gap-3 md:gap-5">
-        <div className="w-10 h-10 md:w-[52px] md:h-[52px] rounded-[9px] md:rounded-[10px] bg-accent text-accent-ink font-cond font-bold text-[22px] md:text-[28px] flex items-center justify-center shrink-0">
+        <div className="w-10 h-10 md:w-[52px] md:h-[52px] rounded-[9px] md:rounded-[10px] accent-gradient accent-glow text-accent-ink font-cond font-bold text-[22px] md:text-[28px] flex items-center justify-center shrink-0">
           {position}
         </div>
         <div className="flex flex-col gap-1 min-w-0 flex-1">

@@ -26,6 +26,7 @@ export default {
         ink: token("c-ink"),
         muted: token("c-muted"),
         accent: token("c-accent"),
+        "accent-hi": token("c-accent-hi"),
         "accent-ink": token("c-accent-ink"),
         live: token("c-live"),
         alarm: token("c-alarm"),

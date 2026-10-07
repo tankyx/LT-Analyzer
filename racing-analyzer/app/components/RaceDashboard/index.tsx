@@ -111,7 +111,7 @@ interface GapHistory {
 
 const TrendArrows = ({ trend }: { trend: Trend | undefined }) => {
   if (!trend || trend.arrow === 0) {
-    return <span className="text-gray-400">~</span>;
+    return <span className="text-muted">~</span>;
   }
   
   const getArrows = () => {
@@ -121,7 +121,7 @@ const TrendArrows = ({ trend }: { trend: Trend | undefined }) => {
   
   const getColor = () => {
     // Simplified logic based on trend direction
-    return trend.value < 0 ? 'text-green-600' : 'text-red-600';
+    return trend.value < 0 ? 'text-live' : 'text-alarm';
   };
   
   return (
@@ -1090,20 +1090,20 @@ const RaceDashboard = () => {
         )}
       </div>
 
-      <div className="rounded-xl border border-line bg-surface overflow-hidden" role="table" aria-label="Standings">
+      <div className="rounded-xl border border-line bg-surface overflow-hidden panel" role="table" aria-label="Standings">
         <div
           role="row"
           className={`${STANDINGS_GRID} hidden md:grid h-9 px-4 text-[11px] font-bold tracking-[.08em] uppercase text-muted border-b border-line bg-surface-2`}
         >
-          <div>Pos</div>
-          <div>Team</div>
-          <div className="md:hidden" />
-          <div>Status</div>
-          <div>Last</div>
-          <div>Best</div>
-          <div className="text-right">Gap</div>
-          <div className="text-right">{isQualificationMode ? 'Laps' : 'Stops'}</div>
-          <div className="text-center">Watch</div>
+          <div role="columnheader">Pos</div>
+          <div role="columnheader">Team</div>
+          <div role="columnheader" className="md:hidden" />
+          <div role="columnheader">Status</div>
+          <div role="columnheader">Last</div>
+          <div role="columnheader">Best</div>
+          <div role="columnheader" className="text-right">Gap</div>
+          <div role="columnheader" className="text-right">{isQualificationMode ? 'Laps' : 'Stops'}</div>
+          <div role="columnheader" className="text-center">Watch</div>
         </div>
 
         {filteredTeams.length > 0 ? (
@@ -1176,7 +1176,7 @@ const RaceDashboard = () => {
         />
       )}
 
-      <div className="rounded-xl border border-line bg-surface overflow-hidden">
+      <div className="rounded-xl border border-line bg-surface overflow-hidden panel">
         <div className="flex items-center justify-between gap-3 px-4 h-12 border-b border-line bg-surface-2">
           <h2 className="font-cond font-bold text-lg tracking-wide flex items-center gap-2">
             <Eye size={18} className="text-accent" />
@@ -1304,7 +1304,7 @@ const RaceDashboard = () => {
 
   const ChartTab = (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl border border-line bg-surface p-3 md:p-4">
+      <div className="rounded-xl border border-line bg-surface p-3 md:p-4 panel">
         <TimeDeltaChart
           gapHistory={gapHistory}
           teams={teams}
@@ -1416,7 +1416,7 @@ const RaceDashboard = () => {
               isActive={activeTab === 'pace'}
             />
             {ChartTab}
-            <div className="rounded-xl border border-line bg-surface overflow-hidden">
+            <div className="rounded-xl border border-line bg-surface overflow-hidden panel">
               <StintPlanner
                 isDarkMode={isDarkMode}
                 myTeam={myTeam}
@@ -1427,7 +1427,7 @@ const RaceDashboard = () => {
                 trackName={selectedTrackName}
               />
             </div>
-            <div className="rounded-xl border border-line bg-surface overflow-hidden">
+            <div className="rounded-xl border border-line bg-surface overflow-hidden panel">
               <FleetTracker
                 isDarkMode={isDarkMode}
                 fleetBoard={fleetBoard}
@@ -1442,7 +1442,7 @@ const RaceDashboard = () => {
               />
             </div>
             {user?.role === 'admin' && (
-              <div className="rounded-xl border border-line bg-surface overflow-hidden">
+              <div className="rounded-xl border border-line bg-surface overflow-hidden panel">
                 <AdminPanel isDarkMode={isDarkMode} />
               </div>
             )}

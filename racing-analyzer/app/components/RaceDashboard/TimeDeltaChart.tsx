@@ -3,7 +3,6 @@ import {
   Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine, Label, Area, ComposedChart
 } from 'recharts';
-import { motion } from 'framer-motion';
 
 // Define types for our props
 interface TimeDeltaChartProps {
@@ -43,20 +42,28 @@ interface ChartDataPoint {
 }
 
 // Toggle component for switching between regular and adjusted gap modes
-const ModeToggle: React.FC<ModeToggleProps> = ({ mode, setMode, isDarkMode }) => (
-  <div className="flex items-center space-x-2">
-    <span className={`text-sm ${mode === 'regular' ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')}`}>
+const ModeToggle: React.FC<ModeToggleProps> = ({ mode, setMode }) => (
+  <div className="flex items-center gap-2">
+    <span className={`text-sm ${mode === 'regular' ? 'text-ink font-semibold' : 'text-muted'}`}>
       Regular Gap
     </span>
-    <button 
+    <button
+      type="button"
+      role="switch"
+      aria-checked={mode === 'adjusted'}
+      aria-label="Adjusted for pit stops"
       onClick={() => setMode(mode === 'regular' ? 'adjusted' : 'regular')}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${mode === 'adjusted' ? (isDarkMode ? 'bg-blue-600' : 'bg-blue-500') : (isDarkMode ? 'bg-gray-600' : 'bg-gray-300')}`}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
+        mode === 'adjusted' ? 'bg-accent' : 'bg-line'
+      }`}
     >
-      <span 
-        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${mode === 'adjusted' ? 'translate-x-6' : 'translate-x-1'}`} 
+      <span
+        className={`inline-block h-4 w-4 rounded-full bg-surface shadow transform transition-transform ${
+          mode === 'adjusted' ? 'translate-x-6' : 'translate-x-1'
+        }`}
       />
     </button>
-    <span className={`text-sm ${mode === 'adjusted' ? (isDarkMode ? 'text-blue-300' : 'text-blue-600') : (isDarkMode ? 'text-gray-400' : 'text-gray-500')}`}>
+    <span className={`text-sm ${mode === 'adjusted' ? 'text-ink font-semibold' : 'text-muted'}`}>
       Adjusted for Pit Stops
     </span>
   </div>
@@ -194,12 +201,12 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
       const sortedPayload = [...filteredPayload].sort((a, b) => a.value - b.value);
       
       return (
-        <div className={`p-4 rounded-lg shadow-lg border max-w-xs ${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        <div className={`p-4 rounded-lg shadow-lg border max-w-xs ${'bg-surface border-line'}`}>
           <div className="flex items-center space-x-2 mb-2">
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${'bg-surface-2'}`}>
               <span className="font-bold">{absoluteLap}</span>
             </div>
-            <h3 className={`font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-800'}`}>Lap {absoluteLap}</h3>
+            <h3 className={`font-semibold ${'text-ink'}`}>Lap {absoluteLap}</h3>
           </div>
           
           <div className="space-y-2 mt-2 max-h-60 overflow-y-auto">
@@ -215,25 +222,25 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               const pitStops = team?.['Pit Stops'] || '0';
               
               return (
-                <div key={entry.dataKey} className={`flex items-center p-2 rounded ${hoveredTeam === kartNum ? (isDarkMode ? 'bg-gray-700' : 'bg-gray-100') : ''}`}>
+                <div key={entry.dataKey} className={`flex items-center p-2 rounded ${hoveredTeam === kartNum ? ('bg-surface-2') : ''}`}>
                   <div className="flex-shrink-0 mr-3">
                     <div className="w-3 h-10 rounded-sm" style={{ backgroundColor: color }}></div>
                   </div>
                   <div className="flex-grow">
                     <div className="flex items-center gap-2">
-                      <div className={`text-xs font-medium text-center rounded px-1 ${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'}`}>
+                      <div className={`text-xs font-medium text-center rounded px-1 ${isDarkMode ? 'bg-surface-2' : 'bg-line'}`}>
                         P{position || '?'}
                       </div>
-                      <div className={`font-medium truncate ${isDarkMode ? 'text-gray-200' : 'text-gray-800'}`}>
+                      <div className={`font-medium truncate ${'text-ink'}`}>
                         {teamName}
                       </div>
                     </div>
                     <div className="flex items-center mt-1">
-                      <span className={`text-sm ${status === 'Pit-in' ? 'text-red-500 font-semibold' : (isDarkMode ? 'text-gray-400' : 'text-gray-600')}`}>
+                      <span className={`text-sm ${status === 'Pit-in' ? 'text-alarm font-semibold' : ('text-muted')}`}>
                         {status === 'Pit-in' ? '🔴 In Pits' : status || 'On Track'}
                       </span>
                       {gapMode === 'adjusted' && (
-                        <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                        <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-info/15 text-info">
                           {pitStops} Pit{parseInt(pitStops) !== 1 ? 's' : ''}
                         </span>
                       )}
@@ -241,7 +248,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                   </div>
                   <div className="flex-shrink-0 text-right">
                     <span 
-                      className={`font-bold text-base ${gap < 0 ? 'text-green-500' : gap > 0 ? 'text-red-500' : 'text-blue-500'}`}
+                      className={`font-bold text-base ${gap < 0 ? 'text-live' : gap > 0 ? 'text-alarm' : 'text-info'}`}
                     >
                       {gap.toFixed(3)}s
                     </span>
@@ -293,37 +300,30 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   // Empty state when no teams are monitored
   if (!gapHistory || Object.keys(gapHistory).length === 0 || monitoredTeams.length === 0) {
     return (
-      <div className={`rounded-lg shadow p-4 mb-4 transition-colors duration-300 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+      <div className={`rounded-lg shadow p-4 mb-4 transition-colors duration-300 ${'bg-surface'}`}>
         <div className="flex items-center gap-2 mb-3">
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
           <h2 className="font-bold text-lg">Race Delta Analysis</h2>
         </div>
-        <div className={`text-center py-12 rounded-lg border-2 border-dashed ${isDarkMode ? 'border-gray-700 text-gray-400' : 'border-gray-200 text-gray-500'}`}>
+        <div className={`text-center py-12 rounded-lg border-2 border-dashed ${'border-line text-muted'}`}>
           <svg className="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
           <p className="text-lg font-medium">No data available</p>
           <p className="mt-2">Monitor teams to see the time delta chart</p>
-          <button 
-            className={`mt-4 px-4 py-2 rounded-md transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-gray-100 hover:bg-gray-200 text-gray-800'}`}
-          >
-            Monitor teams by clicking the star icon
-          </button>
+          <p className={`mt-4 text-sm ${'text-muted'}`}>
+            Monitor teams from the standings by tapping the star.
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className={`rounded-lg shadow overflow-hidden transition-colors duration-300 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}
-    >
-      <div className={`px-4 py-3 border-b ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
+    <div className={`rounded-lg shadow overflow-hidden transition-colors duration-300 ${'bg-surface'}`}>
+      <div className={`px-4 py-3 border-b ${'border-line bg-surface-2'}`}>
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
           <h2 className="font-bold text-lg flex items-center gap-2">
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -339,7 +339,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               isDarkMode={isDarkMode}
             />
             
-            <div className={`text-xs rounded-md px-2 py-1 ${isDarkMode ? 'bg-blue-900 text-blue-100' : 'bg-blue-50 text-blue-800'}`}>
+            <div className="text-xs rounded-md px-2 py-1 bg-info/15 text-info">
               <span>Showing last 15 laps</span>
             </div>
           </div>
@@ -359,7 +359,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
             >
               <CartesianGrid 
                 strokeDasharray="3 3" 
-                stroke={isDarkMode ? '#374151' : '#e5e7eb'} 
+                stroke="rgb(var(--c-line))" 
                 vertical={false}
               />
               <XAxis 
@@ -369,9 +369,9 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                   value: 'Lap', 
                   position: 'insideBottomRight', 
                   offset: -5,
-                  fill: isDarkMode ? '#9ca3af' : '#4b5563'
+                  fill: 'rgb(var(--c-muted))'
                 }}
-                tick={{ fill: isDarkMode ? '#9ca3af' : '#4b5563' }}
+                tick={{ fill: 'rgb(var(--c-muted))' }}
               />
               <YAxis 
                 domain={[minGap, maxGap]}
@@ -379,22 +379,22 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                   value: gapMode === 'adjusted' ? 'Adjusted Gap (s)' : 'Time Delta (s)', 
                   angle: -90, 
                   position: 'insideLeft',
-                  style: { textAnchor: 'middle', fill: isDarkMode ? '#9ca3af' : '#4b5563' }
+                  style: { textAnchor: 'middle', fill: 'rgb(var(--c-muted))' }
                 }}
-                tick={{ fill: isDarkMode ? '#9ca3af' : '#4b5563' }}
+                tick={{ fill: 'rgb(var(--c-muted))' }}
               />
               
               {/* Zero line represents your team's reference point */}
               <ReferenceLine 
                 y={0} 
-                stroke={isDarkMode ? '#d1d5db' : '#6b7280'} 
+                stroke="rgb(var(--c-muted))" 
                 strokeWidth={2}
                 strokeDasharray="3 3"
               >
                 <Label 
                   value="Your Team" 
                   position="right" 
-                  fill={isDarkMode ? '#e5e7eb' : '#4b5563'}
+                  fill="rgb(var(--c-ink))"
                 />
               </ReferenceLine>
               
@@ -447,10 +447,11 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                       stroke={color}
                       strokeWidth={isHighlighted ? 3 : 2}
                       strokeDasharray="5 2"
+                      isAnimationActive={false}
                       activeDot={{
                         r: 8,
                         fill: color,
-                        stroke: isDarkMode ? '#1f2937' : '#ffffff'
+                        stroke: 'rgb(var(--c-surface))'
                       }}
                     />
                   );
@@ -467,18 +468,17 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                     dot={{ 
                       r: isHighlighted ? 6 : 4,
                       strokeWidth: isHighlighted ? 2 : 1,
-                      fill: isDarkMode ? '#1f2937' : '#ffffff',
+                      fill: 'rgb(var(--c-surface))',
                       stroke: color
                     }}
                     activeDot={{ 
                       r: 8, 
-                      stroke: isDarkMode ? '#1f2937' : '#ffffff',
+                      stroke: 'rgb(var(--c-surface))',
                       strokeWidth: 2,
                       fill: color
                     }}
                     connectNulls
-                    animateNewValues
-                    isAnimationActive={true}
+                    isAnimationActive={false}
                   />
                 );
               })}
@@ -486,43 +486,51 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
           </ResponsiveContainer>
         </div>
         
-        <div className={`text-xs mt-3 flex flex-wrap justify-center gap-3 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+        <div className={`text-xs mt-3 flex flex-wrap justify-center gap-3 ${'text-muted'}`}>
           <div className="flex items-center gap-2">
             <div className="flex items-center">
-              <div className="h-px w-5 bg-gray-400"></div>
-              <div className="h-3 w-3 rounded-full bg-gray-400"></div>
+              <div className="h-px w-5 bg-line"></div>
+              <div className="h-3 w-3 rounded-full bg-line"></div>
             </div>
             <span>Teams on track</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center">
-              <div className="h-px w-5 bg-gray-400 dashed-line"></div>
-              <div className="h-3 w-3 rounded-full bg-red-400"></div>
+              <div className="h-px w-5 bg-line dashed-line"></div>
+              <div className="h-3 w-3 rounded-full bg-alarm"></div>
             </div>
             <span>Teams in pits</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-green-500">▼</span>
+            <span className="text-live">▼</span>
             <span>Getting closer</span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-red-500">▲</span>
+            <span className="text-alarm">▲</span>
             <span>Falling behind</span>
           </div>
           {gapMode === 'adjusted' && (
             <div className="flex items-center gap-2 ml-4">
-              <span className="px-1 py-0.5 text-xs rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+              <span className="px-1 py-0.5 text-xs rounded-full bg-info/15 text-info">
                 Pit time: {Math.floor(pitStopTime / 60)}:{(pitStopTime % 60).toString().padStart(2, '0')}
               </span>
             </div>
           )}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
 
-// Memoized: the dashboard re-renders ~1×/s on every track_update; without
-// memo the whole recharts tree re-rendered even when this chart's props
-// hadn't changed.
-export default React.memo(TimeDeltaChart);
+// Memoized with a comparator on the data-driving props: the dashboard pushes
+// a fresh `teams` array on every ~1s track update, and the per-render
+// onColorAssignment/onTeamHover callbacks churn too, so a shallow compare
+// would never skip. `teams` is read for tooltip status, so it stays stale
+// between gapHistory updates — acceptable for a hover-only readout.
+export default React.memo(TimeDeltaChart, (prev, next) =>
+  prev.gapHistory === next.gapHistory &&
+  prev.monitoredTeams === next.monitoredTeams &&
+  prev.isDarkMode === next.isDarkMode &&
+  prev.pitStopTime === next.pitStopTime &&
+  prev.requiredPitStops === next.requiredPitStops,
+);

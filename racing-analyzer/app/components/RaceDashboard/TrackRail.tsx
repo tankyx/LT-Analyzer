@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Settings, X } from 'lucide-react';
 import { buildTrackTrie, searchTrackTrie } from './lib/trackTrie';
 
@@ -61,11 +61,28 @@ const TrackRail: React.FC<TrackRailProps> = ({
   const [query, setQuery] = useState('');
   const { live, idle } = useMemo(() => groupTracks(tracks, query), [tracks, query]);
   const isSheet = variant === 'sheet';
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isSheet) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose?.();
+      // Keep focus inside the modal while it is open.
+      if (e.key === 'Tab' && sheetRef.current) {
+        const focusables = sheetRef.current.querySelectorAll<HTMLElement>(
+          'button, input, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -89,7 +106,7 @@ const TrackRail: React.FC<TrackRailProps> = ({
         }`}
       >
         <span
-          className={`w-2 h-2 rounded-full shrink-0 ${t.active ? 'bg-live animate-live-blink' : 'bg-line'}`}
+          className={`w-2 h-2 rounded-full shrink-0 ${t.active ? 'bg-live live-glow' : 'bg-line'}`}
         />
         <span className="flex flex-col min-w-0 flex-1 py-1.5">
           <span
@@ -182,7 +199,7 @@ const TrackRail: React.FC<TrackRailProps> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center" role="dialog" aria-modal="true" aria-label="Choose a track">
+    <div ref={sheetRef} className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center" role="dialog" aria-modal="true" aria-label="Choose a track">
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60" />
       <div className="relative flex flex-col gap-3 p-3 pb-[max(12px,env(safe-area-inset-bottom))] bg-surface border border-line rounded-t-2xl md:rounded-2xl w-full md:w-[440px] h-[85vh] md:h-[70vh] shadow-2xl">
         <div className="flex items-center justify-between px-1">

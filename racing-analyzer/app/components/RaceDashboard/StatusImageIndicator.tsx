@@ -36,23 +36,23 @@ const StatusImageIndicator: React.FC<StatusImageIndicatorProps> = ({ status = 'O
   const getStatusColorClass = () => {
     switch (status) {
       case 'Pit-in':
-        return 'text-red-600';
+        return 'text-alarm';
       case 'Pit-out':
-        return 'text-yellow-600';
+        return 'text-accent';
       case 'Finished':
-        return 'text-blue-600';
+        return 'text-info';
       case 'Stopped':
-        return 'text-red-700';
+        return 'text-alarm';
       case 'Up':
-        return 'text-green-600';
+        return 'text-live';
       case 'Down':
-        return 'text-red-500';
+        return 'text-alarm';
       case 'On Track':
-        return 'text-green-600';
+        return 'text-live';
       default:
         // Log unexpected status values for debugging
         console.warn(`Unexpected status value: "${status}"`);
-        return 'text-gray-600';
+        return 'text-muted';
     }
   };
 

@@ -112,7 +112,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   };
 
   return (
-    <div className={`rounded-lg shadow p-4 mb-6 transition-colors ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+    <div className={`rounded-lg shadow p-4 mb-6 transition-colors bg-surface`}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4">
         <h2 className="font-semibold text-lg mb-2 sm:mb-0 flex items-center">
           <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -124,8 +124,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
         
         {isSimulating && (
           <div className="flex items-center gap-2">
-            <div className={`text-sm rounded-full px-3 py-1 flex items-center ${isDarkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800'}`}>
-              <span className="w-2 h-2 rounded-full bg-green-500 inline-block animate-pulse mr-2"></span>
+            <div className={`text-sm rounded-full px-3 py-1 flex items-center bg-live/15 text-live`}>
+              <span className="w-2 h-2 rounded-full bg-live inline-block animate-pulse mr-2"></span>
               {isSimulationMode ? 'Simulation' : 'Real Data'} Active - {formatTime(timer)}
             </div>
           </div>
@@ -133,7 +133,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className={`rounded-lg p-4 border ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
+        <div className={`rounded-lg p-4 border border-line bg-surface-2`}>
           <div className="flex flex-col space-y-4">
             {/* Track Selection Mode Toggle - Only show for admin */}
             {user?.role === 'admin' && (
@@ -143,11 +143,11 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
                     ${!showUrlInput
                       ? (isDarkMode 
-                          ? 'bg-blue-700 text-white border-blue-600' 
-                          : 'bg-blue-100 text-blue-800 border-blue-300')
+                          ? 'bg-info text-white border-info' 
+                          : 'bg-info/15 text-info border-info')
                       : (isDarkMode 
-                          ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
-                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                          ? 'bg-surface text-ink border-line hover:bg-surface-2' 
+                          : 'bg-surface text-ink border-line hover:bg-surface-2')
                     }
                   `}
                 >
@@ -158,11 +158,11 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
                     ${showUrlInput
                       ? (isDarkMode 
-                          ? 'bg-blue-700 text-white border-blue-600' 
-                          : 'bg-blue-100 text-blue-800 border-blue-300')
+                          ? 'bg-info text-white border-info' 
+                          : 'bg-info/15 text-info border-info')
                       : (isDarkMode 
-                          ? 'bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700' 
-                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')
+                          ? 'bg-surface text-ink border-line hover:bg-surface-2' 
+                          : 'bg-surface text-ink border-line hover:bg-surface-2')
                     }
                   `}
                 >
@@ -174,7 +174,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
             {/* Track Selection or URL Input */}
             {showUrlInput && user?.role === 'admin' ? (
               <div>
-                <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                <label className={`block text-xs mb-1 text-muted`}>
                   Live Timing URL:
                 </label>
                 <div className="flex gap-2">
@@ -188,15 +188,15 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                     placeholder="https://www.apex-timing.com/live-timing/..."
                     className={`flex-1 px-3 py-2 rounded border text-sm
                       ${isDarkMode 
-                        ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
-                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                        ? 'bg-canvas border-line text-ink placeholder:text-muted' 
+                        : 'bg-surface border-line text-ink placeholder:text-muted'
                       }
-                      focus:outline-none focus:ring-2 focus:ring-blue-500
+                      focus:outline-none focus:ring-2 focus:ring-info
                     `}
                   />
                 </div>
                 <div className="mt-2">
-                  <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                  <label className={`block text-xs mb-1 text-muted`}>
                     WebSocket URL (required):
                   </label>
                     <input
@@ -206,10 +206,10 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                       placeholder="ws://www.apex-timing.com:8585/"
                       className={`w-full px-3 py-2 rounded border text-sm
                         ${isDarkMode 
-                          ? 'bg-gray-900 border-gray-600 text-gray-100 placeholder-gray-500' 
-                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                          ? 'bg-canvas border-line text-ink placeholder:text-muted' 
+                          : 'bg-surface border-line text-ink placeholder:text-muted'
                         }
-                        focus:outline-none focus:ring-2 focus:ring-blue-500
+                        focus:outline-none focus:ring-2 focus:ring-info
                       `}
                     />
                 </div>
@@ -264,8 +264,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
 
 
             {!isSimulating && showModeSelector && (
-              <div className={`p-4 rounded-lg border ${isDarkMode ? 'border-gray-600 bg-gray-800' : 'border-gray-300 bg-white'}`}>
-                <p className={`text-sm mb-3 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Choose data source:</p>
+              <div className={`p-4 rounded-lg border border-line bg-surface`}>
+                <p className={`text-sm mb-3 ${isDarkMode ? 'text-ink' : 'text-muted'}`}>Choose data source:</p>
                 
                 <div className="flex space-x-3">
                   <button
@@ -273,8 +273,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                     disabled={isStarting}
                     className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all
                       ${isDarkMode 
-                        ? 'bg-blue-700 hover:bg-blue-600 text-white' 
-                        : 'bg-blue-500 hover:bg-blue-600 text-white'
+                        ? 'bg-info hover:bg-info text-white' 
+                        : 'bg-info hover:bg-info text-white'
                       }
                     `}
                   >
@@ -285,8 +285,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                     disabled={isStarting}
                     className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all
                       ${isDarkMode 
-                        ? 'bg-purple-700 hover:bg-purple-600 text-white' 
-                        : 'bg-purple-500 hover:bg-purple-600 text-white'
+                        ? 'bg-class2 hover:bg-class2 text-white' 
+                        : 'bg-class2 hover:bg-class2 text-white'
                       }
                     `}
                   >
@@ -308,8 +308,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   ${isStarting ? 'opacity-70 cursor-wait' : ''}
                   ${isSimulating ? 'opacity-50 cursor-not-allowed' : ''}
                   ${isDarkMode 
-                    ? 'bg-green-700 hover:bg-green-600 text-white disabled:bg-gray-700 disabled:text-gray-400' 
-                    : 'bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-200 disabled:text-gray-500'
+                    ? 'bg-live hover:bg-live text-white disabled:bg-surface-2 disabled:text-muted' 
+                    : 'bg-live hover:bg-live text-white disabled:bg-surface-2 disabled:text-muted'
                   }
                 `}
               >
@@ -338,8 +338,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                 ${isStopping ? 'opacity-70 cursor-wait' : ''}
                 ${!isSimulating ? 'opacity-50 cursor-not-allowed' : ''}
                 ${isDarkMode 
-                  ? 'bg-red-700 hover:bg-red-600 text-white disabled:bg-gray-700 disabled:text-gray-400' 
-                  : 'bg-red-500 hover:bg-red-600 text-white disabled:bg-gray-200 disabled:text-gray-500'
+                  ? 'bg-alarm hover:bg-alarm text-white disabled:bg-surface-2 disabled:text-muted' 
+                  : 'bg-alarm hover:bg-alarm text-white disabled:bg-surface-2 disabled:text-muted'
                 }
               `}
             >
@@ -364,8 +364,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
           </div>
         </div>
         
-        <div className={`rounded-lg p-4 border ${isDarkMode ? 'border-gray-700 bg-gray-700' : 'border-gray-200 bg-gray-50'}`}>
-          <h3 className={`text-sm mb-2 flex items-center gap-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+        <div className={`rounded-lg p-4 border border-line bg-surface-2`}>
+          <h3 className={`text-sm mb-2 flex items-center gap-1 ${isDarkMode ? 'text-ink' : 'text-muted'}`}>
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -374,24 +374,24 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
           
           {status ? (
             <div className={`font-medium ${
-              status.includes('running') ? 'text-green-500' : 
-              status.includes('stopped') ? (isDarkMode ? 'text-orange-400' : 'text-orange-500') : 
-              status.includes('Error') ? 'text-red-500' : 
-              (isDarkMode ? 'text-blue-400' : 'text-blue-600')
+              status.includes('running') ? 'text-live' : 
+              status.includes('stopped') ? ('text-accent') : 
+              status.includes('Error') ? 'text-alarm' : 
+              ('text-info')
             }`}>
               {status}
             </div>
           ) : (
-            <div className={`${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+            <div className={`text-muted`}>
               Ready to start simulation
             </div>
           )}
           
-          <div className="mt-2 text-xs text-gray-500">
+          <div className="mt-2 text-xs text-muted">
             {isSimulating ? (
               <div className="space-y-1">
                 <div className="flex items-center gap-1">
-                  <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                  <span className="inline-block w-2 h-2 rounded-full bg-live animate-pulse"></span>
                   {isSimulationMode ? 'The simulation is running at 4x real-time speed' : 'Collecting real-time data from Apex Timing'}
                 </div>
               </div>

@@ -50,8 +50,8 @@ function ResetPasswordInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-      <div className="max-w-md w-full p-6 bg-gray-800 rounded-md space-y-4">
+    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">
+      <div className="max-w-md w-full p-6 bg-surface rounded-md space-y-4">
         <h2 className="text-center text-2xl font-bold">Set a new password</h2>
         <form className="space-y-3" onSubmit={submit}>
           <input
@@ -60,7 +60,7 @@ function ResetPasswordInner() {
             placeholder="New password (min 12 chars)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="block w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md placeholder-gray-500"
+            className="block w-full px-3 py-2 bg-canvas border border-line rounded-md placeholder:text-muted"
           />
           <input
             type="password"
@@ -68,20 +68,20 @@ function ResetPasswordInner() {
             placeholder="Confirm new password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            className="block w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded-md placeholder-gray-500"
+            className="block w-full px-3 py-2 bg-canvas border border-line rounded-md placeholder:text-muted"
           />
           {error && (
-            <div className="rounded-md bg-red-900 p-3 text-sm text-red-200">{error}</div>
+            <div className="rounded-md bg-alarm/15 p-3 text-sm text-alarm">{error}</div>
           )}
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
+            className="w-full py-2 px-4 bg-info hover:bg-info rounded-md disabled:opacity-50"
           >
             {loading ? 'Saving…' : 'Save new password'}
           </button>
-          <p className="text-sm text-gray-400 text-center">
-            <Link href="/forgot-password" className="text-blue-300 hover:underline">
+          <p className="text-sm text-muted text-center">
+            <Link href="/forgot-password" className="text-info hover:underline">
               Need a new reset link?
             </Link>
           </p>
@@ -93,7 +93,7 @@ function ResetPasswordInner() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-gray-900" />}>
+    <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
       <ResetPasswordInner />
     </Suspense>
   );

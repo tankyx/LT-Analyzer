@@ -915,14 +915,14 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   }, [presetSaveState]);
 
   return (
-    <div className={`p-6 ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
+    <div className="p-6 bg-surface text-ink">
       <h2 className="text-2xl font-bold mb-6">Stint Planner</h2>
 
       {/* Preset Selector */}
       {trackName && (
-        <div className={`mb-6 p-4 rounded-lg border ${isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-blue-50 border-gray-300'}`}>
+        <div className={`mb-6 p-4 rounded-lg border ${isDarkMode ? 'bg-surface-2 border-line' : 'bg-info/15 border-line'}`}>
           <div className="flex items-center gap-3 flex-wrap">
-            <label htmlFor="stint-preset-select" className={`text-sm font-medium ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+            <label htmlFor="stint-preset-select" className={`text-sm font-medium text-ink`}>
               {trackName} presets:
             </label>
 
@@ -943,18 +943,16 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 }}
                 className={`flex-1 min-w-[200px] p-2 rounded border ${
                   renameError
-                    ? 'border-red-500'
-                    : isDarkMode ? 'border-gray-600' : 'border-gray-300'
-                } ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}
+                    ? 'border-alarm'
+                    : 'border-line'
+                } bg-surface text-ink`}
               />
             ) : (
               <select
                 id="stint-preset-select"
                 value={selectedPresetId}
                 onChange={(e) => handlePresetSelect(e.target.value)}
-                className={`flex-1 min-w-[200px] p-2 rounded border ${
-                  isDarkMode ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'
-                }`}
+                className="flex-1 min-w-[200px] p-2 rounded border bg-surface border-line text-ink"
                 disabled={availablePresets.length === 0}
               >
                 <option value="">-- No preset selected --</option>
@@ -973,10 +971,10 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                   disabled={!renameValue.trim()}
                   className={`px-4 py-2 rounded ${
                     !renameValue.trim()
-                      ? 'bg-gray-400 cursor-not-allowed text-gray-200'
+                      ? 'bg-line cursor-not-allowed text-ink'
                       : isDarkMode
-                      ? 'bg-green-600 hover:bg-green-700 text-white'
-                      : 'bg-green-500 hover:bg-green-600 text-white'
+                      ? 'bg-live hover:bg-live text-white'
+                      : 'bg-live hover:bg-live text-white'
                   }`}
                 >
                   Save name
@@ -984,7 +982,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 <button
                   onClick={cancelRenamePreset}
                   className={`px-4 py-2 rounded ${
-                    isDarkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-300 hover:bg-gray-400 text-gray-900'
+                    isDarkMode ? 'bg-line hover:bg-surface-2 text-ink' : 'bg-line hover:bg-line text-ink'
                   }`}
                 >
                   Cancel
@@ -997,7 +995,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     onClick={startRenamePreset}
                     title={`Rename "${selectedPreset.name}" without creating a second preset`}
                     className={`px-4 py-2 rounded ${
-                      isDarkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                      isDarkMode ? 'bg-line hover:bg-surface-2 text-ink' : 'bg-line hover:bg-line text-ink'
                     }`}
                   >
                     Rename
@@ -1007,7 +1005,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 <button
                   onClick={() => (showSavePresetDialog ? closeSaveDialog() : setShowSavePresetDialog(true))}
                   className={`px-4 py-2 rounded ${
-                    isDarkMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
+                    'bg-info hover:bg-info text-white'
                   }`}
                 >
                   Save as new
@@ -1017,7 +1015,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                   <button
                     onClick={handleDeletePreset}
                     className={`px-4 py-2 rounded ${
-                      isDarkMode ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-red-500 hover:bg-red-600 text-white'
+                      'bg-alarm hover:bg-alarm text-white'
                     }`}
                   >
                     Delete
@@ -1028,7 +1026,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           </div>
 
           {renameError && (
-            <div role="alert" className={`mt-2 text-xs ${isDarkMode ? 'text-red-300' : 'text-red-700'}`}>
+            <div role="alert" className={`mt-2 text-xs text-alarm`}>
               {renameError} Pick another name.
             </div>
           )}
@@ -1039,10 +1037,10 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
               role="status"
               className={`mt-2 text-xs ${
                 presetSaveState === 'saving' || isPresetDirty
-                  ? isDarkMode ? 'text-amber-300' : 'text-amber-700'
+                  ? 'text-accent'
                   : presetSaveState === 'saved'
-                  ? isDarkMode ? 'text-green-300' : 'text-green-700'
-                  : isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                  ? 'text-live'
+                  : 'text-muted'
               }`}
             >
               {presetSaveState === 'saving' || isPresetDirty
@@ -1070,9 +1068,9 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                   aria-invalid={!!presetNameError}
                   className={`flex-1 p-2 rounded border ${
                     presetNameError
-                      ? 'border-red-500'
-                      : isDarkMode ? 'border-gray-600' : 'border-gray-300'
-                  } ${isDarkMode ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}
+                      ? 'border-alarm'
+                      : 'border-line'
+                  } bg-surface text-ink`}
                   onKeyDown={(e) => e.key === 'Enter' && handleSavePreset()}
                 />
                 <button
@@ -1080,10 +1078,10 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                   disabled={!newPresetName.trim()}
                   className={`px-4 py-2 rounded ${
                     !newPresetName.trim()
-                      ? 'bg-gray-400 cursor-not-allowed text-gray-200'
+                      ? 'bg-line cursor-not-allowed text-ink'
                       : isDarkMode
-                      ? 'bg-green-600 hover:bg-green-700 text-white'
-                      : 'bg-green-500 hover:bg-green-600 text-white'
+                      ? 'bg-live hover:bg-live text-white'
+                      : 'bg-live hover:bg-live text-white'
                   }`}
                 >
                   Save
@@ -1091,7 +1089,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 <button
                   onClick={closeSaveDialog}
                   className={`px-4 py-2 rounded ${
-                    isDarkMode ? 'bg-gray-600 hover:bg-gray-700 text-white' : 'bg-gray-300 hover:bg-gray-400 text-gray-900'
+                    isDarkMode ? 'bg-line hover:bg-surface-2 text-ink' : 'bg-line hover:bg-line text-ink'
                   }`}
                 >
                   Cancel
@@ -1100,19 +1098,19 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
               {/* Name clash: names are unique per track, so offer the overwrite. */}
               {presetNameError && (
-                <div role="alert" className={`flex items-center gap-3 flex-wrap text-xs ${isDarkMode ? 'text-red-300' : 'text-red-700'}`}>
+                <div role="alert" className={`flex items-center gap-3 flex-wrap text-xs text-alarm`}>
                   <span>{presetNameError}</span>
                   {clashingPresetId && (
                     <button
                       onClick={() => overwritePreset(clashingPresetId)}
                       className={`px-2 py-1 rounded font-semibold ${
-                        isDarkMode ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-amber-500 hover:bg-amber-600 text-white'
+                        'bg-accent hover:bg-accent text-white'
                       }`}
                     >
                       Overwrite it
                     </button>
                   )}
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>or pick another name.</span>
+                  <span className={'text-muted'}>or pick another name.</span>
                 </div>
               )}
             </div>
@@ -1123,7 +1121,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       {/* Active Stint Timer */}
       {activeStint && (
         <div 
-          className={`mb-6 p-4 rounded-lg border-2 ${isDarkMode ? 'border-green-700' : 'border-green-300'}`}
+          className={`mb-6 p-4 rounded-lg border-2 border-live`}
           style={{
             backgroundColor: getDriverColor(activeStint.driverIndex),
             color: isDarkMode ? '#ffffff' : '#000000'
@@ -1141,7 +1139,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
       {/* Current Driver Selection */}
       <div className="mb-6">
-        <label className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+        <label className={`block text-sm font-medium mb-1 text-ink`}>
           Current Driver
         </label>
         <select
@@ -1151,7 +1149,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             setCurrentDriverIndex(parseInt(e.target.value));
           }}
           className={`w-full md:w-64 p-2 rounded border ${
-            isDarkMode ? 'border-gray-600' : 'border-gray-300'
+            'border-line'
           }`}
           style={{
             backgroundColor: getDriverColor(currentDriverIndex),
@@ -1176,7 +1174,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       {/* Configuration Form */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
         <div>
-          <label htmlFor="stint-numStints" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-numStints" className={`block text-sm font-medium mb-1 text-ink`}>
             Number of Stints
           </label>
           <input
@@ -1187,13 +1185,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.numStints}
             onChange={(e) => handleConfigChange('numStints', parseInt(e.target.value) || 1)}
             className={`w-full p-2 rounded border ${
-              isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
             }`}
           />
         </div>
 
         <div>
-          <label htmlFor="stint-minStintTime" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-minStintTime" className={`block text-sm font-medium mb-1 text-ink`}>
             Min Stint Time (minutes)
           </label>
           <input
@@ -1204,13 +1202,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.minStintTime}
             onChange={(e) => handleConfigChange('minStintTime', parseInt(e.target.value) || 1)}
             className={`w-full p-2 rounded border ${
-              isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
             }`}
           />
         </div>
 
         <div>
-          <label htmlFor="stint-maxStintTime" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-maxStintTime" className={`block text-sm font-medium mb-1 text-ink`}>
             Max Stint Time (minutes)
           </label>
           <input
@@ -1221,13 +1219,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.maxStintTime}
             onChange={(e) => handleConfigChange('maxStintTime', parseInt(e.target.value) || 1)}
             className={`w-full p-2 rounded border ${
-              isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
             }`}
           />
         </div>
 
         <div>
-          <label htmlFor="stint-pitDuration" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-pitDuration" className={`block text-sm font-medium mb-1 text-ink`}>
             Pit Duration (minutes)
           </label>
           <input
@@ -1239,13 +1237,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.pitDuration}
             onChange={(e) => handleConfigChange('pitDuration', parseFloat(e.target.value) || 1)}
             className={`w-full p-2 rounded border ${
-              isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
             }`}
           />
         </div>
 
         <div>
-          <label htmlFor="stint-numDrivers" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-numDrivers" className={`block text-sm font-medium mb-1 text-ink`}>
             Number of Drivers
           </label>
           <input
@@ -1256,13 +1254,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.numDrivers}
             onChange={(e) => handleConfigChange('numDrivers', parseInt(e.target.value) || 1)}
             className={`w-full p-2 rounded border ${
-              isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
             }`}
           />
         </div>
 
         <div>
-          <label htmlFor="stint-totalRaceTime" className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+          <label htmlFor="stint-totalRaceTime" className={`block text-sm font-medium mb-1 text-ink`}>
             Total Race Time (minutes)
           </label>
           <input
@@ -1273,7 +1271,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.totalRaceTime}
             onChange={(e) => handleConfigChange('totalRaceTime', parseInt(e.target.value) || 30)}
             className={`w-full p-2 rounded border ${
-              isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-300'
+              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
             }`}
           />
         </div>
@@ -1285,8 +1283,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         role="status"
         className={`mb-6 p-3 rounded-lg text-sm flex flex-wrap items-center gap-x-6 gap-y-1 ${
           scheduleFits
-            ? isDarkMode ? 'bg-gray-700' : 'bg-gray-100'
-            : isDarkMode ? 'bg-amber-900/40 border border-amber-700' : 'bg-amber-50 border border-amber-300'
+            ? 'bg-surface-2'
+            : 'bg-accent/15 border border-accent'
         }`}
       >
         <span>
@@ -1299,7 +1297,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           {' · '}
           in pits <span className="font-semibold">{formatTime(config.pitDuration * Math.max(0, config.numStints - 1))}</span>
         </span>
-        <span className={scheduleFits ? '' : isDarkMode ? 'text-amber-300' : 'text-amber-800'}>
+        <span className={scheduleFits ? '' : 'text-accent'}>
           Planned <span className="font-semibold">{formatTime(currentSpan)}</span> of{' '}
           <span className="font-semibold">{formatTime(config.totalRaceTime)}</span>
           {!scheduleFits && (
@@ -1311,7 +1309,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       </div>
 
       {/* Available Special Stints */}
-      <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+      <div className={`mb-6 p-4 rounded-lg bg-surface-2`}>
         <h3 className="text-lg font-semibold mb-3">Available Special Stints</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
@@ -1338,7 +1336,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {driverNames.map((name, index) => (
             <div key={index}>
-              <label htmlFor={`stint-driver-name-${index}`} className={`block text-sm font-medium mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+              <label htmlFor={`stint-driver-name-${index}`} className={`block text-sm font-medium mb-1 text-ink`}>
                 Driver {index + 1}
               </label>
               <input
@@ -1347,7 +1345,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 value={name}
                 onChange={(e) => handleDriverNameChange(index, e.target.value)}
                 className={`w-full p-2 rounded border transition-colors ${
-                  isDarkMode ? 'border-gray-600' : 'border-gray-300'
+                  'border-line'
                 }`}
                 style={{
                   backgroundColor: getDriverColor(index),
@@ -1360,14 +1358,14 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       </div>
 
       {/* Driver Statistics */}
-      <div className={`mb-6 p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+      <div className={`mb-6 p-4 rounded-lg bg-surface-2`}>
         <h3 className="text-lg font-semibold mb-3">Driver Statistics</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {driverStats.map((stat, index) => (
             <div 
               key={stat.driver} 
               className={`p-3 rounded border transition-colors ${
-                isDarkMode ? 'border-gray-600' : 'border-gray-300'
+                'border-line'
               }`}
               style={{
                 backgroundColor: getDriverColor(index),
@@ -1388,38 +1386,38 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
       {/* Stint Table */}
       <div className="overflow-x-auto">
-        <table className={`w-full border-collapse ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+        <table className={`w-full border-collapse border-line`}>
           <thead>
-            <tr className={isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}>
-              <th className={`border p-2 text-left ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+            <tr className={'bg-surface-2'}>
+              <th className={`border p-2 text-left border-line`}>
                 Stint
               </th>
-              <th className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+              <th className={`border p-2 text-center border-line`}>
                 Driver
               </th>
-              <th className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+              <th className={`border p-2 text-center border-line`}>
                 Duration (min)
               </th>
-              <th className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+              <th className={`border p-2 text-center border-line`}>
                 Type
               </th>
-              <th className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+              <th className={`border p-2 text-center border-line`}>
                 Time Range
               </th>
             </tr>
           </thead>
           <tbody>
             {stintAssignments.map((assignment, index) => (
-              <tr key={index} className={isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
-                <td className={`border p-2 font-medium ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+              <tr key={index} className={'hover:bg-surface-2'}>
+                <td className={`border p-2 font-medium border-line`}>
                   {assignment.stint}
                 </td>
-                <td className={`border p-2 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                <td className={`border p-2 border-line`}>
                   <select
                     value={assignment.driver}
                     onChange={(e) => handleStintDriverChange(index, parseInt(e.target.value))}
                     className={`w-full p-1 rounded border ${
-                      isDarkMode ? 'border-gray-600' : 'border-gray-300'
+                      'border-line'
                     }`}
                     style={{
                       backgroundColor: getDriverColor(assignment.driver - 1),
@@ -1440,7 +1438,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     ))}
                   </select>
                 </td>
-                <td className={`border p-2 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                <td className={`border p-2 border-line`}>
                   <input
                     type="number"
                     min="0"
@@ -1449,22 +1447,22 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     value={assignment.duration}
                     onChange={(e) => handleStintDurationChange(index, parseInt(e.target.value) || 0)}
                     className={`w-full p-1 rounded border text-center ${
-                      isDarkMode ? 'border-gray-600' : 'border-gray-300'
+                      'border-line'
                     } ${
                       assignment.isJoker
-                        ? isDarkMode ? 'bg-yellow-900' : 'bg-yellow-100'
+                        ? 'bg-accent/15'
                         : assignment.isLong
-                        ? isDarkMode ? 'bg-blue-900' : 'bg-blue-100'
-                        : isDarkMode ? 'bg-gray-700' : 'bg-white'
+                        ? 'bg-info/15'
+                        : isDarkMode ? 'bg-surface-2' : 'bg-surface'
                     }`}
                   />
                 </td>
-                <td className={`border p-2 text-center ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
-                  {assignment.isJoker && <span className="font-semibold text-yellow-600">JOKER</span>}
-                  {assignment.isLong && <span className="font-semibold text-blue-600">LONG</span>}
+                <td className={`border p-2 text-center border-line`}>
+                  {assignment.isJoker && <span className="font-semibold text-accent">JOKER</span>}
+                  {assignment.isLong && <span className="font-semibold text-info">LONG</span>}
                   {!assignment.isJoker && !assignment.isLong && assignment.duration > 0 && <span>Normal</span>}
                 </td>
-                <td className={`border p-2 text-center text-sm ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                <td className={`border p-2 text-center text-sm border-line`}>
                   {assignment.duration > 0 && (
                     <span>{formatTime(assignment.startTime)} - {formatTime(assignment.endTime)}</span>
                   )}
@@ -1481,7 +1479,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           <h3 className="text-lg font-semibold mb-3">Completed Stints</h3>
           <div className="space-y-2">
             {stintHistory.map((stint, index) => (
-              <div key={index} className={`p-2 rounded ${isDarkMode ? 'bg-gray-700' : 'bg-gray-100'}`}>
+              <div key={index} className={`p-2 rounded bg-surface-2`}>
                 {driverNames[stint.driver - 1]} - {stint.duration} minutes
                 <span className="text-sm ml-2 opacity-70">
                   ({stint.timestamp.toLocaleTimeString()})
@@ -1495,11 +1493,11 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       {/* Legend */}
       <div className="mt-4 flex gap-4 text-sm">
         <div className="flex items-center gap-2">
-          <div className={`w-4 h-4 ${isDarkMode ? 'bg-yellow-900' : 'bg-yellow-100'} border ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
+          <div className={`w-4 h-4 bg-accent/15 border border-line`}></div>
           <span>Joker Stint ({config.minStintTime} - {config.minStintTime + 5} min)</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className={`w-4 h-4 ${isDarkMode ? 'bg-blue-900' : 'bg-blue-100'} border ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
+          <div className={`w-4 h-4 bg-info/15 border border-line`}></div>
           <span>Long Stint ({config.maxStintTime - 5} - {config.maxStintTime} min)</span>
         </div>
       </div>

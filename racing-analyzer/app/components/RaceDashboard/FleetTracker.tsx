@@ -54,15 +54,15 @@ const fmtDelta = (d: number | null): string =>
   d == null ? '' : `${d < 0 ? '-' : '+'}${Math.abs(d).toFixed(1)}s`;
 
 const paceChipClass = (cls: string, dark: boolean) => {
-  if (cls === 'fast') return dark ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800';
-  if (cls === 'slow') return dark ? 'bg-red-900 text-red-200' : 'bg-red-100 text-red-800';
-  if (cls === 'insufficient') return dark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-500';
-  return dark ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700';
+  if (cls === 'fast') return 'bg-live/15 text-live';
+  if (cls === 'slow') return 'bg-alarm/15 text-alarm';
+  if (cls === 'insufficient') return dark ? 'bg-surface-2 text-ink' : 'bg-surface-2 text-muted';
+  return 'bg-surface-2 text-ink';
 };
 
 // Presentational card body, shared by the draggable card and the drag overlay.
 const CardBody: React.FC<{ kart: FleetKartState; isDarkMode: boolean }> = ({ kart, isDarkMode }) => {
-  const subtle = isDarkMode ? 'text-gray-400' : 'text-gray-500';
+  const subtle = 'text-muted';
   return (
     <>
       <div className="flex items-center justify-between">
@@ -88,7 +88,7 @@ const KartCard: React.FC<{ kart: FleetKartState; isDarkMode: boolean; onSelect: 
   ({ kart, isDarkMode, onSelect }) => {
     const { attributes, listeners, setNodeRef, transform, isDragging } =
       useDraggable({ id: `kart-${kart.fleet_kart_id}`, data: { kart } });
-    const cardBase = isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-100' : 'bg-white border-gray-200 text-gray-900';
+    const cardBase = 'bg-surface border-line text-ink';
     return (
       <div
         ref={setNodeRef}
@@ -111,7 +111,7 @@ const Droppable: React.FC<{ id: string; className?: string; testId?: string; chi
     const { setNodeRef, isOver } = useDroppable({ id });
     return (
       <div ref={setNodeRef} data-testid={testId}
-        className={`${className} ${isOver ? 'ring-2 ring-blue-500' : ''}`}>
+        className={`${className} ${isOver ? 'ring-2 ring-info' : ''}`}>
         {children}
       </div>
     );
@@ -170,9 +170,9 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
   };
   const laneStyleFor = (lane: number) => COLOR_MAP[laneColors[lane] || defaultColorKey(lane)];
 
-  const subtle = isDarkMode ? 'text-gray-400' : 'text-gray-500';
-  const colHeader = isDarkMode ? 'text-gray-200' : 'text-gray-700';
-  const columnWrap = isDarkMode ? 'bg-gray-900/40' : 'bg-gray-50';
+  const subtle = 'text-muted';
+  const colHeader = 'text-ink';
+  const columnWrap = 'bg-surface-2';
 
   const onTrack = useMemo(() => fleetBoard.filter(k => k.column === 'on_track').sort(byPace), [fleetBoard]);
   const inPit = useMemo(() => fleetBoard.filter(k => k.column === 'in_pit').sort(byPace), [fleetBoard]);
@@ -247,19 +247,19 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive, canEditRegistry, registry.length, sessionId, trackId]);
 
-  const cardBase = isDarkMode ? 'bg-gray-800 border-gray-700 text-gray-100' : 'bg-white border-gray-200 text-gray-900';
+  const cardBase = 'bg-surface border-line text-ink';
 
   return (
     <div className="p-3 sm:p-4">
       {/* Quick actions */}
       <div className="flex flex-wrap gap-2 mb-3">
         <button onClick={onAddAssignment}
-          className="flex-1 min-h-[44px] px-4 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700">
+          className="flex-1 min-h-[44px] px-4 rounded-lg font-semibold text-white bg-info hover:bg-info">
           + Record kart assignment
         </button>
         {canEditRegistry && (
           <button onClick={() => setShowRegistry(s => !s)}
-            className={`min-h-[44px] px-4 rounded-lg font-medium border ${isDarkMode ? 'border-gray-600 text-gray-200' : 'border-gray-300 text-gray-700'}`}>
+            className={`min-h-[44px] px-4 rounded-lg font-medium border border-line text-ink`}>
             {showRegistry ? 'Close fleet' : 'Manage fleet'}
           </button>
         )}
@@ -269,7 +269,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
       {canEditRegistry && showRegistry && (
         <div className={`mb-4 p-3 rounded-lg border ${cardBase}`}>
           <button onClick={handleAutoPopulate} disabled={busy}
-            className="w-full min-h-[44px] mb-2 px-4 rounded-lg font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
+            className="w-full min-h-[44px] mb-2 px-4 rounded-lg font-semibold text-white bg-info hover:bg-info disabled:opacity-50">
             Auto-add karts from session
           </button>
           {autoMsg && <p className={`text-xs mb-3 ${subtle}`}>{autoMsg}</p>}
@@ -278,10 +278,10 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
             <span className={`text-sm ${subtle}`}>Pit lanes</span>
             <div className="flex items-center gap-2">
               <button onClick={() => changeLaneCount(laneCount - 1)}
-                className={`w-9 h-9 rounded-lg border text-lg ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>−</button>
+                className={`w-9 h-9 rounded-lg border text-lg border-line`}>−</button>
               <span className="w-6 text-center font-semibold">{laneCount}</span>
               <button onClick={() => changeLaneCount(laneCount + 1)}
-                className={`w-9 h-9 rounded-lg border text-lg ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>+</button>
+                className={`w-9 h-9 rounded-lg border text-lg border-line`}>+</button>
             </div>
           </div>
 
@@ -297,7 +297,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
                   return (
                     <button key={c.key} aria-label={`Lane ${lane} ${c.key}`}
                       onClick={() => setLaneColor(lane, c.key)}
-                      className={`w-6 h-6 rounded-full ${c.dot} ${isSel ? 'ring-2 ring-offset-1 ring-gray-500' : ''}`} />
+                      className={`w-6 h-6 rounded-full ${c.dot} ${isSel ? 'ring-2 ring-offset-1 ring-muted' : ''}`} />
                   );
                 })}
               </div>
@@ -308,9 +308,9 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
             <input value={newLabel} onChange={e => setNewLabel(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleAddKart(); }}
               placeholder="Add a kart (e.g. K-12)"
-              className={`flex-1 min-h-[44px] px-3 rounded-lg border ${isDarkMode ? 'bg-gray-900 border-gray-600 text-white' : 'bg-white border-gray-300'}`} />
+              className={`flex-1 min-h-[44px] px-3 rounded-lg border ${isDarkMode ? 'bg-canvas border-line text-white' : 'bg-surface border-line'}`} />
             <button onClick={handleAddKart} disabled={busy || !newLabel.trim()}
-              className="min-h-[44px] px-4 rounded-lg font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50">Add</button>
+              className="min-h-[44px] px-4 rounded-lg font-semibold text-white bg-live hover:bg-live disabled:opacity-50">Add</button>
           </div>
           {registry.length > 0 && (
             <ul className="space-y-1 max-h-32 overflow-y-auto">
@@ -318,7 +318,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
                 <li key={k.id} className="flex items-center justify-between text-sm">
                   <span>{k.label}</span>
                   <button onClick={() => handleDeleteKart(k.id)} disabled={busy}
-                    className="min-h-[36px] px-3 text-red-500 hover:text-red-600">Retire</button>
+                    className="min-h-[36px] px-3 text-alarm hover:text-alarm">Retire</button>
                 </li>
               ))}
             </ul>
@@ -333,7 +333,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
             <>
               <p className="text-sm mt-1 mb-4">One tap creates a kart for every team in the session.</p>
               <button onClick={handleAutoPopulate} disabled={busy}
-                className="min-h-[44px] px-5 rounded-lg font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
+                className="min-h-[44px] px-5 rounded-lg font-semibold text-white bg-info hover:bg-info disabled:opacity-50">
                 Auto-add karts from session
               </button>
               {autoMsg && <p className="text-xs mt-3">{autoMsg}</p>}
@@ -383,7 +383,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
               </div>
               {unlaned.length > 0 && (
                 <div data-testid="lane-unsorted"
-                  className={`rounded-lg border border-dashed p-2 mt-2 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+                  className={`rounded-lg border border-dashed p-2 mt-2 border-line`}>
                   <span className={`text-xs font-medium ${colHeader}`}>Just dropped — place in a lane</span>
                   <div className="mt-1 flex flex-wrap gap-2">
                     {unlaned.map(k => (
@@ -412,7 +412,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50"
           onClick={() => setSelected(null)} data-testid="kart-action-sheet">
           <div onClick={e => e.stopPropagation()}
-            className={`w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl p-4 sm:p-6 ${isDarkMode ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900'}`}>
+            className={`w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl p-4 sm:p-6 bg-surface text-ink`}>
             <h2 className="text-lg font-bold mb-1">Kart {selected.label}</h2>
             <p className={`text-sm mb-4 ${subtle}`}>
               {selected.column === 'available'
@@ -423,7 +423,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
             {selected.column === 'available' ? (
               <>
                 <button onClick={() => doAssign(selected)}
-                  className="w-full min-h-[48px] mb-3 rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700">
+                  className="w-full min-h-[48px] mb-3 rounded-lg font-semibold text-white bg-info hover:bg-info">
                   Assign to a team…
                 </button>
                 <p className={`text-sm mb-2 ${subtle}`}>Move to lane</p>
@@ -446,7 +446,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
             </div>
 
             <button onClick={() => setSelected(null)}
-              className={`w-full min-h-[44px] mt-2 rounded-lg font-medium border ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}>
+              className={`w-full min-h-[44px] mt-2 rounded-lg font-medium border border-line`}>
               Cancel
             </button>
           </div>

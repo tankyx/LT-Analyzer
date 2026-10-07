@@ -120,15 +120,16 @@ const StandingsRow = React.memo(function StandingsRow({
     >
       {/* Position */}
       <div
+        role="cell"
         className={`w-[30px] h-[30px] md:w-8 md:h-8 rounded-[7px] md:rounded-lg font-cond font-bold text-base md:text-[17px] flex items-center justify-center ${
-          isMyTeam ? 'bg-accent text-accent-ink' : 'bg-surface-2 text-ink'
+          isMyTeam ? 'accent-gradient text-accent-ink' : 'bg-surface-2 text-ink'
         }`}
       >
         {team.Position}
       </div>
 
       {/* Team */}
-      <div className="flex flex-col gap-0.5 min-w-0 py-1.5">
+      <div role="cell" className="flex flex-col gap-0.5 min-w-0 py-1.5">
         <div className="flex items-center gap-2 min-w-0">
           {isMonitored && teamColor && (
             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: teamColor }} aria-hidden />
@@ -147,30 +148,30 @@ const StandingsRow = React.memo(function StandingsRow({
       </div>
 
       {/* Phone: last lap over gap */}
-      <div className="md:hidden flex flex-col items-end gap-0.5 pr-1">
+      <div role="cell" className="md:hidden flex flex-col items-end gap-0.5 pr-1">
         <span className={`font-mono tabular text-[15px] font-medium ${inPit ? 'text-alarm' : 'text-ink'}`}>
           {team['Last Lap'] || '—'}
         </span>
-        <span className={`font-mono tabular text-xs ${lapped || !team.Gap ? 'text-muted' : 'text-muted'}`}>
+        <span className={`font-mono tabular text-xs ${lapped ? 'text-alarm' : 'text-muted'}`}>
           {team.Gap || '—'}
         </span>
       </div>
 
       {/* Desktop columns */}
-      <div className="hidden md:block">
+      <div role="cell" className="hidden md:block">
         <StatusPill status={team.Status} />
       </div>
-      <div className={`hidden md:block font-mono tabular text-[15px] font-medium ${inPit ? 'text-alarm' : 'text-ink'}`}>
+      <div role="cell" className={`hidden md:block font-mono tabular text-[15px] font-medium ${inPit ? 'text-alarm' : 'text-ink'}`}>
         {team['Last Lap'] || '—'}
       </div>
-      <div className="hidden md:block font-mono tabular text-[15px] text-ink">{team['Best Lap'] || '—'}</div>
-      <div className={`hidden md:block font-mono tabular text-[15px] text-right ${lapped ? 'text-muted' : 'text-ink'}`}>
+      <div role="cell" className="hidden md:block font-mono tabular text-[15px] text-ink">{team['Best Lap'] || '—'}</div>
+      <div role="cell" className={`hidden md:block font-mono tabular text-[15px] text-right ${lapped ? 'text-muted' : 'text-ink'}`}>
         {team.Gap || '—'}
       </div>
-      <div className="hidden md:block font-mono tabular text-[13px] text-muted text-right">{team['Pit Stops'] || '0'}</div>
+      <div role="cell" className="hidden md:block font-mono tabular text-[13px] text-muted text-right">{team['Pit Stops'] || '0'}</div>
 
       {/* Watch */}
-      <div className="flex items-center justify-end md:justify-center">
+      <div role="cell" className="flex items-center justify-end md:justify-center">
         {canAlert && (
           <span className="hidden md:inline-flex">
             <PitAlertButton kartNum={team.Kart} teamName={team.Team} trackId={selectedTrackId} onTriggerAlert={onTriggerAlert} />

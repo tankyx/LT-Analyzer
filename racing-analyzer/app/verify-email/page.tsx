@@ -39,14 +39,14 @@ function VerifyEmailInner() {
   }, [token]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-      <div className="max-w-md p-6 bg-gray-800 rounded-md text-center space-y-4">
+    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">
+      <div className="max-w-md p-6 bg-surface rounded-md text-center space-y-4">
         {status === 'pending' && <p>Verifying your email…</p>}
         {status === 'ok' && (
           <>
             <h2 className="text-2xl font-bold">Email verified ✓</h2>
-            <p className="text-sm text-gray-300">You can now sign in.</p>
-            <Link href="/login" className="inline-block px-4 py-2 bg-blue-600 rounded-md">Sign in</Link>
+            <p className="text-sm text-ink">You can now sign in.</p>
+            <Link href="/login" className="inline-block px-4 py-2 bg-info rounded-md">Sign in</Link>
           </>
         )}
         {status === 'expired' && <ResendForm reason="expired" />}
@@ -54,7 +54,7 @@ function VerifyEmailInner() {
         {status === 'error' && (
           <>
             <p>Something went wrong on our side. Try again in a minute.</p>
-            <Link href="/login" className="text-blue-300 underline">Back to login</Link>
+            <Link href="/login" className="text-info underline">Back to login</Link>
           </>
         )}
       </div>
@@ -86,7 +86,7 @@ function ResendForm({ reason }: { reason: 'expired' | 'invalid' }) {
     return (
       <>
         <p>If that email exists and is unverified, a fresh link is on its way.</p>
-        <Link href="/login" className="text-blue-300 underline">Back to login</Link>
+        <Link href="/login" className="text-info underline">Back to login</Link>
       </>
     );
   }
@@ -96,17 +96,17 @@ function ResendForm({ reason }: { reason: 'expired' | 'invalid' }) {
       <h2 className="text-2xl font-bold">
         {reason === 'expired' ? 'Link expired' : 'Link is invalid'}
       </h2>
-      <p className="text-sm text-gray-300">Enter your email and we&apos;ll send a fresh verification link.</p>
+      <p className="text-sm text-ink">Enter your email and we&apos;ll send a fresh verification link.</p>
       <input
         type="email"
         required
         placeholder="Email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        className="block w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-md text-white placeholder-gray-500"
+        className="block w-full px-3 py-2 bg-surface border border-line rounded-md text-ink placeholder:text-muted"
       />
       <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
-      <button type="submit" className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 rounded-md">
+      <button type="submit" className="w-full py-2 px-4 bg-info hover:bg-info rounded-md">
         Resend verification
       </button>
     </form>
@@ -115,7 +115,7 @@ function ResendForm({ reason }: { reason: 'expired' | 'invalid' }) {
 
 export default function VerifyEmailPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-gray-900" />}>
+    <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
       <VerifyEmailInner />
     </Suspense>
   );

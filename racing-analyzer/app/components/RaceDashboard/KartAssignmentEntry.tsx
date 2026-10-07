@@ -45,8 +45,8 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
     }
   };
 
-  const panel = isDarkMode ? 'bg-gray-800 text-gray-100' : 'bg-white text-gray-900';
-  const field = isDarkMode ? 'bg-gray-900 border-gray-600 text-white' : 'bg-white border-gray-300';
+  const panel = 'bg-surface text-ink';
+  const field = isDarkMode ? 'bg-canvas border-line text-ink' : 'bg-surface border-line';
 
   return (
     <div
@@ -96,20 +96,20 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
           {activeKarts.map(k => <option key={k.id} value={k.id}>{k.label}</option>)}
         </select>
         {activeKarts.length === 0 && (
-          <p className="text-sm text-red-500 mb-2">No karts registered yet — add some in the fleet manager.</p>
+          <p className="text-sm text-alarm mb-2">No karts registered yet — add some in the fleet manager.</p>
         )}
 
         <div className="flex gap-2 mt-5">
           <button
             onClick={onCancel}
-            className={`flex-1 min-h-[48px] rounded-lg font-medium border ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}
+            className={`flex-1 min-h-[48px] rounded-lg font-medium border ${'border-line'}`}
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="flex-1 min-h-[48px] rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+            className="flex-1 min-h-[48px] rounded-lg font-semibold text-white bg-info hover:bg-info disabled:opacity-50"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>

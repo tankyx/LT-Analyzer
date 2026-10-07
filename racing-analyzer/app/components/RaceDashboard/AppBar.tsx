@@ -67,13 +67,20 @@ const AppBar: React.FC<AppBarProps> = ({
     const onDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [menuOpen]);
 
   const connDot =
     connectionStatus === 'connected'
-      ? 'bg-live'
+      ? 'bg-live live-glow'
       : connectionStatus === 'connecting'
         ? 'bg-accent animate-live-blink'
         : 'bg-alarm';
@@ -97,7 +104,7 @@ const AppBar: React.FC<AppBarProps> = ({
       <div className="h-full flex items-center gap-2 md:gap-4 px-3 md:px-5">
         {/* Brand (desktop only; the track button carries identity on phones) */}
         <div className="hidden md:flex items-center gap-2.5 shrink-0">
-          <div className="w-[30px] h-[30px] rounded-[7px] bg-accent text-accent-ink font-cond font-bold text-[15px] flex items-center justify-center">
+          <div className="w-[30px] h-[30px] rounded-[7px] accent-gradient accent-glow text-accent-ink font-cond font-bold text-[15px] flex items-center justify-center">
             LT
           </div>
           <span className="font-cond font-bold text-[19px] tracking-wide">LT-ANALYZER</span>
@@ -112,7 +119,7 @@ const AppBar: React.FC<AppBarProps> = ({
           className="flex items-center gap-2.5 h-10 md:h-9 pl-2.5 pr-3 rounded-lg border border-line bg-surface-2 min-w-0 max-w-full md:max-w-[420px] hover:border-muted/60 transition-colors"
         >
           <span
-            className={`w-2 h-2 rounded-full shrink-0 ${sessionActive ? 'bg-live animate-live-blink' : 'bg-line'}`}
+            className={`w-2 h-2 rounded-full shrink-0 ${sessionActive ? 'bg-live live-glow' : 'bg-line'}`}
             data-testid="session-dot"
           />
           <span className="text-[15px] md:text-sm font-semibold truncate">{trackName || 'Select a track'}</span>
@@ -188,6 +195,20 @@ const AppBar: React.FC<AppBarProps> = ({
             {menuOpen && (
               <div
                 role="menu"
+                onKeyDown={(e) => {
+                  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+                  const items = Array.from(
+                    menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') || [],
+                  ).filter((el) => el.offsetParent !== null);
+                  if (items.length === 0) return;
+                  e.preventDefault();
+                  const idx = items.indexOf(document.activeElement as HTMLButtonElement);
+                  let next = 0;
+                  if (e.key === 'ArrowDown') next = (idx + 1) % items.length;
+                  else if (e.key === 'ArrowUp') next = (idx - 1 + items.length) % items.length;
+                  else if (e.key === 'End') next = items.length - 1;
+                  items[next].focus();
+                }}
                 className="absolute right-0 mt-2 w-56 rounded-xl border border-line bg-surface shadow-xl p-1.5 z-50"
               >
                 <div className="px-3 py-2">

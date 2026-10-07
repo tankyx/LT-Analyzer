@@ -16,6 +16,7 @@
   --c-ink: 20 24 31;
   --c-muted: 95 106 122;
   --c-accent: 200 140 0;
+  --c-accent-hi: 247 170 28;
   --c-accent-ink: 26 18 0;
   --c-live: 22 148 80;
   --c-alarm: 214 64 58;
@@ -37,6 +38,7 @@
   --c-ink: 233 237 242;
   --c-muted: 138 148 166;
   --c-accent: 242 182 50;
+  --c-accent-hi: 255 208 88;
   --c-accent-ink: 26 18 0;
   --c-live: 67 209 122;
   --c-alarm: 240 101 90;
@@ -54,6 +56,40 @@ body {
   background: rgb(var(--c-canvas));
   font-family: var(--font-sans), "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Signature accent: warm gradient sweep for the brand mark and primary actions.
+   Oversized + slowly shifting so the ember moves across the surface. */
+.accent-gradient {
+  background-image: linear-gradient(135deg, rgb(var(--c-accent)), rgb(var(--c-accent-hi)));
+  background-size: 200% 200%;
+  animation: accent-shimmer 7s ease-in-out infinite;
+}
+@keyframes accent-shimmer {
+  0%, 100% { background-position: 0% 0%; }
+  50% { background-position: 100% 100%; }
+}
+
+/* Soft drop shadow for the gradient accent surfaces. */
+.accent-glow {
+  box-shadow: 0 2px 10px -2px rgb(var(--c-accent) / 0.6);
+}
+
+/* Breathing glow for live status dots: a soft ring that blooms and fades. */
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--c-live) / 0.55); }
+  50% { box-shadow: 0 0 0 5px rgb(var(--c-live) / 0); }
+}
+.live-glow {
+  animation: live-pulse 2s ease-out infinite;
+}
+
+/* Panel depth: an offset, blurred elevation that lifts cards off the canvas. */
+.panel {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 8px 24px -8px rgba(0, 0, 0, 0.14);
 }
 
 /* Timing figures: fixed-width digits so a table doesn't jitter on refresh. */
@@ -87,4 +123,53 @@ body {
 .scroll-thin {
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--c-line)) transparent;
+}
+
+/* Browser surfaces, themed — selection, caret, and scrollbars ship with the
+   design instead of the platform default. */
+::selection {
+  background: rgb(var(--c-accent) / 0.28);
+  color: rgb(var(--c-ink));
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line)) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-line));
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Reduced motion: pause looped/blinking animation and replace it with a
+   static, equivalent state signal (a ring, a tint) so no information is lost. */
+@media (prefers-reduced-motion: reduce) {
+  .pit-alert,
+  .row-updated,
+  .animate-live-blink,
+  .live-glow,
+  .accent-gradient {
+    animation: none;
+  }
+  .pit-alert {
+    box-shadow: 0 0 0 2px rgb(var(--c-alarm) / 0.45);
+  }
+  .row-updated {
+    background-color: rgb(var(--c-info) / 0.16);
+  }
+  .accent-gradient {
+    background-size: 100% 100%;
+    background-position: 0% 0%;
+  }
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+  }
 }
