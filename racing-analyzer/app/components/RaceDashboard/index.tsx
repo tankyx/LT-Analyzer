@@ -110,6 +110,7 @@ interface DeltaData {
 interface GapHistory {
   [kart: string]: {
     gaps: number[];
+    adjusted_gaps?: number[];
     last_update: string;
   };
 }
@@ -337,6 +338,56 @@ export const shouldPollFleet = (
   return activeTab === 'fleet' || registrySize > 0;
 };
 
+// Phase 2 dropped the backend's `gap_history`, which left the Delta chart with
+// no data source (it always rendered "No data available"). Rebuild the series
+// client-side from the deltas we already compute: one point per completed lap,
+// appended when a monitored kart's `Last Lap` changes — the same trigger the
+// old backend used. The first sample is seeded immediately so the chart draws
+// at once, and the arrays are capped to bound memory. Exported for unit tests.
+export const MAX_GAP_HISTORY = 60;
+export const appendLapGapHistory = (
+  prev: GapHistory,
+  monitoredTeams: string[],
+  deltas: Record<string, { gap: number; adjusted_gap?: number }>,
+  teams: Array<{ Kart: string; 'Last Lap'?: string }>,
+  maxEntries: number = MAX_GAP_HISTORY,
+): GapHistory => {
+  const next: GapHistory = { ...prev };
+  let changed = false;
+
+  monitoredTeams.forEach(kart => {
+    const data = deltas[kart];
+    const team = teams.find(t => t.Kart === kart);
+    const lastLap = team?.['Last Lap'] || '';
+    if (!data || !lastLap) return;
+
+    const adjusted = data.adjusted_gap ?? data.gap;
+    const existing = next[kart];
+    if (!existing) {
+      next[kart] = { gaps: [data.gap], adjusted_gaps: [adjusted], last_update: lastLap };
+      changed = true;
+    } else if (existing.last_update !== lastLap) {
+      next[kart] = {
+        gaps: [...existing.gaps, data.gap].slice(-maxEntries),
+        adjusted_gaps: [...(existing.adjusted_gaps || []), adjusted].slice(-maxEntries),
+        last_update: lastLap,
+      };
+      changed = true;
+    }
+  });
+
+  // Forget karts the user stopped monitoring.
+  const monitored = new Set(monitoredTeams);
+  Object.keys(next).forEach(kart => {
+    if (!monitored.has(kart)) {
+      delete next[kart];
+      changed = true;
+    }
+  });
+
+  return changed ? next : prev;
+};
+
 const RaceDashboard = () => {
   const { user, logout, apiFetch } = useAuth();
   const router = useRouter();
@@ -512,7 +563,20 @@ const RaceDashboard = () => {
     }
     return calculateTeamGaps(teams, myTeam, monitoredTeams, pitStopTime, requiredPitStops, isQualificationMode);
   }, [teams, myTeam, monitoredTeams, pitStopTime, requiredPitStops, isQualificationMode]);
-    
+
+  // Phase 2 dropped the backend's `gap_history`, which left the Delta chart
+  // with no data source; rebuild it from the client-side deltas (see
+  // appendLapGapHistory). Gaps are measured from your team, so switching it
+  // invalidates the series — that reset effect is declared first so it runs
+  // before the accumulation effect on the same render.
+  useEffect(() => {
+    setGapHistory({});
+  }, [myTeam]);
+  useEffect(() => {
+    if (!myTeam || monitoredTeams.length === 0) return;
+    setGapHistory(prev => appendLapGapHistory(prev, monitoredTeams, frontendDeltaData, teams));
+  }, [frontendDeltaData, teams, myTeam, monitoredTeams]);
+
   const handleTeamHover = (kartNum: string | null) => {
     setHoveredTeam(kartNum);
   };
