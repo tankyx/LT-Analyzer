@@ -30,7 +30,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center canvas text-ink">
-      <div className="max-w-md w-full p-6 bg-surface rounded-md space-y-4">
+      <div className="max-w-md w-full p-6 bg-surface rounded-none space-y-4">
         <h2 className="text-center text-2xl font-bold">Reset your password</h2>
         {sent ? (
           <>
@@ -47,13 +47,13 @@ export default function ForgotPasswordPage() {
               placeholder="Email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full px-3 py-2 bg-canvas border border-line rounded-md placeholder:text-muted"
+              className="block w-full px-3 py-2 bg-canvas border border-line rounded-none placeholder:text-muted"
             />
             <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
             <button
               type="submit"
               disabled={loading || !turnstileToken}
-              className="w-full py-2 px-4 bg-info hover:bg-info rounded-md disabled:opacity-50"
+              className="w-full py-2 px-4 bg-info hover:bg-info rounded-none disabled:opacity-50"
             >
               {loading ? 'Sending…' : 'Send reset link'}
             </button>

@@ -101,7 +101,7 @@ const TrackRail: React.FC<TrackRailProps> = ({
         type="button"
         onClick={() => pick(t.track_id)}
         aria-current={selected ? 'true' : undefined}
-        className={`w-full flex items-center gap-2.5 min-h-11 md:min-h-10 px-3 rounded-lg text-left border transition-colors ${
+        className={`w-full flex items-center gap-2.5 min-h-11 md:min-h-10 px-3 rounded-none text-left border transition-colors ${
           selected ? 'bg-surface-2 border-line' : 'border-transparent hover:bg-surface-2/60'
         }`}
       >
@@ -136,7 +136,7 @@ const TrackRail: React.FC<TrackRailProps> = ({
           placeholder={`Search ${tracks.length} tracks`}
           aria-label="Search tracks"
           autoFocus={isSheet}
-          className="w-full h-10 md:h-9 pl-9 pr-8 rounded-lg border border-line bg-canvas text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50"
+          className="w-full h-10 md:h-9 pl-9 pr-8 rounded-none border border-line bg-canvas text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50"
         />
         {query && (
           <button
@@ -181,7 +181,7 @@ const TrackRail: React.FC<TrackRailProps> = ({
         <button
           type="button"
           onClick={onOpenAdmin}
-          className="shrink-0 flex items-center gap-2 h-10 px-3 rounded-lg text-sm text-muted hover:text-ink hover:bg-surface-2"
+          className="shrink-0 flex items-center gap-2 h-10 px-3 rounded-none text-sm text-muted hover:text-ink hover:bg-surface-2"
         >
           <Settings size={15} />
           Admin
@@ -201,14 +201,14 @@ const TrackRail: React.FC<TrackRailProps> = ({
   return (
     <div ref={sheetRef} className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center" role="dialog" aria-modal="true" aria-label="Choose a track">
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60" />
-      <div className="relative flex flex-col gap-3 p-3 pb-[max(12px,env(safe-area-inset-bottom))] bg-surface border border-line rounded-t-2xl md:rounded-2xl w-full md:w-[440px] h-[85vh] md:h-[70vh] shadow-2xl">
+      <div className="relative flex flex-col gap-3 p-3 pb-[max(12px,env(safe-area-inset-bottom))] bg-surface border border-line rounded-t-none md:rounded-none w-full md:w-[440px] h-[85vh] md:h-[70vh] shadow-2xl">
         <div className="flex items-center justify-between px-1">
           <span className="font-cond font-bold text-lg tracking-wide">TRACKS</span>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close track picker"
-            className="w-10 h-10 flex items-center justify-center rounded-lg text-muted hover:text-ink hover:bg-surface-2"
+            className="w-10 h-10 flex items-center justify-center rounded-none text-muted hover:text-ink hover:bg-surface-2"
           >
             <X size={18} />
           </button>

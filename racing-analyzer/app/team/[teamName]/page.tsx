@@ -450,12 +450,12 @@ export default function TeamProfilePage() {
   if (error) {
     return (
       <div className="dark min-h-screen bg-gradient-to-br from-canvas via-surface to-canvas flex items-center justify-center">
-        <div className="bg-alarm/15 text-alarm p-6 rounded-lg max-w-md">
+        <div className="bg-alarm/15 text-alarm p-6 rounded-none max-w-md">
           <h2 className="text-xl font-bold mb-2">Error</h2>
           <p>{error}</p>
           <button
             onClick={() => router.push('/data')}
-            className="mt-4 px-4 py-2 bg-alarm hover:bg-alarm rounded-lg transition-colors"
+            className="mt-4 px-4 py-2 bg-alarm hover:bg-alarm rounded-none transition-colors"
           >
             Back to Data Page
           </button>
@@ -492,7 +492,7 @@ export default function TeamProfilePage() {
         </div>
 
         {overallStats && (
-          <div className="bg-surface rounded-lg p-6 mb-6">
+          <div className="bg-surface rounded-none p-6 mb-6">
             <h2 className="text-2xl font-semibold text-white mb-4">Overall Statistics</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <StatCard label="Total Sessions" value={overallStats.total_sessions} color="text-info" />
@@ -504,7 +504,7 @@ export default function TeamProfilePage() {
                 <h3 className="text-sm uppercase tracking-wide text-muted mb-2">Best Lap by Track</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {overallStats.bests_by_track.map(b => (
-                    <div key={b.track_id} className="bg-surface-2 rounded-lg px-3 py-2">
+                    <div key={b.track_id} className="bg-surface-2 rounded-none px-3 py-2">
                       <div className="text-xs text-muted">{b.track_name}</div>
                       <div className="text-lg font-bold text-class2">{b.best_lap || 'N/A'}</div>
                     </div>
@@ -679,7 +679,7 @@ function AliasPanel({
   ]);
 
   return (
-    <div className="bg-surface rounded-lg p-4 mb-6">
+    <div className="bg-surface rounded-none p-4 mb-6">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold text-ink uppercase tracking-wide">Aliases</h3>
         {aliases && !viewingIsCanonical && (
@@ -733,7 +733,7 @@ function AliasPanel({
                 onFocus={() => setShowSuggestions(true)}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                 placeholder={`Search for a name to alias to "${canonical}"`}
-                className="w-full px-3 py-1.5 bg-surface-2 text-white text-sm rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+                className="w-full px-3 py-1.5 bg-surface-2 text-white text-sm rounded-none focus:outline-none focus:ring-2 focus:ring-info"
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !showSuggestions) onAdd();
                 }}
@@ -745,14 +745,14 @@ function AliasPanel({
             <button
               onClick={onAdd}
               disabled={busy || !newAlias.trim()}
-              className="px-3 py-1.5 bg-info hover:bg-info disabled:opacity-50 text-white text-sm rounded-lg"
+              className="px-3 py-1.5 bg-info hover:bg-info disabled:opacity-50 text-white text-sm rounded-none"
             >
               {busy ? '...' : 'Add'}
             </button>
           </div>
 
           {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute z-10 left-0 right-0 mt-1 bg-canvas border border-line rounded-lg max-h-72 overflow-y-auto shadow-xl">
+            <div className="absolute z-10 left-0 right-0 mt-1 bg-canvas border border-line rounded-none max-h-72 overflow-y-auto shadow-xl">
               {suggestions.map((s) => {
                 const already = existingAliasNames.has(s.name.toLowerCase());
                 return (
@@ -785,7 +785,7 @@ function AliasPanel({
           )}
 
           {showSuggestions && !searching && newAlias.trim().length >= 2 && suggestions.length === 0 && (
-            <div className="absolute z-10 left-0 right-0 mt-1 bg-canvas border border-line rounded-lg px-3 py-2 text-xs text-muted">
+            <div className="absolute z-10 left-0 right-0 mt-1 bg-canvas border border-line rounded-none px-3 py-2 text-xs text-muted">
               No matches. You can still add it as a free-form alias.
             </div>
           )}
@@ -797,7 +797,7 @@ function AliasPanel({
 
 function StatCard({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
-    <div className="bg-surface-2 rounded-lg p-4">
+    <div className="bg-surface-2 rounded-none p-4">
       <div className="text-muted text-sm mb-1">{label}</div>
       <div className={`text-3xl font-bold ${color}`}>{value}</div>
     </div>
@@ -834,7 +834,7 @@ function SessionsTab({
   onToggle: (trackId: number, sessionId: number) => void;
 }) {
   return (
-    <div className="bg-surface rounded-lg p-6">
+    <div className="bg-surface rounded-none p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-semibold text-white">Session History</h2>
         <div className="flex items-center gap-2">
@@ -842,7 +842,7 @@ function SessionsTab({
           <select
             value={selectedTrack || ''}
             onChange={e => setSelectedTrack(e.target.value ? parseInt(e.target.value) : null)}
-            className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+            className="px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
           >
             <option value="">All Tracks</option>
             {uniqueTracks.map(track => (
@@ -966,13 +966,13 @@ function ConsistencyTab({
   data: ConsistencyResponse | null;
 }) {
   if (loading) {
-    return <div className="bg-surface rounded-lg p-6 text-ink">Loading consistency stats...</div>;
+    return <div className="bg-surface rounded-none p-6 text-ink">Loading consistency stats...</div>;
   }
   if (error) {
-    return <div className="bg-alarm/15 rounded-lg p-6 text-alarm">{error}</div>;
+    return <div className="bg-alarm/15 rounded-none p-6 text-alarm">{error}</div>;
   }
   if (!data || data.sessions.length === 0) {
-    return <div className="bg-surface rounded-lg p-6 text-muted">No consistency data available.</div>;
+    return <div className="bg-surface rounded-none p-6 text-muted">No consistency data available.</div>;
   }
 
   const trendData = data.trend.map(t => ({
@@ -990,7 +990,7 @@ function ConsistencyTab({
 
   return (
     <div className="space-y-6">
-      <div className="bg-surface rounded-lg p-6">
+      <div className="bg-surface rounded-none p-6">
         <h3 className="text-xl font-semibold text-white mb-4">Career Consistency</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
@@ -1015,7 +1015,7 @@ function ConsistencyTab({
         </p>
       </div>
 
-      <div className="bg-surface rounded-lg p-6">
+      <div className="bg-surface rounded-none p-6">
         <h3 className="text-xl font-semibold text-white mb-4">σ Over Time (older → newer)</h3>
         {trendData.length > 1 ? (
           <div className="h-64">
@@ -1035,7 +1035,7 @@ function ConsistencyTab({
         )}
       </div>
 
-      <div className="bg-surface rounded-lg p-6">
+      <div className="bg-surface rounded-none p-6">
         <h3 className="text-xl font-semibold text-white mb-4">Per-Session σ (last 20)</h3>
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
@@ -1050,7 +1050,7 @@ function ConsistencyTab({
         </div>
       </div>
 
-      <div className="bg-surface rounded-lg p-6">
+      <div className="bg-surface rounded-none p-6">
         <h3 className="text-xl font-semibold text-white mb-4">Session Detail</h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -1122,12 +1122,12 @@ function FairnessTab({
 }) {
   return (
     <div className="space-y-6">
-      <div className="bg-surface rounded-lg p-4 flex items-center gap-3 flex-wrap">
+      <div className="bg-surface rounded-none p-4 flex items-center gap-3 flex-wrap">
         <label className="text-ink text-sm">Track:</label>
         <select
           value={trackId || ''}
           onChange={e => setTrackId(parseInt(e.target.value))}
-          className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+          className="px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
         >
           {tracks.map(t => (
             <option key={t.id} value={t.id}>{t.track_name}</option>
@@ -1138,7 +1138,7 @@ function FairnessTab({
           value={layoutId ?? ''}
           onChange={e => setLayoutId(e.target.value === '' ? null : parseInt(e.target.value))}
           disabled={layouts.length === 0}
-          className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info disabled:opacity-50"
+          className="px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info disabled:opacity-50"
         >
           <option value="">{layouts.length === 0 ? 'no layouts' : 'all layouts'}</option>
           {layouts.map(l => (
@@ -1149,7 +1149,7 @@ function FairnessTab({
         <select
           value={windowMonths}
           onChange={e => setWindowMonths(parseInt(e.target.value))}
-          className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+          className="px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
         >
           <option value={3}>3 mo</option>
           <option value={6}>6 mo</option>
@@ -1162,8 +1162,8 @@ function FairnessTab({
         </p>
       </div>
 
-      {loading && <div className="bg-surface rounded-lg p-6 text-ink">Loading fairness analysis...</div>}
-      {error && <div className="bg-alarm/15 rounded-lg p-6 text-alarm">{error}</div>}
+      {loading && <div className="bg-surface rounded-none p-6 text-ink">Loading fairness analysis...</div>}
+      {error && <div className="bg-alarm/15 rounded-none p-6 text-alarm">{error}</div>}
 
       {data && !loading && (
         <>
@@ -1186,10 +1186,10 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
   });
 
   return (
-    <div className="bg-surface rounded-lg p-6">
+    <div className="bg-surface rounded-none p-6">
       <div className="flex items-baseline justify-between mb-4">
         <h3 className="text-xl font-semibold text-white">Sprint — Kart Draw Fairness</h3>
-        <span className={`text-xs px-2 py-1 rounded ${block.enabled ? 'bg-live/15 text-live' : 'bg-accent/15 text-accent'}`}>
+        <span className={`text-xs px-2 py-1 rounded-none ${block.enabled ? 'bg-live/15 text-live' : 'bg-accent/15 text-accent'}`}>
           {block.enabled ? 'Aggregate enabled' : `Needs ≥ ${threshold} sprint sessions`}
         </span>
       </div>
@@ -1315,13 +1315,13 @@ function RandomnessVerdictPanel({ block }: { block: FairnessResponse['sprint'] }
   }
 
   return (
-    <div className={`rounded-lg p-4 mb-4 ${color}`}>
+    <div className={`rounded-none p-4 mb-4 ${color}`}>
       <div className="font-semibold mb-1">{label}</div>
       <div className="text-xs mb-3 opacity-90">{explanation}</div>
       {n > 0 && (
         <div className="grid grid-cols-4 gap-2 text-xs">
           {block.quartile_counts.map((c, i) => (
-            <div key={i} className="bg-black bg-opacity-30 rounded px-2 py-1">
+            <div key={i} className="bg-black bg-opacity-30 rounded-none px-2 py-1">
               <div className="opacity-70">Q{i + 1}{i === 0 ? ' (best)' : ''}</div>
               <div className="font-mono text-base">{c}</div>
               <div className="opacity-60">exp {(n / 4).toFixed(1)}</div>
@@ -1341,10 +1341,10 @@ function RandomnessVerdictPanel({ block }: { block: FairnessResponse['sprint'] }
 
 function EnduranceFairnessPanel({ block, threshold }: { block: FairnessResponse['endurance']; threshold: number }) {
   return (
-    <div className="bg-surface rounded-lg p-6">
+    <div className="bg-surface rounded-none p-6">
       <div className="flex items-baseline justify-between mb-4">
         <h3 className="text-xl font-semibold text-white">Endurance — Stint-Pace Stability</h3>
-        <span className={`text-xs px-2 py-1 rounded ${block.enabled ? 'bg-live/15 text-live' : 'bg-accent/15 text-accent'}`}>
+        <span className={`text-xs px-2 py-1 rounded-none ${block.enabled ? 'bg-live/15 text-live' : 'bg-accent/15 text-accent'}`}>
           {block.enabled ? 'Aggregate enabled' : `Needs ≥ ${threshold} endurance sessions`}
         </span>
       </div>

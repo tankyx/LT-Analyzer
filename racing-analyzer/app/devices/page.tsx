@@ -194,7 +194,7 @@ export default function DevicesPage() {
             type="button"
             onClick={() => router.push('/dashboard')}
             aria-label="Back to dashboard"
-            className="w-10 h-10 rounded-lg flex items-center justify-center hover:bg-surface-2"
+            className="w-10 h-10 rounded-none flex items-center justify-center hover:bg-surface-2"
           >
             <ArrowLeft size={18} />
           </button>
@@ -211,7 +211,7 @@ export default function DevicesPage() {
         </p>
 
         {/* Pairing */}
-        <section className="rounded-xl border border-line bg-surface p-4 flex flex-col gap-3" aria-label="Pair a board">
+        <section className="rounded-none border border-line bg-surface p-4 flex flex-col gap-3" aria-label="Pair a board">
           <div className="text-xs font-bold tracking-[.08em] uppercase text-muted flex items-center gap-2">
             <Link2 size={14} />
             Pair a board
@@ -225,12 +225,12 @@ export default function DevicesPage() {
                 maxLength={64}
                 required
                 aria-label="Board name"
-                className="flex-1 h-11 rounded-lg border border-line bg-canvas px-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+                className="flex-1 h-11 rounded-none border border-line bg-canvas px-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
               />
               <button
                 type="submit"
                 disabled={pairBusy || !pairLabel.trim()}
-                className="h-11 px-4 rounded-lg bg-accent text-accent-ink font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                className="h-11 px-4 rounded-none bg-accent text-accent-ink font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <Link2 size={16} />
                 {pairBusy ? 'Starting…' : 'Get pairing code'}
@@ -261,7 +261,7 @@ export default function DevicesPage() {
           )}
 
           {pairing && pairStatus === 'paired' && (
-            <div role="status" className="rounded-lg border border-live/60 bg-live/10 px-3 py-2 text-sm flex items-center gap-2">
+            <div role="status" className="rounded-none border border-live/60 bg-live/10 px-3 py-2 text-sm flex items-center gap-2">
               <Check size={16} className="text-live" />
               <span>
                 <span className="font-semibold">{pairing.label}</span> is paired. The board holds its token now.
@@ -273,7 +273,7 @@ export default function DevicesPage() {
           )}
 
           {pairing && pairStatus === 'expired' && (
-            <div role="status" className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2">
+            <div role="status" className="rounded-none border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2">
               The code for <span className="font-semibold">{pairing.label}</span> expired before the board used it.
               <button type="button" onClick={() => setPairing(null)} className="ml-auto text-xs underline">
                 Try again
@@ -283,13 +283,13 @@ export default function DevicesPage() {
         </section>
 
         {error && (
-          <div role="alert" className="rounded-lg border border-alarm/50 bg-alarm/10 px-3 py-2 text-sm text-alarm">
+          <div role="alert" className="rounded-none border border-alarm/50 bg-alarm/10 px-3 py-2 text-sm text-alarm">
             {error}
           </div>
         )}
 
         {/* Token list */}
-        <section className="rounded-xl border border-line bg-surface overflow-hidden" aria-label="Device tokens">
+        <section className="rounded-none border border-line bg-surface overflow-hidden" aria-label="Device tokens">
           <div className="px-4 py-3 border-b border-line text-xs font-bold tracking-[.08em] uppercase text-muted">
             Paired boards ({active.length})
           </div>
@@ -315,7 +315,7 @@ export default function DevicesPage() {
                     type="button"
                     onClick={() => revoke(t)}
                     aria-label={`Revoke ${t.label}`}
-                    className="shrink-0 h-10 px-3 rounded-lg text-sm font-medium text-alarm hover:bg-alarm/10 flex items-center gap-1.5"
+                    className="shrink-0 h-10 px-3 rounded-none text-sm font-medium text-alarm hover:bg-alarm/10 flex items-center gap-1.5"
                   >
                     <Trash2 size={15} />
                     <span className="hidden sm:inline">Revoke</span>
@@ -327,7 +327,7 @@ export default function DevicesPage() {
         </section>
 
         {revoked.length > 0 && (
-          <section className="rounded-xl border border-line bg-surface overflow-hidden" aria-label="Revoked tokens">
+          <section className="rounded-none border border-line bg-surface overflow-hidden" aria-label="Revoked tokens">
             <div className="px-4 py-3 border-b border-line text-xs font-bold tracking-[.08em] uppercase text-muted">
               Revoked ({revoked.length})
             </div>
@@ -344,7 +344,7 @@ export default function DevicesPage() {
         )}
 
         {/* Advanced: raw token */}
-        <details className="rounded-xl border border-line bg-surface">
+        <details className="rounded-none border border-line bg-surface">
           <summary className="cursor-pointer px-4 py-3 text-xs font-bold tracking-[.08em] uppercase text-muted select-none">
             Advanced: create a raw token (scripts, curl)
           </summary>
@@ -357,12 +357,12 @@ export default function DevicesPage() {
                 maxLength={64}
                 required
                 aria-label="Device label"
-                className="flex-1 h-11 rounded-lg border border-line bg-canvas px-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
+                className="flex-1 h-11 rounded-none border border-line bg-canvas px-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40"
               />
               <button
                 type="submit"
                 disabled={busy || !label.trim()}
-                className="h-11 px-4 rounded-lg border border-line bg-surface-2 font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                className="h-11 px-4 rounded-none border border-line bg-surface-2 font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <Plus size={16} />
                 {busy ? 'Creating…' : 'Create token'}
@@ -370,19 +370,19 @@ export default function DevicesPage() {
             </form>
 
             {fresh && (
-              <section className="rounded-xl border border-live/60 bg-live/10 p-4 flex flex-col gap-3" aria-label="New token">
+              <section className="rounded-none border border-live/60 bg-live/10 p-4 flex flex-col gap-3" aria-label="New token">
                 <div className="text-sm font-semibold">
                   Token for <span className="font-mono">{fresh.label}</span> — shown once, copy it now.
                 </div>
                 <div className="flex items-stretch gap-2">
-                  <code className="flex-1 min-w-0 rounded-lg border border-line bg-canvas px-3 py-2 font-mono text-xs break-all select-all">
+                  <code className="flex-1 min-w-0 rounded-none border border-line bg-canvas px-3 py-2 font-mono text-xs break-all select-all">
                     {fresh.token}
                   </code>
                   <button
                     type="button"
                     onClick={copy}
                     aria-label="Copy token"
-                    className="shrink-0 w-11 rounded-lg border border-line bg-surface flex items-center justify-center hover:bg-surface-2"
+                    className="shrink-0 w-11 rounded-none border border-line bg-surface flex items-center justify-center hover:bg-surface-2"
                   >
                     {copied ? <Check size={16} className="text-live" /> : <Copy size={16} />}
                   </button>

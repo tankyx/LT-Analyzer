@@ -72,7 +72,7 @@ const HelpDrawer: React.FC<HelpDrawerProps> = ({ onClose }) => {
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/60" />
       <div
         ref={ref}
-        className="relative flex flex-col gap-4 p-4 pb-[max(16px,env(safe-area-inset-bottom))] bg-surface border border-line rounded-t-2xl md:rounded-2xl w-full md:w-[520px] max-h-[85vh] md:max-h-[75vh] shadow-2xl"
+        className="relative flex flex-col gap-4 p-4 pb-[max(16px,env(safe-area-inset-bottom))] bg-surface border border-line rounded-t-none md:rounded-none w-full md:w-[520px] max-h-[85vh] md:max-h-[75vh] shadow-2xl"
       >
         <div className="flex items-center justify-between px-1">
           <h2 className="font-cond font-bold text-xl tracking-wide">DASHBOARD GUIDE</h2>
@@ -80,7 +80,7 @@ const HelpDrawer: React.FC<HelpDrawerProps> = ({ onClose }) => {
             type="button"
             onClick={onClose}
             aria-label="Close guide"
-            className="w-10 h-10 flex items-center justify-center rounded-lg text-muted hover:text-ink hover:bg-surface-2"
+            className="w-10 h-10 flex items-center justify-center rounded-none text-muted hover:text-ink hover:bg-surface-2"
           >
             <X size={18} />
           </button>
@@ -88,18 +88,18 @@ const HelpDrawer: React.FC<HelpDrawerProps> = ({ onClose }) => {
 
         <div className="flex-1 min-h-0 overflow-y-auto scroll-thin flex flex-col gap-3 -mx-1 px-1">
           {SECTIONS.map((s) => (
-            <div key={s.title} className="rounded-lg border border-line bg-canvas p-3">
+            <div key={s.title} className="rounded-none border border-line bg-canvas p-3">
               <h3 className="font-cond font-bold text-lg tracking-wide text-accent">{s.title}</h3>
               <p className="text-sm text-muted mt-1">{s.body}</p>
             </div>
           ))}
 
-          <div className="rounded-lg border border-line bg-surface-2 p-3">
+          <div className="rounded-none border border-line bg-surface-2 p-3">
             <h3 className="font-cond font-bold text-lg tracking-wide text-ink">Keyboard</h3>
             <ul className="mt-1 flex flex-col gap-1">
               {SHORTCUTS.map(([key, desc]) => (
                 <li key={key} className="flex items-center gap-2 text-sm text-muted">
-                  <kbd className="font-mono tabular text-xs px-1.5 py-0.5 rounded bg-surface border border-line text-ink">{key}</kbd>
+                  <kbd className="font-mono tabular text-xs px-1.5 py-0.5 rounded-none bg-surface border border-line text-ink">{key}</kbd>
                   {desc}
                 </li>
               ))}

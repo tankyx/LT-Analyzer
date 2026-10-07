@@ -55,7 +55,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
-      <body className={`${fontSans.variable} ${fontCond.variable} ${fontMono.variable} font-sans antialiased`}>
+      <body className={`${fontSans.variable} ${fontCond.variable} ${fontMono.variable} antialiased`}>
         <ThemeProvider>
           <AuthProvider>
             {children}

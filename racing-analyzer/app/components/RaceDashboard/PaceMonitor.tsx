@@ -142,7 +142,7 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
         <button
           type="button"
           onClick={load}
-          className="h-10 px-4 rounded-lg border border-line bg-surface-2 text-sm font-semibold"
+          className="h-10 px-4 rounded-none border border-line bg-surface-2 text-sm font-semibold"
         >
           Try again
         </button>
@@ -165,13 +165,13 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
   return (
     <div className="p-3 md:p-4 flex flex-col gap-3">
       {/* Verdict — the one thing a crew needs at a glance. */}
-      <div className={`rounded-xl border p-3 md:p-4 ${verdictCopy.tone}`}>
+      <div className={`rounded-none border p-3 md:p-4 ${verdictCopy.tone}`}>
         <div className="flex items-center justify-between gap-3">
           <span className="font-cond font-bold text-xl md:text-2xl tracking-wide uppercase">
             {verdictCopy.title}
           </span>
           {kart && (
-            <span className="font-mono tabular text-xs px-2 py-1 rounded-md bg-surface/70 text-ink shrink-0">
+            <span className="font-mono tabular text-xs px-2 py-1 rounded-none bg-surface/70 text-ink shrink-0">
               {kart.label}
             </span>
           )}
@@ -180,7 +180,7 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
       </div>
 
       {/* Pace now, against the field at the same moment. */}
-      <div className="rounded-xl border border-line bg-surface p-3 md:p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="rounded-none border border-line bg-surface p-3 md:p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="flex flex-col gap-1">
           <span className="text-[10px] md:text-[11px] font-bold tracking-[.08em] uppercase text-muted">
             This stint vs field
@@ -228,14 +228,14 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
       </div>
 
       {/* Stint by stint. */}
-      <div className="rounded-xl border border-line bg-surface overflow-hidden">
+      <div className="rounded-none border border-line bg-surface overflow-hidden">
         <div className="flex items-center justify-between px-3 md:px-4 h-11 border-b border-line bg-surface-2">
           <h3 className="font-cond font-bold text-lg tracking-wide">STINTS</h3>
           <button
             type="button"
             onClick={load}
             aria-label="Refresh pace"
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-muted hover:text-ink hover:bg-surface"
+            className="w-9 h-9 rounded-none flex items-center justify-center text-muted hover:text-ink hover:bg-surface"
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
           </button>
@@ -256,7 +256,7 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
                   key={stint.stint_index}
                   className={`flex items-center gap-3 px-3 md:px-4 py-2.5 ${isCurrent ? 'bg-accent/[.07]' : ''}`}
                 >
-                  <div className="w-8 h-8 rounded-lg bg-surface-2 font-cond font-bold flex items-center justify-center shrink-0">
+                  <div className="w-8 h-8 rounded-none bg-surface-2 font-cond font-bold flex items-center justify-center shrink-0">
                     {stint.stint_index + 1}
                   </div>
                   <div className="flex flex-col min-w-0 flex-1">

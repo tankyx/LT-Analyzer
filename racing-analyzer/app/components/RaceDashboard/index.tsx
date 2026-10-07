@@ -21,7 +21,7 @@ import PitAlertTarget, {
   targetIdsFor,
 } from './PitAlertTarget';
 import AlertStack from './AlertStack';
-import StandingsRow, { STANDINGS_GRID, PitAlertButton } from './StandingsRow';
+import StandingsRow, { PitAlertButton } from './StandingsRow';
 import { getTeamClass, displayTeamName } from './lib/teamName';
 import { useTheme } from '../../contexts/ThemeContext';
 import { AlertTriangle, Car, Clock, Eye, Gauge, Info, LineChart, List, Settings, Star, X } from 'lucide-react';
@@ -1101,7 +1101,11 @@ const RaceDashboard = () => {
     : availableTracks.map(t => ({ track_id: t.id, track_name: t.track_name, active: false }));
 
   const locateTeam = (kart: string) => {
-    document.getElementById(`team-${kart}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // The tower renders twice (desktop pinned aside + phone panel); scroll
+    // the instance that is actually visible.
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>(`[data-kart="${kart}"]`));
+    const visible = nodes.find((el) => el.offsetParent !== null) ?? nodes[0];
+    visible?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const StandingsTab = (
@@ -1117,22 +1121,7 @@ const RaceDashboard = () => {
         )}
       </div>
 
-      <div className="rounded-xl border border-line bg-surface overflow-hidden panel" role="table" aria-label="Standings">
-        <div
-          role="row"
-          className={`${STANDINGS_GRID} hidden md:grid h-9 px-4 text-[11px] font-bold tracking-[.08em] uppercase text-muted border-b border-line bg-surface-2`}
-        >
-          <div role="columnheader">Pos</div>
-          <div role="columnheader">Team</div>
-          <div role="columnheader" className="md:hidden" />
-          <div role="columnheader">Status</div>
-          <div role="columnheader">Last</div>
-          <div role="columnheader">Best</div>
-          <div role="columnheader" className="text-right">Gap</div>
-          <div role="columnheader" className="text-right">{isQualificationMode ? 'Laps' : 'Stops'}</div>
-          <div role="columnheader" className="text-center">Watch</div>
-        </div>
-
+      <div className="rounded-none border border-line bg-surface overflow-hidden tower-sweep" role="table" aria-label="Standings">
         {filteredTeams.length > 0 ? (
           sortedTeams.map(team => (
             <StandingsRow
@@ -1157,7 +1146,7 @@ const RaceDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setTrackSheetOpen(true)}
-                  className="mt-4 h-10 px-4 rounded-lg border border-line bg-surface-2 text-sm font-semibold text-ink"
+                  className="mt-4 h-10 px-4 rounded-none border border-line bg-surface-2 text-sm font-semibold text-ink"
                 >
                   Pick a live track
                 </button>
@@ -1168,7 +1157,7 @@ const RaceDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedClass('all')}
-                  className="mt-4 h-10 px-4 rounded-lg border border-line bg-surface-2 text-sm font-semibold text-ink"
+                  className="mt-4 h-10 px-4 rounded-none border border-line bg-surface-2 text-sm font-semibold text-ink"
                 >
                   Show all teams
                 </button>
@@ -1203,7 +1192,7 @@ const RaceDashboard = () => {
         />
       )}
 
-      <div className="rounded-xl border border-line bg-surface overflow-hidden panel">
+      <div className="rounded-none border border-line bg-surface overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 h-12 border-b border-line bg-surface-2">
           <h2 className="font-cond font-bold text-lg tracking-wide flex items-center gap-2">
             <Eye size={18} className="text-accent" />
@@ -1211,12 +1200,12 @@ const RaceDashboard = () => {
             <span className="font-mono tabular text-xs px-1.5 py-px rounded-full bg-line text-muted">{monitoredTeams.length}</span>
           </h2>
           {!isQualificationMode && (
-            <div className="inline-flex gap-1 p-[3px] rounded-lg bg-surface border border-line" role="group" aria-label="Gap mode">
+            <div className="inline-flex gap-1 p-[3px] rounded-none bg-surface border border-line" role="group" aria-label="Gap mode">
               <button
                 type="button"
                 aria-pressed={!showAdjustedGap}
                 onClick={() => setShowAdjustedGap(false)}
-                className={`h-8 px-3 rounded-md text-xs font-semibold ${!showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
+                className={`h-8 px-3 rounded-none text-xs font-semibold ${!showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
               >
                 Raw
               </button>
@@ -1224,7 +1213,7 @@ const RaceDashboard = () => {
                 type="button"
                 aria-pressed={showAdjustedGap}
                 onClick={() => setShowAdjustedGap(true)}
-                className={`h-8 px-3 rounded-md text-xs font-semibold ${showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
+                className={`h-8 px-3 rounded-none text-xs font-semibold ${showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
               >
                 Adjusted
               </button>
@@ -1234,7 +1223,7 @@ const RaceDashboard = () => {
             <button
               type="button"
               onClick={() => { setIsUserUpdate(true); setMonitoredTeams([]); }}
-              className="h-8 px-2.5 rounded-md text-xs font-semibold text-muted hover:text-alarm hover:bg-alarm/10"
+              className="h-8 px-2.5 rounded-none text-xs font-semibold text-muted hover:text-alarm hover:bg-alarm/10"
             >
               Clear all
             </button>
@@ -1254,13 +1243,13 @@ const RaceDashboard = () => {
               return (
                 <div
                   key={kart}
-                  className={`rounded-lg border p-3 flex flex-col gap-2 transition-colors ${
+                  className={`rounded-none border p-3 flex flex-col gap-2 transition-colors ${
                     inPit ? 'border-alarm/50 bg-alarm/[.07]' : 'border-line bg-canvas'
                   } ${hoveredTeam === kart ? 'ring-2 ring-info/60' : ''}`}
                   style={{ boxShadow: teamColors[kart] ? `inset 3px 0 0 ${teamColors[kart]}` : undefined }}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-surface-2 font-cond font-bold text-base flex items-center justify-center shrink-0">
+                    <div className="w-8 h-8 rounded-none bg-surface-2 font-cond font-bold text-base flex items-center justify-center shrink-0">
                       {data.position}
                     </div>
                     <div className="flex flex-col min-w-0 flex-1">
@@ -1282,7 +1271,7 @@ const RaceDashboard = () => {
                         type="button"
                         onClick={() => toggleTeamMonitoring(kart)}
                         aria-label={`Stop monitoring ${data.team_name}`}
-                        className="w-9 h-9 rounded-lg flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+                        className="w-9 h-9 rounded-none flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
                       >
                         <X size={16} />
                       </button>
@@ -1340,7 +1329,7 @@ const RaceDashboard = () => {
 
   const ChartTab = (
     <div className="flex flex-col gap-3">
-      <div className="rounded-xl border border-line bg-surface p-3 md:p-4 panel">
+      <div className="rounded-none border border-line bg-surface p-3 md:p-4">
         <TimeDeltaChart
           gapHistory={gapHistory}
           teams={teams}
@@ -1352,7 +1341,7 @@ const RaceDashboard = () => {
           requiredPitStops={requiredPitStops}
         />
       </div>
-      <div className="rounded-xl border border-line bg-surface p-4 text-xs text-muted">
+      <div className="rounded-none border border-line bg-surface p-4 text-xs text-muted">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="flex items-center gap-2">
             <span className="h-px w-5 bg-muted" /><span className="h-3 w-3 rounded-full bg-muted" />
@@ -1380,7 +1369,7 @@ const RaceDashboard = () => {
   ];
 
   return (
-    <div className="min-h-screen canvas text-ink">
+    <div className="h-dvh canvas text-ink flex flex-col overflow-hidden rise-in">
       <AppBar
         trackName={selectedTrackName}
         sessionLabel={sessionLabel}
@@ -1396,120 +1385,113 @@ const RaceDashboard = () => {
         onOpenDevices={() => router.push('/devices')}
       />
 
-      <div className="flex items-start">
-        {/* Desktop track rail */}
-        <aside className="hidden lg:block w-64 shrink-0 sticky top-14 h-[calc(100vh-56px)]">
-          <TrackRail
-            tracks={railTracks}
-            selectedTrackId={selectedTrackId}
-            onSelect={setSelectedTrackId}
-            variant="rail"
-            isAdmin={user?.role === 'admin'}
-            onOpenAdmin={() => router.push('/admin')}
-          />
-        </aside>
-
-        <main className="flex-1 min-w-0 p-3 md:p-5 pb-24 md:pb-8 flex flex-col gap-3 md:gap-4">
-          {!sessionActive && sessionStatus && (
-            <div className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2">
-              <AlertTriangle size={16} className="text-accent shrink-0" />
-              <span>{sessionStatus.trackName || selectedTrackName}: no active session right now.</span>
-            </div>
-          )}
-
-          {dataWarning && (
-            <div
-              role="status"
-              className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2"
-            >
-              <AlertTriangle size={16} className="text-accent shrink-0" />
-              <span className="flex-1 min-w-0">{dataWarning}</span>
-              <button
-                type="button"
-                onClick={() => { setDataWarning(null); refreshFleetState(); }}
-                className="shrink-0 h-7 px-2.5 rounded-md text-xs font-semibold bg-surface-2 hover:bg-line"
-              >
-                Retry
-              </button>
-              <button
-                type="button"
-                onClick={() => setDataWarning(null)}
-                aria-label="Dismiss warning"
-                className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )}
-
-          <MyTeamStrip
-            teams={teams}
-            myTeam={myTeam}
-            onSelectMyTeam={(kart) => {
-              setIsUserUpdate(true);
-              setMyTeam(kart);
-            }}
-            isQualificationMode={isQualificationMode}
-            requiredPitStops={requiredPitStops}
-            onPitAlert={(kart, teamName) => triggerPitAlert(kart, teamName)}
-            pitAlertTargetSlot={
-              activeBoards.length > 0 ? (
-                <PitAlertTarget
-                  devices={activeBoards}
-                  value={pitAlertTarget}
-                  onChange={(v) => {
-                    setPitAlertTarget(v);
-                    savePitAlertTarget(v);
-                  }}
-                />
-              ) : undefined
-            }
-          />
-
-          <TabbedInterface tabs={tabs} defaultTab="standings" isDarkMode={isDarkMode} onTabChange={setActiveTab}>
-            {StandingsTab}
-            {MonitoredTeamsTab}
-            <PaceMonitor
-              trackId={selectedTrackId}
-              teamName={myTeamName}
-              sessionId={currentSessionId}
-              updateTick={liveUpdateTick}
-              isActive={activeTab === 'pace'}
-            />
-            {ChartTab}
-            <div className="rounded-xl border border-line bg-surface overflow-hidden panel">
-              <StintPlanner
-                isDarkMode={isDarkMode}
-                myTeam={myTeam}
-                teams={teams}
-                isSimulating={true}
-                sessionInfo={sessionInfo}
-                trackId={selectedTrackId}
-                trackName={selectedTrackName}
-              />
-            </div>
-            <div className="rounded-xl border border-line bg-surface overflow-hidden panel">
-              <FleetTracker
-                isDarkMode={isDarkMode}
-                fleetBoard={fleetBoard}
-                registry={fleetRegistry}
-                trackId={selectedTrackId}
-                sessionId={currentSessionId}
-                isActive={activeTab === 'fleet'}
-                canEditRegistry={!!user}
-                onReassign={(kartId) => setAssignmentEntry({ open: true, defaultKartId: kartId })}
-                onAddAssignment={() => setAssignmentEntry({ open: true })}
-                onRegistryChange={refreshRegistry}
-              />
-            </div>
-            {user?.role === 'admin' && (
-              <div className="rounded-xl border border-line bg-surface overflow-hidden panel">
-                <AdminPanel isDarkMode={isDarkMode} />
+      <TabbedInterface
+        tabs={tabs}
+        defaultTab="standings"
+        isDarkMode={isDarkMode}
+        onTabChange={setActiveTab}
+        pinnedId="standings"
+        top={
+          <>
+            {!sessionActive && sessionStatus && (
+              <div className="rounded-none border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2">
+                <AlertTriangle size={16} className="text-accent shrink-0" />
+                <span>{sessionStatus.trackName || selectedTrackName}: no active session right now.</span>
               </div>
             )}
-          </TabbedInterface>
-        </main>
-      </div>
+
+            {dataWarning && (
+              <div
+                role="status"
+                className="rounded-none border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2"
+              >
+                <AlertTriangle size={16} className="text-accent shrink-0" />
+                <span className="flex-1 min-w-0">{dataWarning}</span>
+                <button
+                  type="button"
+                  onClick={() => { setDataWarning(null); refreshFleetState(); }}
+                  className="shrink-0 h-7 px-2.5 rounded-none text-xs font-semibold bg-surface-2 hover:bg-line"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDataWarning(null)}
+                  aria-label="Dismiss warning"
+                  className="shrink-0 w-7 h-7 rounded-none flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
+            <MyTeamStrip
+              teams={teams}
+              myTeam={myTeam}
+              onSelectMyTeam={(kart) => {
+                setIsUserUpdate(true);
+                setMyTeam(kart);
+              }}
+              isQualificationMode={isQualificationMode}
+              requiredPitStops={requiredPitStops}
+              onPitAlert={(kart, teamName) => triggerPitAlert(kart, teamName)}
+              pitAlertTargetSlot={
+                activeBoards.length > 0 ? (
+                  <PitAlertTarget
+                    devices={activeBoards}
+                    value={pitAlertTarget}
+                    onChange={(v) => {
+                      setPitAlertTarget(v);
+                      savePitAlertTarget(v);
+                    }}
+                  />
+                ) : undefined
+              }
+            />
+          </>
+        }
+      >
+        {StandingsTab}
+        {MonitoredTeamsTab}
+        <PaceMonitor
+          trackId={selectedTrackId}
+          teamName={myTeamName}
+          sessionId={currentSessionId}
+          updateTick={liveUpdateTick}
+          isActive={activeTab === 'pace'}
+        />
+        {ChartTab}
+        <div className="rounded-none border border-line bg-surface overflow-hidden">
+          <StintPlanner
+            isDarkMode={isDarkMode}
+            myTeam={myTeam}
+            teams={teams}
+            isSimulating={true}
+            sessionInfo={sessionInfo}
+            trackId={selectedTrackId}
+            trackName={selectedTrackName}
+          />
+        </div>
+        <div className="rounded-none border border-line bg-surface overflow-hidden">
+          <FleetTracker
+            isDarkMode={isDarkMode}
+            fleetBoard={fleetBoard}
+            registry={fleetRegistry}
+            trackId={selectedTrackId}
+            sessionId={currentSessionId}
+            isActive={activeTab === 'fleet'}
+            canEditRegistry={!!user}
+            onReassign={(kartId) => setAssignmentEntry({ open: true, defaultKartId: kartId })}
+            onAddAssignment={() => setAssignmentEntry({ open: true })}
+            onRegistryChange={refreshRegistry}
+          />
+        </div>
+        {user?.role === 'admin' && (
+          <div className="rounded-none border border-line bg-surface overflow-hidden">
+            <AdminPanel isDarkMode={isDarkMode} />
+          </div>
+        )}
+      </TabbedInterface>
 
       {trackSheetOpen && (
         <TrackRail

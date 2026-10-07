@@ -24,7 +24,7 @@ const ClassFilter: React.FC<ClassFilterProps> = ({
     <div
       role="group"
       aria-label="Filter by class"
-      className="inline-flex gap-1 p-[3px] rounded-lg bg-surface border border-line"
+      className="inline-flex gap-1 p-[3px] rounded-none bg-surface border border-line"
     >
       {OPTIONS.map((opt) => {
         const active = selectedClass === opt.value;
@@ -35,7 +35,7 @@ const ClassFilter: React.FC<ClassFilterProps> = ({
             type="button"
             aria-pressed={active}
             onClick={() => onClassChange(opt.value)}
-            className={`h-9 md:h-8 px-3 rounded-md text-[13px] font-semibold transition-colors ${
+            className={`h-9 md:h-8 px-3 rounded-none text-[13px] font-semibold transition-colors ${
               active ? 'bg-surface-2 text-ink' : 'text-muted hover:text-ink'
             }`}
           >

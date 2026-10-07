@@ -92,7 +92,7 @@ const PitAlertTarget: React.FC<PitAlertTargetProps> = ({ devices, value, onChang
         aria-label="Pit alert target"
         value={known ? String(value) : 'all'}
         onChange={(e) => onChange(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-        className="h-9 md:h-8 max-w-[9.5rem] rounded-md border border-line bg-surface text-ink text-xs px-1.5 focus:outline-none focus:ring-2 focus:ring-accent/40"
+        className="h-9 md:h-8 max-w-[9.5rem] rounded-none border border-line bg-surface text-ink text-xs px-1.5 focus:outline-none focus:ring-2 focus:ring-accent/40"
       >
         <option value="all">All boards</option>
         {active.map((d) => (

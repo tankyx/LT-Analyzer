@@ -644,7 +644,7 @@ export default function DataPage() {
         )}
 
         {activeTab === 'search' && (
-          <div className="bg-surface rounded-lg p-6 mb-6">
+          <div className="bg-surface rounded-none p-6 mb-6">
             <h2 className="text-xl font-semibold text-white mb-2">Find a driver</h2>
             <p className="text-sm text-muted mb-4">
               Search by driver/team name. Click a result to open the full profile with cross-track history, consistency stats,
@@ -656,14 +656,14 @@ export default function DataPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Start typing a name..."
-                className="w-full px-4 py-3 bg-surface-2 text-white text-lg rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+                className="w-full px-4 py-3 bg-surface-2 text-white text-lg rounded-none focus:outline-none focus:ring-2 focus:ring-info"
                 autoFocus
               />
               {searching && <div className="absolute right-3 top-3 text-muted">Searching...</div>}
             </div>
 
             {searchQuery && searchResults.length > 0 && (
-              <div className="mt-4 bg-surface-2 rounded-lg max-h-96 overflow-y-auto">
+              <div className="mt-4 bg-surface-2 rounded-none max-h-96 overflow-y-auto">
                 {searchResults.map((team, idx) => (
                   <div
                     key={`${team.name}-${idx}`}
@@ -695,12 +695,12 @@ export default function DataPage() {
         <>
 
         {/* Track Selector */}
-        <div className="bg-surface rounded-lg p-6 mb-6">
+        <div className="bg-surface rounded-none p-6 mb-6">
           <h2 className="text-xl font-semibold text-white mb-4">Select Track</h2>
           <select
             value={selectedTrackId}
             onChange={(e) => setSelectedTrackId(parseInt(e.target.value))}
-            className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+            className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
           >
             {tracks.map((track) => (
               <option key={track.id} value={track.id}>
@@ -711,12 +711,12 @@ export default function DataPage() {
         </div>
 
         {/* Session Selector */}
-        <div className="bg-surface rounded-lg p-6 mb-6">
+        <div className="bg-surface rounded-none p-6 mb-6">
           <h2 className="text-xl font-semibold text-white mb-4">Filter by Session (Optional)</h2>
           <select
             value={globalSessionFilter || ''}
             onChange={(e) => setGlobalSessionFilter(e.target.value ? parseInt(e.target.value) : null)}
-            className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+            className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
           >
             <option value="">All Sessions</option>
             {allSessions.map((session) => (
@@ -733,7 +733,7 @@ export default function DataPage() {
         </div>
 
         {/* Search Section */}
-        <div className="bg-surface rounded-lg p-6 mb-6">
+        <div className="bg-surface rounded-none p-6 mb-6">
           <h2 className="text-xl font-semibold text-white mb-4">Search Teams</h2>
           <div className="relative">
             <input
@@ -741,7 +741,7 @@ export default function DataPage() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search for a team name..."
-              className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+              className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
             />
             {searching && (
               <div className="absolute right-3 top-2.5 text-muted">Searching...</div>
@@ -750,7 +750,7 @@ export default function DataPage() {
 
           {/* Search Results */}
           {searchResults.length > 0 && (
-            <div className="mt-4 bg-surface-2 rounded-lg max-h-60 overflow-y-auto">
+            <div className="mt-4 bg-surface-2 rounded-none max-h-60 overflow-y-auto">
               {searchResults.map((team, idx) => (
                 <div
                   key={`${team.name}-${idx}`}
@@ -766,13 +766,13 @@ export default function DataPage() {
         </div>
 
         {/* Top Teams Section */}
-        <div className="bg-surface rounded-lg p-6 mb-6">
+        <div className="bg-surface rounded-none p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold text-white">Top Teams</h2>
             <select
               value={topTeamsLimit}
               onChange={(e) => setTopTeamsLimit(parseInt(e.target.value))}
-              className="px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+              className="px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
             >
               <option value={10}>Top 10</option>
               <option value={20}>Top 20</option>
@@ -881,7 +881,7 @@ export default function DataPage() {
 
         {/* Mass Delete Section - Admin Only */}
         {user?.role === 'admin' && (
-          <div className="bg-surface rounded-lg p-6 mb-6">
+          <div className="bg-surface rounded-none p-6 mb-6">
             <h2 className="text-xl font-semibold text-white mb-4">
               Mass Delete Laps (Track-Wide)
             </h2>
@@ -902,7 +902,7 @@ export default function DataPage() {
                   placeholder="e.g., 55.0"
                   value={massDeleteThreshold || ''}
                   onChange={(e) => setMassDeleteThreshold(parseFloat(e.target.value) || 0)}
-                  className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+                  className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
                 />
                 <p className="text-xs text-muted mt-1">
                   Laps under {massDeleteThreshold || 0}s will be deleted
@@ -914,7 +914,7 @@ export default function DataPage() {
                 <select
                   value={massDeleteType}
                   onChange={(e) => setMassDeleteType(e.target.value)}
-                  className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+                  className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
                 >
                   <option value="lap_history">Individual Laps (lap_history)</option>
                   <option value="best_laps">Best Lap Records (lap_times)</option>
@@ -930,7 +930,7 @@ export default function DataPage() {
                 <button
                   onClick={handleMassDelete}
                   disabled={!massDeleteThreshold || massDeleteThreshold <= 0 || massDeleting}
-                  className="w-full px-4 py-2 bg-alarm text-white rounded-lg hover:bg-alarm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full px-4 py-2 bg-alarm text-white rounded-none hover:bg-alarm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {massDeleting ? 'Deleting...' : 'Delete Laps'}
                 </button>
@@ -938,7 +938,7 @@ export default function DataPage() {
             </div>
 
             {massDeleteResult && (
-              <div className={`mt-4 p-4 rounded-lg ${
+              <div className={`mt-4 p-4 rounded-none ${
                 massDeleteResult.success
                   ? 'bg-live/15 text-live'
                   : 'bg-alarm/15 text-alarm'
@@ -958,7 +958,7 @@ export default function DataPage() {
 
         {/* Selected Teams */}
         {selectedTeams.length > 0 && (
-          <div className="bg-surface rounded-lg p-6 mb-6">
+          <div className="bg-surface rounded-none p-6 mb-6">
             <h2 className="text-xl font-semibold text-white mb-4">
               Selected Teams ({selectedTeams.length})
             </h2>
@@ -966,7 +966,7 @@ export default function DataPage() {
               {selectedTeams.map((team) => (
                 <div
                   key={team}
-                  className="bg-info text-white px-4 py-2 rounded-lg flex items-center gap-2"
+                  className="bg-info text-white px-4 py-2 rounded-none flex items-center gap-2"
                 >
                   <span>{team}</span>
                   <button
@@ -983,7 +983,7 @@ export default function DataPage() {
 
         {/* No Common Sessions Message */}
         {selectedTeams.length >= 2 && commonSessions.length === 0 && (
-          <div className="bg-accent/15 border border-accent rounded-lg p-4 mb-6">
+          <div className="bg-accent/15 border border-accent rounded-none p-4 mb-6">
             <p className="text-accent">
               <strong>Note:</strong> These teams have not raced together in the same session.
               Showing comparison data from all their sessions combined.
@@ -994,14 +994,14 @@ export default function DataPage() {
 
         {/* Session Selector */}
         {commonSessions.length > 0 && (
-          <div className="bg-surface rounded-lg p-6 mb-6">
+          <div className="bg-surface rounded-none p-6 mb-6">
             <h2 className="text-xl font-semibold text-white mb-4">
               Select Session (showing only sessions where all teams participated)
             </h2>
             <select
               value={selectedSession || ''}
               onChange={(e) => setSelectedSession(e.target.value ? parseInt(e.target.value) : null)}
-              className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+              className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
             >
               <option value="">All Sessions</option>
               {commonSessions.map((session) => (
@@ -1028,7 +1028,7 @@ export default function DataPage() {
               if (!stats) return null;
 
               return (
-                <div key={teamName} className="bg-surface rounded-lg p-6">
+                <div key={teamName} className="bg-surface rounded-none p-6">
                   <h3 className="text-lg font-semibold text-white mb-4 capitalize">{teamName}</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
@@ -1066,14 +1066,14 @@ export default function DataPage() {
 
         {/* All Laps Section - Single Team Only */}
         {selectedTeams.length === 1 && (
-          <div className="bg-surface rounded-lg p-6 mb-6">
+          <div className="bg-surface rounded-none p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold text-white">
                 All Laps - {selectedTeams[0]} ({allLapsTotalCount} total)
               </h2>
               <button
                 onClick={() => router.push(`/team/${encodeURIComponent(selectedTeams[0])}`)}
-                className="px-4 py-2 bg-info text-white rounded-lg hover:bg-info transition-colors flex items-center gap-2"
+                className="px-4 py-2 bg-info text-white rounded-none hover:bg-info transition-colors flex items-center gap-2"
               >
                 📊 View Full Profile
               </button>
@@ -1142,14 +1142,14 @@ export default function DataPage() {
                       <button
                         onClick={() => setAllLapsPage(Math.max(0, allLapsPage - 1))}
                         disabled={allLapsPage === 0}
-                        className="px-4 py-2 bg-surface-2 text-white rounded-lg hover:bg-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-4 py-2 bg-surface-2 text-white rounded-none hover:bg-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Previous
                       </button>
                       <button
                         onClick={() => setAllLapsPage(allLapsPage + 1)}
                         disabled={(allLapsPage + 1) * allLapsPerPage >= allLapsTotalCount}
-                        className="px-4 py-2 bg-surface-2 text-white rounded-lg hover:bg-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-4 py-2 bg-surface-2 text-white rounded-none hover:bg-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Next
                       </button>
@@ -1169,7 +1169,7 @@ export default function DataPage() {
         {comparisonData.length >= 2 && (
           <div className="space-y-6">
             {/* Best Lap Time Comparison */}
-            <div className="bg-surface rounded-lg p-6">
+            <div className="bg-surface rounded-none p-6">
               <h2 className="text-xl font-semibold text-white mb-4">Best Lap Time Comparison</h2>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={comparisonData}>
@@ -1187,7 +1187,7 @@ export default function DataPage() {
             </div>
 
             {/* Average Lap Time Comparison */}
-            <div className="bg-surface rounded-lg p-6">
+            <div className="bg-surface rounded-none p-6">
               <h2 className="text-xl font-semibold text-white mb-4">Average Lap Time Comparison</h2>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={comparisonData}>
@@ -1208,7 +1208,7 @@ export default function DataPage() {
             {Object.keys(lapDetails).length > 0 && (
               <>
                 {/* Stint Selector */}
-                <div className="bg-surface rounded-lg p-6">
+                <div className="bg-surface rounded-none p-6">
                   <h2 className="text-xl font-semibold text-white mb-4">Select Stint or Lap Range</h2>
 
                   {/* Stint Dropdown */}
@@ -1218,7 +1218,7 @@ export default function DataPage() {
                       <select
                         value={selectedStint}
                         onChange={(e) => handleStintSelection(e.target.value)}
-                        className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+                        className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
                       >
                         <option value="">Custom Range</option>
                         {teamStints.map((teamStint) =>
@@ -1246,7 +1246,7 @@ export default function DataPage() {
                           setStintStart(parseInt(e.target.value) || 1);
                           setSelectedStint(''); // Clear stint selection when manually changing
                         }}
-                        className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+                        className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
                         min={1}
                       />
                     </div>
@@ -1259,7 +1259,7 @@ export default function DataPage() {
                           setStintEnd(parseInt(e.target.value) || 50);
                           setSelectedStint(''); // Clear stint selection when manually changing
                         }}
-                        className="w-full px-4 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+                        className="w-full px-4 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
                         min={stintStart}
                       />
                     </div>
@@ -1270,7 +1270,7 @@ export default function DataPage() {
                 </div>
 
                 {/* Selected Stint Lap Times */}
-                <div className="bg-surface rounded-lg p-6">
+                <div className="bg-surface rounded-none p-6">
                   <h2 className="text-xl font-semibold text-white mb-4">
                     Lap Times Comparison (Laps {stintStart}-{stintEnd})
                   </h2>
@@ -1320,7 +1320,7 @@ export default function DataPage() {
                 </div>
 
                 {/* Full Race with 10-Lap Moving Average */}
-                <div className="bg-surface rounded-lg p-6">
+                <div className="bg-surface rounded-none p-6">
                   <h2 className="text-xl font-semibold text-white mb-4">
                     Full Race Pace (10-Lap Rolling Average)
                   </h2>
@@ -1372,7 +1372,7 @@ export default function DataPage() {
 
                 {/* Lap-by-Lap Comparison Table */}
                 {selectedTeams.length === 2 && (
-                  <div className="bg-surface rounded-lg p-6">
+                  <div className="bg-surface rounded-none p-6">
                     <h2 className="text-xl font-semibold text-white mb-4">
                       Lap-by-Lap Comparison
                     </h2>
@@ -1459,7 +1459,7 @@ export default function DataPage() {
         {/* Delete Confirmation Dialog */}
         {deleteDialogOpen && teamToDelete && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-surface rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="bg-surface rounded-none p-6 max-w-md w-full mx-4">
               <h3 className="text-xl font-semibold text-white mb-4">Delete Best Lap?</h3>
               <p className="text-ink mb-6">
                 Are you sure you want to delete the best lap time of{' '}
@@ -1472,14 +1472,14 @@ export default function DataPage() {
                 <button
                   onClick={cancelDeleteBestLap}
                   disabled={deletingLap}
-                  className="px-4 py-2 bg-line text-white rounded-lg hover:bg-line transition-colors disabled:opacity-50"
+                  className="px-4 py-2 bg-line text-white rounded-none hover:bg-line transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={confirmDeleteBestLap}
                   disabled={deletingLap}
-                  className="px-4 py-2 bg-alarm text-white rounded-lg hover:bg-alarm transition-colors disabled:opacity-50"
+                  className="px-4 py-2 bg-alarm text-white rounded-none hover:bg-alarm transition-colors disabled:opacity-50"
                 >
                   {deletingLap ? 'Deleting...' : 'Delete'}
                 </button>
@@ -1712,7 +1712,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
   const fmtRel = (v: number) => v.toFixed(4);
 
   return (
-    <div className="bg-surface rounded-lg p-6 mb-6">
+    <div className="bg-surface rounded-none p-6 mb-6">
       <h2 className="text-xl font-semibold text-white mb-2">Kart-Draw Fairness — {trackName || 'select a track'}</h2>
       <p className="text-sm text-muted mb-4">
         The direct test for kart-draw favouritism is the <b>variance-deficit test</b> below. For each of a driver&apos;s
@@ -1735,7 +1735,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
           <select
             value={trackId ?? ''}
             onChange={e => setTrackId(parseInt(e.target.value))}
-            className="px-3 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+            className="px-3 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
           >
             {tracks.map(t => (
               <option key={t.id} value={t.id}>{t.track_name}</option>
@@ -1753,7 +1753,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
               const v = parseInt(e.target.value);
               if (!isNaN(v)) setMinSessions(Math.max(2, Math.min(50, v)));
             }}
-            className="w-20 px-3 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+            className="w-20 px-3 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
           />
         </div>
         <div>
@@ -1762,7 +1762,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
             value={layoutId ?? ''}
             onChange={e => setLayoutId(e.target.value === '' ? null : parseInt(e.target.value))}
             disabled={layouts.length === 0}
-            className="px-3 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info disabled:opacity-50"
+            className="px-3 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info disabled:opacity-50"
           >
             <option value="">
               {layouts.length === 0 ? 'no layouts configured' : 'all layouts'}
@@ -1785,7 +1785,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
           <select
             value={windowMonths}
             onChange={e => setWindowMonths(parseInt(e.target.value))}
-            className="px-3 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+            className="px-3 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
           >
             <option value={3}>3</option>
             <option value={6}>6</option>
@@ -1802,7 +1802,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
             value={minFieldBest}
             onChange={e => setMinFieldBest(e.target.value)}
             placeholder="any"
-            className="w-24 px-3 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+            className="w-24 px-3 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
           />
         </div>
         <div>
@@ -1813,7 +1813,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
             value={maxFieldBest}
             onChange={e => setMaxFieldBest(e.target.value)}
             placeholder="any"
-            className="w-24 px-3 py-2 bg-surface-2 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-info"
+            className="w-24 px-3 py-2 bg-surface-2 text-white rounded-none focus:outline-none focus:ring-2 focus:ring-info"
           />
         </div>
         <div className="flex flex-col text-xs text-muted max-w-xs">
@@ -1823,7 +1823,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
       </div>
 
       {configs && configs.session_count > 0 && (
-        <div className="bg-canvas rounded-lg p-3 mb-4">
+        <div className="bg-canvas rounded-none p-3 mb-4">
           <div className="text-xs text-muted mb-2">
             Session field-best distribution ({configs.session_count} sessions, {configs.field_best_min}s–{configs.field_best_max}s).
             Peaks = layouts. Suggested splits at largest gaps:{' '}
@@ -1871,7 +1871,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
       {data && !loading && <VarianceDeficitPanel drivers={data} router={router} />}
 
       {data && !loading && scatterData.length > 0 && (
-        <div className="bg-canvas rounded-lg p-3 mb-4">
+        <div className="bg-canvas rounded-none p-3 mb-4">
           <div className="text-xs text-ink mb-2">
             <b>Consistency of relative pace</b> — each dot is a driver. X = σ of their session-best ÷ field median
             (low = tight), Y = mean of that ratio (&lt; 1 = faster than field). Descriptive only: low-σ / fast drivers
@@ -1926,7 +1926,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
                     if (!active || !payload || payload.length === 0) return null;
                     const p = payload[0].payload as typeof scatterData[0];
                     return (
-                      <div className="bg-surface border border-line rounded px-3 py-2 text-xs">
+                      <div className="bg-surface border border-line rounded-none px-3 py-2 text-xs">
                         <div className="text-white font-semibold">{p.name}</div>
                         <div className="text-ink">Sessions: {p.sessions} · PB: {p.pb}</div>
                         <div className="text-ink">σRel: {fmtRel(p.x)}</div>
@@ -2120,7 +2120,7 @@ function VardefCard({
   return (
     <div
       onClick={() => router.push(`/team/${encodeURIComponent(dr.name)}`)}
-      className={`border ${border} rounded-lg p-3 cursor-pointer hover:brightness-110`}
+      className={`border ${border} rounded-none p-3 cursor-pointer hover:brightness-110`}
     >
       <div className="flex items-baseline justify-between mb-1">
         <span className="text-white font-semibold">{dr.name}</span>
@@ -2172,7 +2172,7 @@ function VarianceDeficitPanel({
 
   if (eligible === 0) {
     return (
-      <div className="bg-canvas rounded-lg p-4 mb-4 text-sm text-muted border border-line">
+      <div className="bg-canvas rounded-none p-4 mb-4 text-sm text-muted border border-line">
         🎯 <b>Variance-deficit shortlist</b>: no driver has enough sessions in the current filter. Widen the window or
         loosen min-sessions.
       </div>
@@ -2180,7 +2180,7 @@ function VarianceDeficitPanel({
   }
 
   return (
-    <div className="bg-canvas rounded-lg p-4 mb-4 border border-line">
+    <div className="bg-canvas rounded-none p-4 mb-4 border border-line">
       <div className="flex items-baseline justify-between mb-3">
         <h3 className="text-white font-semibold">🎯 Variance-deficit shortlist</h3>
         <span className="text-xs text-muted">

@@ -53,7 +53,7 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
   };
 
   const inputCls =
-    'w-full px-3 py-2 rounded-md border border-line bg-canvas text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60';
+    'w-full px-3 py-2 rounded-none border border-line bg-canvas text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60';
 
   return (
     <div className="mb-4">
@@ -62,7 +62,7 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
         onClick={() => setIsOpen(!isOpen)}
         aria-expanded={isOpen}
         aria-controls="pit-stop-settings"
-        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-2 text-ink hover:bg-line transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+        className="flex items-center gap-2 px-3 py-2 rounded-none bg-surface-2 text-ink hover:bg-line transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
       >
         <svg
           className="w-5 h-5"
@@ -83,7 +83,7 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
       </button>
 
       {isOpen && (
-        <div id="pit-stop-settings" className="mt-2 p-4 rounded-lg border border-line bg-surface">
+        <div id="pit-stop-settings" className="mt-2 p-4 rounded-none border border-line bg-surface">
           <h3 className="font-medium mb-3">Pit Stop Configuration</h3>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -149,14 +149,14 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
             <button
               type="button"
               onClick={() => setIsOpen(false)}
-              className="px-3 py-1.5 rounded bg-surface-2 hover:bg-line text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="px-3 py-1.5 rounded-none bg-surface-2 hover:bg-line text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleSave}
-              className="px-3 py-1.5 rounded accent-gradient text-accent-ink flex items-center gap-1 transition-colors hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="px-3 py-1.5 rounded-none accent-gradient text-accent-ink flex items-center gap-1 transition-colors hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />

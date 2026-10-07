@@ -42,7 +42,7 @@ const AlertStack: React.FC<AlertStackProps> = ({ alerts, onDismiss, onLocate }) 
           <div
             key={alert.id}
             role="status"
-            className={`pointer-events-auto flex items-start gap-3 p-3 rounded-xl border shadow-lg ${t.wrap} ${isPit ? 'pit-alert' : ''}`}
+            className={`pointer-events-auto flex items-start gap-3 p-3 rounded-none border shadow-lg ${t.wrap} ${isPit ? 'pit-alert' : ''}`}
           >
             {!alert.customContent && t.icon}
             <div className="flex-1 min-w-0 text-sm">{alert.customContent || alert.message}</div>
@@ -51,7 +51,7 @@ const AlertStack: React.FC<AlertStackProps> = ({ alerts, onDismiss, onLocate }) 
                 <button
                   type="button"
                   onClick={() => onLocate(alert.teamKart!)}
-                  className="h-8 px-2.5 rounded-md text-xs font-semibold bg-surface-2 hover:bg-line"
+                  className="h-8 px-2.5 rounded-none text-xs font-semibold bg-surface-2 hover:bg-line"
                 >
                   Locate
                 </button>
@@ -60,7 +60,7 @@ const AlertStack: React.FC<AlertStackProps> = ({ alerts, onDismiss, onLocate }) 
                 <button
                   type="button"
                   onClick={() => { alert.action!.onClick(); onDismiss(alert.id); }}
-                  className="h-8 px-2.5 rounded-md text-xs font-semibold bg-accent/15 text-accent hover:bg-accent/25"
+                  className="h-8 px-2.5 rounded-none text-xs font-semibold bg-accent/15 text-accent hover:bg-accent/25"
                 >
                   {alert.action.label}
                 </button>
@@ -69,7 +69,7 @@ const AlertStack: React.FC<AlertStackProps> = ({ alerts, onDismiss, onLocate }) 
                 type="button"
                 onClick={() => onDismiss(alert.id)}
                 aria-label="Dismiss"
-                className="w-8 h-8 rounded-md flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+                className="w-8 h-8 rounded-none flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
               >
                 <X size={16} />
               </button>

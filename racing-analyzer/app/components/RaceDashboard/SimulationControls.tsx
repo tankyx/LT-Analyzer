@@ -112,7 +112,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
   };
 
   return (
-    <div className={`rounded-lg shadow p-4 mb-6 transition-colors bg-surface`}>
+    <div className={`rounded-none shadow p-4 mb-6 transition-colors bg-surface`}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4">
         <h2 className="font-semibold text-lg mb-2 sm:mb-0 flex items-center">
           <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -133,14 +133,14 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className={`rounded-lg p-4 border border-line bg-surface-2`}>
+        <div className={`rounded-none p-4 border border-line bg-surface-2`}>
           <div className="flex flex-col space-y-4">
             {/* Track Selection Mode Toggle - Only show for admin */}
             {user?.role === 'admin' && (
               <div className="flex gap-2 mb-2">
                 <button
                   onClick={() => setShowUrlInput(false)}
-                  className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                  className={`flex-1 px-3 py-2 rounded-none text-sm font-medium transition-all border
                     ${!showUrlInput
                       ? (isDarkMode 
                           ? 'bg-info text-white border-info' 
@@ -155,7 +155,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                 </button>
                 <button
                   onClick={() => setShowUrlInput(true)}
-                  className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all border
+                  className={`flex-1 px-3 py-2 rounded-none text-sm font-medium transition-all border
                     ${showUrlInput
                       ? (isDarkMode 
                           ? 'bg-info text-white border-info' 
@@ -186,7 +186,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                       setSelectedTrackId(null);
                     }}
                     placeholder="https://www.apex-timing.com/live-timing/..."
-                    className={`flex-1 px-3 py-2 rounded border text-sm
+                    className={`flex-1 px-3 py-2 rounded-none border text-sm
                       ${isDarkMode 
                         ? 'bg-canvas border-line text-ink placeholder:text-muted' 
                         : 'bg-surface border-line text-ink placeholder:text-muted'
@@ -204,7 +204,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                       value={websocketUrl}
                       onChange={(e) => setWebsocketUrl(e.target.value)}
                       placeholder="ws://www.apex-timing.com:8585/"
-                      className={`w-full px-3 py-2 rounded border text-sm
+                      className={`w-full px-3 py-2 rounded-none border text-sm
                         ${isDarkMode 
                           ? 'bg-canvas border-line text-ink placeholder:text-muted' 
                           : 'bg-surface border-line text-ink placeholder:text-muted'
@@ -264,14 +264,14 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
 
 
             {!isSimulating && showModeSelector && (
-              <div className={`p-4 rounded-lg border border-line bg-surface`}>
+              <div className={`p-4 rounded-none border border-line bg-surface`}>
                 <p className={`text-sm mb-3 ${isDarkMode ? 'text-ink' : 'text-muted'}`}>Choose data source:</p>
                 
                 <div className="flex space-x-3">
                   <button
                     onClick={() => handleStart('real')}
                     disabled={isStarting}
-                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all
+                    className={`flex-1 px-3 py-2 rounded-none text-sm font-medium transition-all
                       ${isDarkMode 
                         ? 'bg-info hover:bg-info text-white' 
                         : 'bg-info hover:bg-info text-white'
@@ -283,7 +283,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   <button
                     onClick={() => handleStart('simulation')}
                     disabled={isStarting}
-                    className={`flex-1 px-3 py-2 rounded text-sm font-medium transition-all
+                    className={`flex-1 px-3 py-2 rounded-none text-sm font-medium transition-all
                       ${isDarkMode 
                         ? 'bg-class2 hover:bg-class2 text-white' 
                         : 'bg-class2 hover:bg-class2 text-white'
@@ -304,7 +304,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   }
                 }}
                 disabled={isStarting || isStopping || isSimulating}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded font-medium transition-all
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-none font-medium transition-all
                   ${isStarting ? 'opacity-70 cursor-wait' : ''}
                   ${isSimulating ? 'opacity-50 cursor-not-allowed' : ''}
                   ${isDarkMode 
@@ -334,7 +334,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
             <button
               onClick={handleStop}
               disabled={isStopping || !isSimulating}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded font-medium transition-all
+              className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-none font-medium transition-all
                 ${isStopping ? 'opacity-70 cursor-wait' : ''}
                 ${!isSimulating ? 'opacity-50 cursor-not-allowed' : ''}
                 ${isDarkMode 
@@ -364,7 +364,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
           </div>
         </div>
         
-        <div className={`rounded-lg p-4 border border-line bg-surface-2`}>
+        <div className={`rounded-none p-4 border border-line bg-surface-2`}>
           <h3 className={`text-sm mb-2 flex items-center gap-1 ${isDarkMode ? 'text-ink' : 'text-muted'}`}>
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

@@ -9,20 +9,20 @@
  * applies it before first paint so there is no flash.
  */
 :root {
-  --c-canvas: 244 245 247;
+  --c-canvas: 235 238 242;
   --c-surface: 255 255 255;
-  --c-surface-2: 238 240 243;
-  --c-line: 221 226 233;
-  --c-ink: 20 24 31;
-  --c-muted: 95 106 122;
-  --c-accent: 200 140 0;
-  --c-accent-hi: 247 170 28;
+  --c-surface-2: 229 233 239;
+  --c-line: 203 210 221;
+  --c-ink: 17 21 28;
+  --c-muted: 76 87 103;
+  --c-accent: 176 118 0;
+  --c-accent-hi: 227 158 26;
   --c-accent-ink: 26 18 0;
-  --c-live: 22 148 80;
-  --c-alarm: 214 64 58;
-  --c-info: 42 111 214;
-  --c-class1: 42 111 214;
-  --c-class2: 139 63 209;
+  --c-live: 20 128 71;
+  --c-alarm: 198 55 50;
+  --c-info: 36 100 196;
+  --c-class1: 36 100 196;
+  --c-class2: 128 56 196;
 
   /* legacy aliases */
   --background: rgb(var(--c-canvas));
@@ -54,56 +54,44 @@
 body {
   color: rgb(var(--c-ink));
   background: rgb(var(--c-canvas));
-  font-family: var(--font-sans), "Helvetica Neue", Arial, sans-serif;
+  /* Race-control terminal: monospace is the default voice — timing data is
+     measurement, not prose. Condensed stays for section headers only. */
+  font-family: var(--font-mono), "SF Mono", "Menlo", "Consolas", monospace;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-/* Page canvas with an ambient pit-wall glow: a faint accent + info wash at
-   the top corners. Tokens flip with theme, so the glow sits on either world. */
+/* Page canvas: flat, high-contrast, no ambient glow — an instrument, not a
+   dashboard. */
 .canvas {
   background-color: rgb(var(--c-canvas));
-  background-image:
-    radial-gradient(760px 420px at 12% -12%, rgb(var(--c-accent) / 0.16), transparent 62%),
-    radial-gradient(640px 360px at 88% -14%, rgb(var(--c-info) / 0.10), transparent 62%);
 }
 
-/* Signature accent: warm gradient sweep for the brand mark and primary actions.
-   Oversized + slowly shifting so the ember moves across the surface. */
+/* Signature accent: a flat two-tone amber block (no shimmer, no glow). */
 .accent-gradient {
   background-image: linear-gradient(135deg, rgb(var(--c-accent)), rgb(var(--c-accent-hi)));
-  background-size: 200% 200%;
-  animation: accent-shimmer 7s ease-in-out infinite;
-}
-@keyframes accent-shimmer {
-  0%, 100% { background-position: 0% 0%; }
-  50% { background-position: 100% 100%; }
 }
 
-/* Soft drop shadow for the gradient accent surfaces. */
-.accent-glow {
-  box-shadow: 0 2px 10px -2px rgb(var(--c-accent) / 0.6);
-}
-
-/* Breathing glow for live status dots: a soft ring that blooms and fades. */
-@keyframes live-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--c-live) / 0.55); }
-  50% { box-shadow: 0 0 0 5px rgb(var(--c-live) / 0); }
+/* Live status: a hard mechanical blink, not a soft halo. */
+@keyframes live-blink-hard {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
 }
 .live-glow {
-  animation: live-pulse 2s ease-out infinite;
-}
-
-/* Panel depth: an offset, blurred elevation that lifts cards off the canvas. */
-.panel {
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.05),
-    0 8px 24px -8px rgba(0, 0, 0, 0.14);
+  animation: live-blink-hard 1.4s steps(2, start) infinite;
 }
 
 /* Timing figures: fixed-width digits so a table doesn't jitter on refresh. */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* In light mode the phosphor glow just blurs dark-on-light digits — the glow
+   only makes sense against the dark pit wall. */
+.dark .led {
+  text-shadow:
+    0 0 10px rgb(var(--c-accent) / 0.35),
+    0 0 2px rgb(var(--c-accent) / 0.25);
 }
 
 /* Monitored team currently in the pits: pulsing alarm ring. */
@@ -126,6 +114,76 @@ body {
   animation: row-breathe 1s ease-in-out 3;
   position: relative;
   z-index: 1;
+}
+
+/* ---- Race-broadcast motion layer ----
+   The pit wall must read as *live*, not static. Each class is one small,
+   purposeful beat tied to the data it displays. */
+
+/* A number the live feed just rewrote: quick pop, like a timing board
+   flipping a digit. Re-mounted per value via key={value} so every change
+   replays it. */
+@keyframes value-pop {
+  0% { transform: scale(1.16); }
+  60% { transform: scale(0.98); }
+  100% { transform: scale(1); }
+}
+.value-tick {
+  display: inline-block;
+  animation: value-pop 0.35s cubic-bezier(0.2, 0.7, 0.3, 1.25);
+}
+
+/* Overtake / position drop: the whole row rings green or red so the eye
+   catches the reshuffle instantly. Box-shadow ring avoids clobbering the
+   row's own background tint. */
+@keyframes row-gain {
+  0% { box-shadow: inset 0 0 0 2px rgb(var(--c-live) / 0.55); }
+  100% { box-shadow: inset 0 0 0 2px rgb(var(--c-live) / 0); }
+}
+.row-gain {
+  animation: row-gain 1s ease-out;
+}
+@keyframes row-loss {
+  0% { box-shadow: inset 0 0 0 2px rgb(var(--c-alarm) / 0.55); }
+  100% { box-shadow: inset 0 0 0 2px rgb(var(--c-alarm) / 0); }
+}
+.row-loss {
+  animation: row-loss 1s ease-out;
+}
+
+/* New best lap: the universal motorsport "purple sector" beat. */
+@keyframes best-flash {
+  0% { background-color: rgb(var(--c-class2) / 0.32); }
+  100% { background-color: rgb(var(--c-class2) / 0); }
+}
+.best-flash {
+  animation: best-flash 1.1s ease-out;
+}
+
+/* First paint: sections rise into place instead of popping. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.rise-in {
+  animation: rise-in 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* The timing tower never looks frozen: a slow ambient sheen drifts across
+   it even when no lap has landed in a while. */
+@keyframes tower-sweep {
+  0% { background-position: 200% 50%; }
+  100% { background-position: -100% 50%; }
+}
+.tower-sweep {
+  background-image: linear-gradient(
+    105deg,
+    transparent 42%,
+    rgb(var(--c-info) / 0.05) 50%,
+    transparent 58%
+  );
+  background-size: 200% 100%;
+  animation: tower-sweep 7s linear infinite;
 }
 
 /* Thin, theme-aware scrollbars for the rails and sheets. */
@@ -163,8 +221,18 @@ body {
   .row-updated,
   .animate-live-blink,
   .live-glow,
-  .accent-gradient {
+  .accent-gradient,
+  .value-tick,
+  .row-gain,
+  .row-loss,
+  .best-flash,
+  .rise-in,
+  .tower-sweep {
     animation: none;
+  }
+  .rise-in {
+    opacity: 1;
+    transform: none;
   }
   .pit-alert {
     box-shadow: 0 0 0 2px rgb(var(--c-alarm) / 0.45);

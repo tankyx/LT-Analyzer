@@ -210,7 +210,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
   }
 
   const th = `px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-ink' : 'text-muted'} uppercase tracking-wider`;
-  const field = 'w-full px-3 py-2 rounded border border-line bg-canvas text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60';
+  const field = 'w-full px-3 py-2 rounded-none border border-line bg-canvas text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60';
 
   return (
     <div className="p-6">
@@ -244,13 +244,13 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                 setUserForm({ username: '', password: '', email: '', role: 'user' });
                 setShowUserModal(true);
               }}
-              className="px-4 py-2 bg-info text-white rounded hover:bg-info"
+              className="px-4 py-2 bg-info text-white rounded-none hover:bg-info"
             >
               Add User
             </button>
           </div>
 
-          <div className={`bg-surface rounded-lg overflow-hidden shadow`}>
+          <div className={`bg-surface rounded-none overflow-hidden shadow`}>
             <table className="min-w-full">
               <thead className={'bg-surface-2'}>
                 <tr>
@@ -312,13 +312,13 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                 setTrackForm({ name: '', location: '', length_meters: '', description: '', timing_url: '', websocket_url: '', is_active: true });
                 setShowTrackModal(true);
               }}
-              className="px-4 py-2 bg-info text-white rounded hover:bg-info"
+              className="px-4 py-2 bg-info text-white rounded-none hover:bg-info"
             >
               Add Track
             </button>
           </div>
 
-          <div className={`bg-surface rounded-lg overflow-hidden shadow`}>
+          <div className={`bg-surface rounded-none overflow-hidden shadow`}>
             <table className="min-w-full">
               <thead className={'bg-surface-2'}>
                 <tr>
@@ -377,7 +377,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
       {/* User Modal */}
       {showUserModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`bg-surface rounded-lg p-6 max-w-md w-full`}>
+          <div className={`bg-surface rounded-none p-6 max-w-md w-full`}>
             <h3 className="text-lg font-semibold mb-4">{editingUser ? 'Edit User' : 'Create User'}</h3>
             <div className="space-y-4">
               <div>
@@ -408,11 +408,11 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
             </div>
             <div className="flex justify-end space-x-3 mt-6">
               <button onClick={() => setShowUserModal(false)}
-                className={`px-4 py-2 rounded ${isDarkMode ? 'bg-surface-2 hover:bg-line' : 'bg-line hover:bg-line'}`}>
+                className={`px-4 py-2 rounded-none ${isDarkMode ? 'bg-surface-2 hover:bg-line' : 'bg-line hover:bg-line'}`}>
                 Cancel
               </button>
               <button onClick={editingUser ? handleUpdateUser : handleCreateUser}
-                className="px-4 py-2 bg-info text-white rounded hover:bg-info">
+                className="px-4 py-2 bg-info text-white rounded-none hover:bg-info">
                 {editingUser ? 'Update' : 'Create'}
               </button>
             </div>
@@ -423,7 +423,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
       {/* Track Modal */}
       {showTrackModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className={`bg-surface rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto`}>
+          <div className={`bg-surface rounded-none p-6 max-w-md w-full max-h-[90vh] overflow-y-auto`}>
             <h3 className="text-lg font-semibold mb-4">{editingTrack ? 'Edit Track' : 'Create Track'}</h3>
             <div className="space-y-4">
               <div>
@@ -466,11 +466,11 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
             </div>
             <div className="flex justify-end space-x-3 mt-6">
               <button onClick={() => setShowTrackModal(false)}
-                className={`px-4 py-2 rounded ${isDarkMode ? 'bg-surface-2 hover:bg-line' : 'bg-line hover:bg-line'}`}>
+                className={`px-4 py-2 rounded-none ${isDarkMode ? 'bg-surface-2 hover:bg-line' : 'bg-line hover:bg-line'}`}>
                 Cancel
               </button>
               <button onClick={editingTrack ? handleUpdateTrack : handleCreateTrack}
-                className="px-4 py-2 bg-info text-white rounded hover:bg-info">
+                className="px-4 py-2 bg-info text-white rounded-none hover:bg-info">
                 {editingTrack ? 'Update' : 'Create'}
               </button>
             </div>

@@ -201,7 +201,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
       const sortedPayload = [...filteredPayload].sort((a, b) => a.value - b.value);
       
       return (
-        <div className={`p-4 rounded-lg shadow-lg border max-w-xs ${'bg-surface border-line'}`}>
+        <div className={`p-4 rounded-none shadow-lg border max-w-xs ${'bg-surface border-line'}`}>
           <div className="flex items-center space-x-2 mb-2">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center ${'bg-surface-2'}`}>
               <span className="font-bold">{absoluteLap}</span>
@@ -222,13 +222,13 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               const pitStops = team?.['Pit Stops'] || '0';
               
               return (
-                <div key={entry.dataKey} className={`flex items-center p-2 rounded ${hoveredTeam === kartNum ? ('bg-surface-2') : ''}`}>
+                <div key={entry.dataKey} className={`flex items-center p-2 rounded-none ${hoveredTeam === kartNum ? ('bg-surface-2') : ''}`}>
                   <div className="flex-shrink-0 mr-3">
-                    <div className="w-3 h-10 rounded-sm" style={{ backgroundColor: color }}></div>
+                    <div className="w-3 h-10 rounded-none" style={{ backgroundColor: color }}></div>
                   </div>
                   <div className="flex-grow">
                     <div className="flex items-center gap-2">
-                      <div className={`text-xs font-medium text-center rounded px-1 ${isDarkMode ? 'bg-surface-2' : 'bg-line'}`}>
+                      <div className={`text-xs font-medium text-center rounded-none px-1 ${isDarkMode ? 'bg-surface-2' : 'bg-line'}`}>
                         P{position || '?'}
                       </div>
                       <div className={`font-medium truncate ${'text-ink'}`}>
@@ -240,7 +240,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                         {status === 'Pit-in' ? '🔴 In Pits' : status || 'On Track'}
                       </span>
                       {gapMode === 'adjusted' && (
-                        <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-info/15 text-info">
+                        <span className="text-xs ml-2 px-1.5 py-0.5 rounded-none bg-info/15 text-info">
                           {pitStops} Pit{parseInt(pitStops) !== 1 ? 's' : ''}
                         </span>
                       )}
@@ -300,14 +300,14 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   // Empty state when no teams are monitored
   if (!gapHistory || Object.keys(gapHistory).length === 0 || monitoredTeams.length === 0) {
     return (
-      <div className={`rounded-lg shadow p-4 mb-4 transition-colors duration-300 ${'bg-surface'}`}>
+      <div className={`rounded-none shadow p-4 mb-4 transition-colors duration-300 ${'bg-surface'}`}>
         <div className="flex items-center gap-2 mb-3">
           <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
           <h2 className="font-bold text-lg">Race Delta Analysis</h2>
         </div>
-        <div className={`text-center py-12 rounded-lg border-2 border-dashed ${'border-line text-muted'}`}>
+        <div className={`text-center py-12 rounded-none border-2 border-dashed ${'border-line text-muted'}`}>
           <svg className="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
@@ -322,7 +322,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   }
 
   return (
-    <div className={`rounded-lg shadow overflow-hidden transition-colors duration-300 ${'bg-surface'}`}>
+    <div className={`rounded-none shadow overflow-hidden transition-colors duration-300 ${'bg-surface'}`}>
       <div className={`px-4 py-3 border-b ${'border-line bg-surface-2'}`}>
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
           <h2 className="font-bold text-lg flex items-center gap-2">
@@ -339,7 +339,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
               isDarkMode={isDarkMode}
             />
             
-            <div className="text-xs rounded-md px-2 py-1 bg-info/15 text-info">
+            <div className="text-xs rounded-none px-2 py-1 bg-info/15 text-info">
               <span>Showing last 15 laps</span>
             </div>
           </div>

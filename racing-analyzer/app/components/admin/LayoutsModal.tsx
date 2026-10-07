@@ -100,7 +100,7 @@ export default function LayoutsModal(
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-surface text-ink rounded-lg p-6 max-w-2xl w-full">
+      <div className="bg-surface text-ink rounded-none p-6 max-w-2xl w-full">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">Layouts — {track.name}</h3>
           <button onClick={onClose} className="text-muted hover:text-ink">✕</button>
@@ -112,9 +112,9 @@ export default function LayoutsModal(
           differ by 10%+. One layout can be marked default to catch sessions outside any band.
         </p>
 
-        {error && <div className="bg-alarm/15 text-alarm rounded p-2 mb-3 text-sm">{error}</div>}
+        {error && <div className="bg-alarm/15 text-alarm rounded-none p-2 mb-3 text-sm">{error}</div>}
 
-        <div className="bg-canvas rounded p-3 mb-4">
+        <div className="bg-canvas rounded-none p-3 mb-4">
           <div className="text-xs text-muted mb-2">{editingId === null ? 'Add layout' : `Editing layout #${editingId}`}</div>
           <div className="grid grid-cols-2 gap-2">
             <input
@@ -122,7 +122,7 @@ export default function LayoutsModal(
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
               placeholder="name (e.g. short / long / wet)"
-              className="col-span-2 px-3 py-2 bg-surface-2 rounded border border-line focus:border-info focus:outline-none"
+              className="col-span-2 px-3 py-2 bg-surface-2 rounded-none border border-line focus:border-info focus:outline-none"
             />
             <input
               type="number"
@@ -130,7 +130,7 @@ export default function LayoutsModal(
               value={form.min_field_best}
               onChange={e => setForm(f => ({ ...f, min_field_best: e.target.value }))}
               placeholder="min field-best (s)"
-              className="px-3 py-2 bg-surface-2 rounded border border-line focus:border-info focus:outline-none"
+              className="px-3 py-2 bg-surface-2 rounded-none border border-line focus:border-info focus:outline-none"
             />
             <input
               type="number"
@@ -138,7 +138,7 @@ export default function LayoutsModal(
               value={form.max_field_best}
               onChange={e => setForm(f => ({ ...f, max_field_best: e.target.value }))}
               placeholder="max field-best (s)"
-              className="px-3 py-2 bg-surface-2 rounded border border-line focus:border-info focus:outline-none"
+              className="px-3 py-2 bg-surface-2 rounded-none border border-line focus:border-info focus:outline-none"
             />
             <label className="col-span-2 flex items-center gap-2 text-sm text-ink">
               <input
@@ -150,7 +150,7 @@ export default function LayoutsModal(
             </label>
           </div>
           <div className="flex gap-2 mt-2">
-            <button onClick={submit} className="px-3 py-1 bg-info rounded hover:bg-info text-sm">
+            <button onClick={submit} className="px-3 py-1 bg-info rounded-none hover:bg-info text-sm">
               {editingId === null ? 'Add' : 'Save'}
             </button>
             {editingId !== null && (
@@ -159,7 +159,7 @@ export default function LayoutsModal(
                   setEditingId(null);
                   setForm({ name: '', min_field_best: '', max_field_best: '', is_default: false });
                 }}
-                className="px-3 py-1 bg-surface-2 rounded hover:bg-line text-sm"
+                className="px-3 py-1 bg-surface-2 rounded-none hover:bg-line text-sm"
               >
                 Cancel edit
               </button>
@@ -200,7 +200,7 @@ export default function LayoutsModal(
         )}
 
         <div className="flex justify-end mt-4">
-          <button onClick={onClose} className="px-4 py-2 bg-surface-2 rounded hover:bg-line">Close</button>
+          <button onClick={onClose} className="px-4 py-2 bg-surface-2 rounded-none hover:bg-line">Close</button>
         </div>
       </div>
     </div>

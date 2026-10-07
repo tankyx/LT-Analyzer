@@ -68,7 +68,7 @@ const TrackSelector: React.FC<TrackSelectorProps> = ({ onSelectTrack, selectedTr
       <label className={`block text-xs mb-2 ${'text-muted'}`}>
         Select Track (will start data collection):
       </label>
-      <div className={`max-h-48 overflow-y-auto rounded border ${
+      <div className={`max-h-48 overflow-y-auto rounded-none border ${
         'border-line'
       }`}>
         {tracks.length === 0 ? (

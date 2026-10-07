@@ -89,13 +89,13 @@ const AppBar: React.FC<AppBarProps> = ({
   const connLabel =
     connectionStatus === 'connected'
       ? lastUpdate
-        ? `Live · ${lastUpdate}`
-        : 'Connected'
+        ? `LIVE ${lastUpdate}`
+        : 'CONNECTED'
       : connectionStatus === 'connecting'
-        ? 'Connecting…'
+        ? 'CONNECTING…'
         : connectionStatus === 'error'
-          ? 'Connection error'
-          : 'Disconnected';
+          ? 'CONN ERROR'
+          : 'DISCONNECTED';
 
   const initials = (user?.username || '?').slice(0, 2).toUpperCase();
   const tone = flagTone(flag);
@@ -107,7 +107,7 @@ const AppBar: React.FC<AppBarProps> = ({
       <div className="h-full flex items-center gap-2 md:gap-4 px-3 md:px-5">
         {/* Brand (desktop only; the track button carries identity on phones) */}
         <div className="hidden md:flex items-center gap-2.5 shrink-0">
-          <div className="w-[30px] h-[30px] rounded-[7px] accent-gradient accent-glow text-accent-ink font-cond font-bold text-[15px] flex items-center justify-center">
+          <div className="w-[30px] h-[30px] rounded-none accent-gradient text-accent-ink font-cond font-bold text-[15px] flex items-center justify-center">
             LT
           </div>
           <span className="font-cond font-bold text-[19px] tracking-wide">LT-ANALYZER</span>
@@ -119,7 +119,7 @@ const AppBar: React.FC<AppBarProps> = ({
           type="button"
           onClick={onOpenTracks}
           aria-label="Switch track"
-          className="flex items-center gap-2.5 h-10 md:h-9 pl-2.5 pr-3 rounded-lg border border-line bg-surface-2 min-w-0 max-w-full md:max-w-[420px] hover:border-muted/60 transition-colors"
+          className="flex items-center gap-2.5 h-10 md:h-9 pl-2.5 pr-3 rounded-none border border-line bg-surface-2 min-w-0 max-w-full md:max-w-[420px] hover:border-muted/60 transition-colors"
         >
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${sessionActive ? 'bg-live live-glow' : 'bg-line'}`}
@@ -157,7 +157,7 @@ const AppBar: React.FC<AppBarProps> = ({
         )}
 
         {/* Connection */}
-        <div className="hidden md:flex items-center gap-1.5 text-xs text-muted whitespace-nowrap" title={connLabel}>
+        <div className="hidden md:flex items-center gap-1.5 text-[11px] uppercase tracking-[.12em] text-muted whitespace-nowrap" title={connLabel}>
           <span className={`w-2 h-2 rounded-full ${connDot}`} data-testid="conn-dot" />
           {connLabel}
         </div>
@@ -166,7 +166,7 @@ const AppBar: React.FC<AppBarProps> = ({
         <button
           type="button"
           onClick={onOpenStats}
-          className="hidden md:flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-sm font-semibold text-ink hover:bg-surface-2 transition-colors"
+          className="hidden md:flex items-center gap-1.5 h-9 px-2.5 rounded-none text-sm font-semibold text-ink hover:bg-surface-2 transition-colors"
         >
           <BarChart3 size={16} />
           Driver stats
@@ -177,7 +177,7 @@ const AppBar: React.FC<AppBarProps> = ({
           type="button"
           onClick={() => setHelpOpen(true)}
           aria-label="Open dashboard guide"
-          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 rounded-lg border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 rounded-none border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
         >
           <HelpCircle size={16} />
           <span className="hidden lg:inline text-xs font-semibold">Guide</span>
@@ -188,7 +188,7 @@ const AppBar: React.FC<AppBarProps> = ({
           type="button"
           onClick={toggleTheme}
           aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 rounded-lg border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 rounded-none border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
         >
           {isDark ? <Sun size={16} /> : <Moon size={16} />}
           <span className="hidden lg:inline text-xs font-semibold">{isDark ? 'Light' : 'Dark'}</span>
@@ -225,7 +225,7 @@ const AppBar: React.FC<AppBarProps> = ({
                   else if (e.key === 'End') next = items.length - 1;
                   items[next].focus();
                 }}
-                className="absolute right-0 mt-2 w-56 rounded-xl border border-line bg-surface shadow-xl p-1.5 z-50"
+                className="absolute right-0 mt-2 w-56 rounded-none border border-line bg-surface shadow-xl p-1.5 z-50"
               >
                 <div className="px-3 py-2">
                   <div className="text-sm font-semibold truncate">{user.username}</div>
@@ -241,7 +241,7 @@ const AppBar: React.FC<AppBarProps> = ({
                     setMenuOpen(false);
                     onOpenStats();
                   }}
-                  className="md:hidden w-full flex items-center gap-2 h-11 px-3 rounded-lg text-sm font-medium hover:bg-surface-2"
+                  className="md:hidden w-full flex items-center gap-2 h-11 px-3 rounded-none text-sm font-medium hover:bg-surface-2"
                 >
                   <BarChart3 size={16} />
                   Driver stats
@@ -260,7 +260,7 @@ const AppBar: React.FC<AppBarProps> = ({
                         setMenuOpen(false);
                         onOpenDevices();
                       }}
-                      className="w-full flex items-center gap-2 h-11 md:h-10 px-3 rounded-lg text-sm font-medium hover:bg-surface-2"
+                      className="w-full flex items-center gap-2 h-11 md:h-10 px-3 rounded-none text-sm font-medium hover:bg-surface-2"
                     >
                       <Cpu size={16} />
                       Devices
@@ -275,7 +275,7 @@ const AppBar: React.FC<AppBarProps> = ({
                     setMenuOpen(false);
                     onLogout();
                   }}
-                  className="w-full flex items-center gap-2 h-11 md:h-10 px-3 rounded-lg text-sm font-medium text-alarm hover:bg-alarm/10"
+                  className="w-full flex items-center gap-2 h-11 md:h-10 px-3 rounded-none text-sm font-medium text-alarm hover:bg-alarm/10"
                 >
                   <LogOut size={16} />
                   Log out

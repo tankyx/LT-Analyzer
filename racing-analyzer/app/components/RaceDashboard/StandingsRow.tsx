@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Bell, Star } from 'lucide-react';
 import StatusPill, { describeStatus, toneClasses } from './StatusPill';
 import { getTeamClass, displayTeamName } from './lib/teamName';
@@ -22,7 +22,7 @@ export { getTeamClass, displayTeamName };
 export const ClassChip: React.FC<{ cls: string | null }> = ({ cls }) =>
   cls ? (
     <span
-      className={`inline-block px-1.5 rounded text-[11px] font-semibold leading-[18px] border ${
+      className={`inline-block px-1.5 rounded-none text-[10px] font-semibold leading-[16px] border ${
         cls === '1' ? 'border-class1/40 text-class1' : 'border-class2/40 text-class2'
       }`}
     >
@@ -36,7 +36,7 @@ export const StarButton: React.FC<{ filled: boolean; onClick?: () => void; label
     onClick={onClick}
     aria-pressed={filled}
     aria-label={label}
-    className={`w-11 h-11 md:w-9 md:h-9 rounded-lg flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
+    className={`w-11 h-11 md:w-9 md:h-9 rounded-none flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
       filled ? 'text-accent' : 'text-line hover:text-muted'
     }`}
   >
@@ -68,7 +68,7 @@ export const PitAlertButton: React.FC<{
       disabled={isLoading}
       title="Send PIT NOW alert to the driver overlay"
       aria-label={`Send pit alert to ${teamName}`}
-      className="w-11 h-11 md:w-9 md:h-9 rounded-lg flex items-center justify-center text-alarm hover:bg-alarm/10 disabled:opacity-50 disabled:cursor-not-allowed"
+      className="w-11 h-11 md:w-9 md:h-9 rounded-none flex items-center justify-center text-alarm hover:bg-alarm/10 disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <Bell size={18} className={isLoading ? 'animate-live-blink' : ''} />
     </button>
@@ -88,10 +88,26 @@ interface StandingsRowProps {
   isDarkMode?: boolean;
 }
 
-/** Shared column template: phone (4 cells) and desktop (8 cells). */
-export const STANDINGS_GRID =
-  'grid items-center gap-2 md:gap-3 grid-cols-[32px_minmax(0,1fr)_auto_auto] md:grid-cols-[56px_minmax(0,1fr)_120px_116px_116px_104px_72px_96px]';
+/** Returns the value from the previous render (undefined on first). */
+function usePrevious<T>(value: T): T | undefined {
+  const ref = useRef<T | undefined>(undefined);
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+  return ref.current;
+}
 
+/** A timing number that "ticks" (pops) whenever the live feed rewrites it.
+ *  key={value} remounts the span so the CSS animation replays on change. */
+const TickingValue: React.FC<{ value: string }> = ({ value }) => (
+  <span key={value} className="value-tick">{value}</span>
+);
+
+/**
+ * A compact timing-tower row: livery position block, team, and the two live
+ * figures a crew actually watches — gap to leader and last lap. Shaped for a
+ * narrow vertical tower, not a wide spreadsheet.
+ */
 const StandingsRow = React.memo(function StandingsRow({
   team,
   isMyTeam,
@@ -107,71 +123,66 @@ const StandingsRow = React.memo(function StandingsRow({
   const inPit = team.Status === 'Pit-in';
   const { tone } = describeStatus(team.Status);
   const lapped = /tour|lap/i.test(team.Gap || '');
+  const isLeader = team.Position === '1';
   const canAlert = isMonitored && !['Pit-in', 'Finished', 'DNF', 'DSQ'].includes(team.Status || '');
+
+  // Position-change detection for the overtake/drop flash.
+  const prevPosition = usePrevious(team.Position);
+  const posChanged = prevPosition !== undefined && prevPosition !== team.Position;
+  const pos = parseInt(team.Position, 10);
+  const prevPos = parseInt(prevPosition ?? '', 10);
+  const gained = posChanged && !isNaN(pos) && !isNaN(prevPos) && pos < prevPos;
+  const lost = posChanged && !isNaN(pos) && !isNaN(prevPos) && pos > prevPos;
 
   return (
     <div
       id={`team-${team.Kart}`}
       role="row"
       data-kart={team.Kart}
-      className={`${STANDINGS_GRID} min-h-[60px] md:min-h-[52px] pl-3 pr-1 md:px-4 border-b border-line last:border-b-0 transition-colors ${
-        isMyTeam ? 'bg-accent/10' : inPit ? 'bg-alarm/[.07]' : 'hover:bg-surface-2/60'
-      } ${isMonitored && inPit ? 'pit-alert' : ''} ${isUpdated ? 'row-updated' : ''}`}
+      style={teamColor ? { borderLeftColor: teamColor } : undefined}
+      className={`flex items-center gap-3 px-3 py-2.5 border-l-[3px] border-l-transparent border-b border-line last:border-b-0 transition-colors min-h-[56px] ${
+        isMyTeam ? 'bg-accent/15' : isLeader ? 'bg-accent/[.09]' : inPit ? 'bg-alarm/[.07]' : 'hover:bg-surface-2/60'
+      } ${isMonitored && inPit ? 'pit-alert' : ''} ${isUpdated ? 'row-updated' : ''} ${gained ? 'row-gain' : ''} ${lost ? 'row-loss' : ''}`}
     >
-      {/* Position */}
+      {/* Position — livery ring + number, amber block for your own team */}
       <div
         role="cell"
-        className={`w-[30px] h-[30px] md:w-8 md:h-8 rounded-[7px] md:rounded-lg font-cond font-bold text-base md:text-[17px] flex items-center justify-center ${
+        style={!isMyTeam && teamColor ? { color: teamColor, boxShadow: `inset 0 0 0 2px ${teamColor}` } : undefined}
+        className={`w-10 h-10 shrink-0 flex items-center justify-center font-cond font-bold text-lg ${
           isMyTeam ? 'accent-gradient text-accent-ink' : 'bg-surface-2 text-ink'
         }`}
       >
-        {team.Position}
+        <TickingValue value={team.Position} />
       </div>
 
       {/* Team */}
-      <div role="cell" className="flex flex-col gap-0.5 min-w-0 py-1.5">
-        <div className="flex items-center gap-2 min-w-0">
+      <div role="cell" className="flex-1 min-w-0 flex flex-col justify-center">
+        <div className="flex items-center gap-1.5 min-w-0">
           {isMonitored && teamColor && (
-            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: teamColor }} aria-hidden />
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: teamColor }} aria-hidden />
           )}
-          <span className="text-sm md:text-[15px] font-semibold truncate">{name}</span>
-          <span className="hidden md:inline-flex"><ClassChip cls={cls} /></span>
-          {isMyTeam && <span className="text-[11px] font-bold tracking-[.06em] text-accent shrink-0">YOU</span>}
+          <span className="text-sm font-semibold truncate">{name}</span>
+          {isMyTeam && <span className="text-[10px] font-bold tracking-[.06em] text-accent shrink-0">YOU</span>}
         </div>
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono tabular text-[11px] md:text-xs text-muted">#{team.Kart}</span>
-          <span className="md:hidden inline-flex"><ClassChip cls={cls} /></span>
-          <span className="md:hidden">
-            <StatusPill status={team.Status} variant="inline" />
-          </span>
+        <div className="flex items-center gap-1.5 min-w-0 text-[11px] text-muted">
+          <span className="font-mono tabular">#{team.Kart}</span>
+          <ClassChip cls={cls} />
+          <StatusPill status={team.Status} variant="inline" />
         </div>
       </div>
 
-      {/* Phone: last lap over gap */}
-      <div role="cell" className="md:hidden flex flex-col items-end gap-0.5 pr-1">
-        <span className={`font-mono tabular text-[15px] font-medium ${inPit ? 'text-alarm' : 'text-ink'}`}>
-          {team['Last Lap'] || '—'}
+      {/* Live figures: gap to leader + last lap */}
+      <div role="cell" className="shrink-0 flex flex-col items-end justify-center">
+        <span className={`font-mono tabular led text-[16px] font-semibold leading-tight ${lapped ? 'text-alarm' : 'text-ink'}`}>
+          <TickingValue value={team.Gap || '—'} />
         </span>
-        <span className={`font-mono tabular text-xs ${lapped ? 'text-alarm' : 'text-muted'}`}>
-          {team.Gap || '—'}
+        <span className={`font-mono tabular text-[11px] ${inPit ? 'text-alarm' : 'text-muted'}`}>
+          <TickingValue value={team['Last Lap'] || '—'} />
         </span>
       </div>
-
-      {/* Desktop columns */}
-      <div role="cell" className="hidden md:block">
-        <StatusPill status={team.Status} />
-      </div>
-      <div role="cell" className={`hidden md:block font-mono tabular text-[15px] font-medium ${inPit ? 'text-alarm' : 'text-ink'}`}>
-        {team['Last Lap'] || '—'}
-      </div>
-      <div role="cell" className="hidden md:block font-mono tabular text-[15px] text-ink">{team['Best Lap'] || '—'}</div>
-      <div role="cell" className={`hidden md:block font-mono tabular text-[15px] text-right ${lapped ? 'text-muted' : 'text-ink'}`}>
-        {team.Gap || '—'}
-      </div>
-      <div role="cell" className="hidden md:block font-mono tabular text-[13px] text-muted text-right">{team['Pit Stops'] || '0'}</div>
 
       {/* Watch */}
-      <div role="cell" className="flex items-center justify-end md:justify-center">
+      <div role="cell" className="shrink-0 flex items-center">
         {canAlert && (
           <span className="hidden md:inline-flex">
             <PitAlertButton kartNum={team.Kart} teamName={team.Team} trackId={selectedTrackId} onTriggerAlert={onTriggerAlert} />
@@ -192,9 +203,7 @@ const StandingsRow = React.memo(function StandingsRow({
   prev.team.Kart === next.team.Kart &&
   prev.team.Status === next.team.Status &&
   prev.team['Last Lap'] === next.team['Last Lap'] &&
-  prev.team['Best Lap'] === next.team['Best Lap'] &&
   prev.team.Gap === next.team.Gap &&
-  prev.team['Pit Stops'] === next.team['Pit Stops'] &&
   prev.isMyTeam === next.isMyTeam &&
   prev.isMonitored === next.isMonitored &&
   prev.teamColor === next.teamColor &&

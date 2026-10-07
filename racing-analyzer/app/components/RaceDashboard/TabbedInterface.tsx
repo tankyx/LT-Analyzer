@@ -16,21 +16,37 @@ interface TabbedInterfaceProps {
   /** Kept for call-site compatibility; theming now comes from CSS tokens. */
   isDarkMode?: boolean;
   onTabChange?: (tabId: string) => void;
+  /**
+   * id of a tab whose panel is pinned as a persistent left column on desktop
+   * (the timing tower). The remaining tabs become the bottom console dock.
+   * The pinned panel must be purely presentational (rendered twice: once in
+   * the desktop tower, once as a normal panel on phones).
+   */
+  pinnedId?: string;
+  /** Always-visible header above the active panel (e.g. the My-team strip). */
+  top?: React.ReactNode;
 }
 
 /**
- * Tabs with two navigations for one state: a segmented bar above the content
- * on desktop, and a fixed bottom tab bar (thumb reach, 44px+ targets) on
- * phones. Panels stay mounted and are hidden, so charts and planners keep
- * their state when the user switches away.
+ * The pit-wall shell. On desktop it shows the pinned tower on the left and a
+ * single active workbench panel on the right, switched by a bottom console
+ * dock. On phones it collapses to one active panel with a thumb-reach bottom
+ * nav. Panels stay mounted and are hidden, so charts and planners keep their
+ * state when the user switches away.
  */
 const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
   tabs,
   defaultTab,
   children,
   onTabChange,
+  pinnedId,
+  top,
 }) => {
   const [activeTab, setActiveTab] = useState<string>(defaultTab || tabs[0]?.id || '');
+
+  const pinnedIndex = pinnedId ? tabs.findIndex((t) => t.id === pinnedId) : -1;
+  const pinnedTab = pinnedIndex >= 0 ? tabs[pinnedIndex] : undefined;
+  const dockTabs = pinnedTab ? tabs.filter((t) => t.id !== pinnedId) : tabs;
 
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId);
@@ -63,100 +79,132 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
   const panelId = (id: string) => `tab-panel-${id}`;
   const tabId = (id: string) => `tab-${id}`;
 
-  const onTablistKeyDown = (e: React.KeyboardEvent) => {
-    const idx = tabs.findIndex((t) => t.id === activeTab);
+  const onTablistKeyDown = (list: TabProps[], e: React.KeyboardEvent) => {
+    const idx = list.findIndex((t) => t.id === activeTab);
     let next: number | null = null;
-    if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
-    else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+    if (e.key === 'ArrowRight') next = (idx + 1) % list.length;
+    else if (e.key === 'ArrowLeft') next = (idx - 1 + list.length) % list.length;
     else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = tabs.length - 1;
+    else if (e.key === 'End') next = list.length - 1;
     if (next === null) return;
     e.preventDefault();
-    const target = tabs[next];
+    const target = list[next];
     handleTabChange(target.id);
     document.getElementById(tabId(target.id))?.focus();
   };
 
+  // On desktop the pinned panel is always visible, so the active workbench
+  // panel must always be a non-pinned one.
+  const workbenchTab = pinnedTab && activeTab === pinnedId ? dockTabs[0]?.id : activeTab;
+
   return (
-    <div className="flex flex-col gap-3">
-      {/* Desktop: segmented tab bar */}
-      <div role="tablist" aria-label="Dashboard sections" className="hidden md:flex items-center gap-1.5" onKeyDown={onTablistKeyDown}>
-        {tabs.map((tab) => {
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              role="tab"
-              id={tabId(tab.id)}
-              aria-selected={active}
-              aria-controls={panelId(tab.id)}
-              tabIndex={active ? 0 : -1}
-              title={tab.hint}
-              onClick={() => handleTabChange(tab.id)}
-              className={`flex items-center gap-2 h-10 px-3.5 rounded-lg text-sm font-semibold border transition-colors ${
-                active
-                  ? 'bg-surface-2 text-ink border-line'
-                  : 'text-muted border-transparent hover:text-ink hover:bg-surface'
-              }`}
-            >
-              {tab.icon}
-              {tab.label}
-              {tab.count !== undefined && (
-                <span
-                  className={`font-mono tabular text-[11px] px-1.5 py-px rounded-full ${
-                    active ? 'bg-accent text-accent-ink' : 'bg-line text-muted'
+    <div className="flex-1 flex min-h-0 w-full">
+      {/* Desktop: pinned timing tower */}
+      {pinnedTab && (
+        <aside className="hidden lg:flex w-[340px] xl:w-[380px] shrink-0 flex-col border-r border-line bg-surface min-h-0">
+          {children[pinnedIndex]}
+        </aside>
+      )}
+
+      {/* Workbench column */}
+      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+        {/* Scrollable content: header + active panel */}
+        <div className="flex-1 overflow-y-auto scroll-thin p-3 md:p-5 pb-24 lg:pb-5 flex flex-col gap-3 md:gap-4">
+          {top}
+          {children.map((child, index) => {
+            const tab = tabs[index];
+            if (!tab) return null;
+            if (tab.id === pinnedId) {
+              // Pinned panel: phones get it as a normal tab panel.
+              return (
+                <div key={tab.id} role="tabpanel" id={panelId(tab.id)} aria-labelledby={tabId(tab.id)} className="lg:hidden" hidden={activeTab !== tab.id}>
+                  {child}
+                </div>
+              );
+            }
+            return (
+              <div key={tab.id} role="tabpanel" id={panelId(tab.id)} aria-labelledby={tabId(tab.id)} hidden={workbenchTab !== tab.id}>
+                {child}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop: bottom console dock (non-pinned tools) */}
+        {pinnedTab && (
+          <nav
+            role="tablist"
+            aria-label="Dashboard tools"
+            className="hidden lg:flex shrink-0 items-stretch border-t border-line bg-surface px-3 py-2 gap-2 overflow-x-auto scroll-thin"
+            onKeyDown={(e) => onTablistKeyDown(dockTabs, e)}
+          >
+            {dockTabs.map((tab) => {
+              const active = workbenchTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  id={tabId(tab.id)}
+                  aria-selected={active}
+                  aria-controls={panelId(tab.id)}
+                  tabIndex={active ? 0 : -1}
+                  title={tab.hint}
+                  onClick={() => handleTabChange(tab.id)}
+                  className={`relative flex flex-col items-center justify-center gap-1 min-w-[72px] px-3 py-2 rounded-none border text-xs font-semibold transition-all ${
+                    active
+                      ? 'bg-accent text-accent-ink border-accent shadow-[0_0_18px_-2px_rgb(var(--c-accent)/0.9)]'
+                      : 'bg-surface text-muted border-line hover:text-ink hover:bg-surface-2 hover:border-muted'
                   }`}
                 >
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+                  {tab.icon}
+                  <span className="truncate max-w-full">{tab.label}</span>
+                  {tab.count !== undefined && (
+                    <span
+                      className={`absolute -top-1.5 -right-1.5 font-mono tabular text-[10px] leading-none px-1 py-0.5 rounded-none ${
+                        active ? 'bg-accent-ink/85 text-accent' : 'bg-line text-muted'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+        )}
 
-      {/* Panels */}
-      <div>
-        {children.map((child, index) => {
-          const tab = tabs[index];
-          if (!tab) return null;
-          return (
-            <div key={tab.id} role="tabpanel" id={panelId(tab.id)} aria-labelledby={tabId(tab.id)} hidden={activeTab !== tab.id}>
-              {child}
-            </div>
-          );
-        })}
+        {/* Phone: fixed bottom tab bar (a nav, not a second tablist). */}
+        <nav
+          aria-label="Dashboard sections"
+          className="lg:hidden fixed bottom-0 inset-x-0 z-40 flex items-stretch border-t border-line bg-surface/80 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
+        >
+          {tabs.map((tab) => {
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleTabChange(tab.id)}
+                aria-current={active ? 'page' : undefined}
+                title={tab.hint}
+                className={`relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 text-[11px] font-semibold ${
+                  active ? 'text-accent' : 'text-muted'
+                }`}
+              >
+                {active && (
+                  <span className="absolute top-0 inset-x-0 h-[3px] bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.9)]" aria-hidden />
+                )}
+                {tab.icon}
+                <span className="truncate max-w-full px-1">{tab.label}</span>
+                {tab.count !== undefined && tab.count > 0 && (
+                  <span className="absolute top-1.5 right-[calc(50%-22px)] font-mono tabular text-[10px] leading-none px-1 py-0.5 rounded-none bg-line text-muted">
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
       </div>
-
-      {/* Phone: fixed bottom tab bar (a nav, not a second tablist — one
-          logical tablist per surface, this is the thumb-reach navigator). */}
-      <nav
-        aria-label="Dashboard sections"
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 flex items-stretch border-t border-line bg-surface/80 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
-      >
-        {tabs.map((tab) => {
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => handleTabChange(tab.id)}
-              aria-current={active ? 'page' : undefined}
-              title={tab.hint}
-              className={`relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 text-[11px] font-semibold ${
-                active ? 'text-accent' : 'text-muted'
-              }`}
-            >
-              {tab.icon}
-              <span className="truncate max-w-full px-1">{tab.label}</span>
-              {tab.count !== undefined && tab.count > 0 && (
-                <span className="absolute top-1.5 right-[calc(50%-22px)] font-mono tabular text-[10px] leading-none px-1 py-0.5 rounded-full bg-line text-muted">
-                  {tab.count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </nav>
     </div>
   );
 };

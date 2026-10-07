@@ -32,7 +32,7 @@ export default function AdminDashboard() {
           <h1 className="text-3xl font-bold">Admin Dashboard</h1>
           <button
             onClick={() => router.push('/dashboard')}
-            className="px-4 py-2 bg-surface-2 border border-line rounded-lg hover:bg-line"
+            className="px-4 py-2 bg-surface-2 border border-line rounded-none hover:bg-line"
           >
             Back to Dashboard
           </button>
