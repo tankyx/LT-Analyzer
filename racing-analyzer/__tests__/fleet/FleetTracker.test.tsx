@@ -75,7 +75,7 @@ describe('FleetTracker kanban', () => {
     render(<FleetTracker {...baseProps} fleetBoard={board} />);
     const chip = screen.getByTestId('pace-chip');
     expect(chip).toHaveTextContent('-0.6s');
-    expect(chip.className).toMatch(/green/);
+    expect(chip.className).toMatch(/live/);
   });
 
   test('tapping an Available kart offers Assign and calls onReassign', () => {

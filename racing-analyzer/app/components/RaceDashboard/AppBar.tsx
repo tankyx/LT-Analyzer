@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { BarChart3, ChevronDown, Cpu, Flag, LogOut, Moon, Sun } from 'lucide-react';
+import { BarChart3, ChevronDown, Cpu, Flag, HelpCircle, LogOut, Moon, Sun } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
+import HelpDrawer from './HelpDrawer';
 
 export interface AppBarUser {
   username: string;
@@ -60,6 +61,7 @@ const AppBar: React.FC<AppBarProps> = ({
 }) => {
   const { isDark, toggleTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -100,6 +102,7 @@ const AppBar: React.FC<AppBarProps> = ({
   const cleanTimers = timers.map((t) => (t || '').trim()).filter(Boolean);
 
   return (
+    <>
     <header className="sticky top-0 z-40 h-14 border-b border-line bg-surface/80 backdrop-blur-md">
       <div className="h-full flex items-center gap-2 md:gap-4 px-3 md:px-5">
         {/* Brand (desktop only; the track button carries identity on phones) */}
@@ -169,14 +172,26 @@ const AppBar: React.FC<AppBarProps> = ({
           Driver stats
         </button>
 
+        {/* Help */}
+        <button
+          type="button"
+          onClick={() => setHelpOpen(true)}
+          aria-label="Open dashboard guide"
+          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 rounded-lg border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+        >
+          <HelpCircle size={16} />
+          <span className="hidden lg:inline text-xs font-semibold">Guide</span>
+        </button>
+
         {/* Theme */}
         <button
           type="button"
           onClick={toggleTheme}
           aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="w-10 h-10 md:w-9 md:h-9 rounded-lg border border-line flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 rounded-lg border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
         >
           {isDark ? <Sun size={16} /> : <Moon size={16} />}
+          <span className="hidden lg:inline text-xs font-semibold">{isDark ? 'Light' : 'Dark'}</span>
         </button>
 
         {/* User */}
@@ -188,9 +203,10 @@ const AppBar: React.FC<AppBarProps> = ({
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-label="Account menu"
-              className="w-10 h-10 md:w-9 md:h-9 rounded-full bg-info text-white font-bold text-[13px] flex items-center justify-center"
+              className="w-10 h-10 md:w-auto md:h-9 md:px-2 rounded-full bg-info text-white font-bold text-[13px] flex items-center justify-center gap-1"
             >
               {initials}
+              <ChevronDown size={14} className="hidden md:inline" />
             </button>
             {menuOpen && (
               <div
@@ -270,6 +286,8 @@ const AppBar: React.FC<AppBarProps> = ({
         )}
       </div>
     </header>
+    {helpOpen && <HelpDrawer onClose={() => setHelpOpen(false)} />}
+    </>
   );
 };
 

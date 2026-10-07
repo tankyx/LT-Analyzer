@@ -20,6 +20,7 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
   setDefaultLapTime,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [localPitTime, setLocalPitTime] = useState(() => {
     const minutes = Math.floor(pitStopTime / 60);
     const seconds = pitStopTime % 60;
@@ -32,7 +33,12 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   });
 
+  const MMSS = /^\d+:[0-5]\d$/;
   const handleSave = () => {
+    if (!MMSS.test(localPitTime) || !MMSS.test(localDefaultLap)) {
+      setFormError('Enter times as M:SS — e.g. 2:38, 1:30.');
+      return;
+    }
     const [pitMinutes, pitSeconds] = localPitTime.split(':').map(Number);
     const pitTotalSeconds = (pitMinutes * 60) + pitSeconds;
 
@@ -42,6 +48,7 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
     setPitStopTime(pitTotalSeconds);
     setRequiredPitStops(localStopsCount);
     setDefaultLapTime(lapTotalSeconds);
+    setFormError(null);
     setIsOpen(false);
   };
 
@@ -135,6 +142,9 @@ const PitStopConfig: React.FC<PitStopConfigProps> = ({
             </div>
           </div>
 
+          {formError && (
+            <p role="alert" className="mt-3 text-xs text-alarm">{formError}</p>
+          )}
           <div className="mt-4 flex justify-end gap-2">
             <button
               type="button"

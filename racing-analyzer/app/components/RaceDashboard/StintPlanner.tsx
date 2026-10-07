@@ -916,7 +916,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
   return (
     <div className="p-6 bg-surface text-ink">
-      <h2 className="text-2xl font-bold mb-6">Stint Planner</h2>
+      <h2 className="text-2xl font-cond font-bold tracking-wide mb-6">Stint Planner</h2>
 
       {/* Preset Selector */}
       {trackName && (
@@ -1127,7 +1127,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             color: isDarkMode ? '#ffffff' : '#000000'
           }}
         >
-          <h3 className="text-lg font-semibold mb-2">Active Stint</h3>
+          <h3 className="text-lg font-cond font-bold tracking-wide mb-2">Active Stint</h3>
           <div className="flex items-center gap-4">
             <span className="text-xl font-bold">
               {driverNames[activeStint.driverIndex]} - {formatSeconds(activeStint.elapsedTime)}
@@ -1308,32 +1308,40 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
         </span>
       </div>
 
-      {/* Available Special Stints */}
-      <div className={`mb-6 p-4 rounded-lg bg-surface-2`}>
-        <h3 className="text-lg font-semibold mb-3">Available Special Stints</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <span className="font-medium">Max Joker Stints: </span>
-            <span className="text-xl font-bold">{availableSpecialStints.maxJokers}</span>
+      {/* Available Special Stints (collapsed reference) */}
+      <details className="mb-6 group">
+        <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden flex items-center gap-2 font-cond font-bold text-lg tracking-wide text-ink hover:text-accent transition-colors">
+          <svg className="w-4 h-4 text-muted group-open:rotate-90 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+          Available Special Stints
+        </summary>
+        <div className="mt-3 p-4 rounded-lg bg-surface-2">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <span className="font-medium">Max Joker Stints: </span>
+              <span className="text-xl font-bold">{availableSpecialStints.maxJokers}</span>
+            </div>
+            <div>
+              <span className="font-medium">Max Long Stints: </span>
+              <span className="text-xl font-bold">{availableSpecialStints.maxLongs}</span>
+            </div>
+            <div>
+              <span className="font-medium">Base Stint Time: </span>
+              <span className="text-xl font-bold">{availableSpecialStints.baseStintTime}m</span>
+            </div>
           </div>
-          <div>
-            <span className="font-medium">Max Long Stints: </span>
-            <span className="text-xl font-bold">{availableSpecialStints.maxLongs}</span>
-          </div>
-          <div>
-            <span className="font-medium">Base Stint Time: </span>
-            <span className="text-xl font-bold">{availableSpecialStints.baseStintTime}m</span>
+          <div className="mt-2 text-sm opacity-75">
+            Note: Time differences are automatically compensated across other stints
           </div>
         </div>
-        <div className="mt-2 text-sm opacity-75">
-          Note: Time differences are automatically compensated across other stints
-        </div>
-      </div>
+      </details>
 
-      {/* Driver Names */}
-      <div className="mb-6">
-        <h3 className="text-lg font-semibold mb-3">Driver Names</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Driver Names (core setup, open by default) */}
+      <details open className="mb-6 group">
+        <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden flex items-center gap-2 font-cond font-bold text-lg tracking-wide text-ink hover:text-accent transition-colors">
+          <svg className="w-4 h-4 text-muted group-open:rotate-90 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+          Driver Names
+        </summary>
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {driverNames.map((name, index) => (
             <div key={index}>
               <label htmlFor={`stint-driver-name-${index}`} className={`block text-sm font-medium mb-1 text-ink`}>
@@ -1355,11 +1363,15 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             </div>
           ))}
         </div>
-      </div>
+      </details>
 
-      {/* Driver Statistics */}
-      <div className={`mb-6 p-4 rounded-lg bg-surface-2`}>
-        <h3 className="text-lg font-semibold mb-3">Driver Statistics</h3>
+      {/* Driver Statistics (collapsed reference) */}
+      <details className="mb-6 group">
+        <summary className="cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden flex items-center gap-2 font-cond font-bold text-lg tracking-wide text-ink hover:text-accent transition-colors">
+          <svg className="w-4 h-4 text-muted group-open:rotate-90 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+          Driver Statistics
+        </summary>
+        <div className="mt-3 p-4 rounded-lg bg-surface-2">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {driverStats.map((stat, index) => (
             <div 
@@ -1382,7 +1394,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             </div>
           ))}
         </div>
-      </div>
+        </div>
+      </details>
 
       {/* Stint Table */}
       <div className="overflow-x-auto">
@@ -1476,7 +1489,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       {/* Stint History */}
       {stintHistory.length > 0 && (
         <div className="mt-6">
-          <h3 className="text-lg font-semibold mb-3">Completed Stints</h3>
+          <h3 className="text-lg font-cond font-bold tracking-wide mb-3">Completed Stints</h3>
           <div className="space-y-2">
             {stintHistory.map((stint, index) => (
               <div key={index} className={`p-2 rounded bg-surface-2`}>

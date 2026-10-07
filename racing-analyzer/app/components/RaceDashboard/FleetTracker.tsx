@@ -171,7 +171,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
   const laneStyleFor = (lane: number) => COLOR_MAP[laneColors[lane] || defaultColorKey(lane)];
 
   const subtle = 'text-muted';
-  const colHeader = 'text-ink';
+  const colHeader = 'text-ink font-cond font-bold tracking-wide';
   const columnWrap = 'bg-surface-2';
 
   const onTrack = useMemo(() => fleetBoard.filter(k => k.column === 'on_track').sort(byPace), [fleetBoard]);
@@ -232,9 +232,11 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
     finally { setBusy(false); }
   };
   const handleDeleteKart = async (kartId: number) => {
+    if (!confirm('Retire this kart? It will be removed from the fleet.')) return;
     setBusy(true);
+    setAutoMsg(null);
     try { await ApiService.deleteFleetKart(trackId, kartId); onRegistryChange(); }
-    catch (err) { console.error('delete kart failed', err); }
+    catch (err) { setAutoMsg(`Retire failed: ${err instanceof Error ? err.message : 'error'}`); }
     finally { setBusy(false); }
   };
 
@@ -413,7 +415,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
           onClick={() => setSelected(null)} data-testid="kart-action-sheet">
           <div onClick={e => e.stopPropagation()}
             className={`w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl p-4 sm:p-6 bg-surface text-ink`}>
-            <h2 className="text-lg font-bold mb-1">Kart {selected.label}</h2>
+            <h2 className="text-lg font-cond font-bold tracking-wide mb-1">Kart {selected.label}</h2>
             <p className={`text-sm mb-4 ${subtle}`}>
               {selected.column === 'available'
                 ? (selected.lane != null ? `In lane ${selected.lane}` : 'Just dropped (no lane)')

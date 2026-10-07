@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FleetKart } from './FleetTracker';
 
 // Minimal shape we need from a live team row (decoupled from the various
@@ -29,6 +29,30 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
   const [teamName, setTeamName] = useState(prompt?.teamName ?? '');
   const [fleetKartId, setFleetKartId] = useState<number | ''>(defaultKartId ?? '');
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
+          'button, input, select, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
 
   const activeKarts = registry.filter(k => k.is_active);
   const canSubmit = teamName.trim() !== '' && fleetKartId !== '' && !submitting;
@@ -55,6 +79,10 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
       data-testid="assignment-overlay"
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={prompt ? `Assign kart to ${prompt.teamName}` : 'Assign a kart'}
         className={`w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl p-4 sm:p-6 ${panel}`}
         onClick={e => e.stopPropagation()}
       >

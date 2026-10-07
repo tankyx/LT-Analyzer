@@ -9,6 +9,9 @@ export interface DashboardAlert {
   type?: 'info' | 'warning' | 'success' | 'error';
   customContent?: React.ReactNode;
   teamKart?: string;
+  fleetKartId?: number;
+  persistent?: boolean;
+  action?: { label: string; onClick: () => void };
 }
 
 interface AlertStackProps {
@@ -51,6 +54,15 @@ const AlertStack: React.FC<AlertStackProps> = ({ alerts, onDismiss, onLocate }) 
                   className="h-8 px-2.5 rounded-md text-xs font-semibold bg-surface-2 hover:bg-line"
                 >
                   Locate
+                </button>
+              )}
+              {alert.action && (
+                <button
+                  type="button"
+                  onClick={() => { alert.action!.onClick(); onDismiss(alert.id); }}
+                  className="h-8 px-2.5 rounded-md text-xs font-semibold bg-accent/15 text-accent hover:bg-accent/25"
+                >
+                  {alert.action.label}
                 </button>
               )}
               <button

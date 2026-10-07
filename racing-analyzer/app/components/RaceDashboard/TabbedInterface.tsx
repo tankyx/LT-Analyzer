@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export interface TabProps {
   id: string;
   label: string;
   icon?: React.ReactNode;
   count?: number;
+  /** One-line explanation shown as a hover tooltip on the tab. */
+  hint?: string;
 }
 
 interface TabbedInterfaceProps {
@@ -34,6 +36,29 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
     setActiveTab(tabId);
     onTabChange?.(tabId);
   };
+
+  // Keyboard accelerator: 1-9 jumps straight to a tab. Ignored while typing
+  // in a field or when a modifier is held. Ref-mirrored so the listener is
+  // registered once, not per live update (~1/s).
+  const tabsRef = useRef(tabs);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  const changeRef = useRef(handleTabChange);
+  useEffect(() => { changeRef.current = handleTabChange; });
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const idx = parseInt(e.key, 10);
+      if (idx >= 1 && idx <= tabsRef.current.length) {
+        e.preventDefault();
+        changeRef.current(tabsRef.current[idx - 1].id);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   const panelId = (id: string) => `tab-panel-${id}`;
   const tabId = (id: string) => `tab-${id}`;
@@ -66,6 +91,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
               aria-selected={active}
               aria-controls={panelId(tab.id)}
               tabIndex={active ? 0 : -1}
+              title={tab.hint}
               onClick={() => handleTabChange(tab.id)}
               className={`flex items-center gap-2 h-10 px-3.5 rounded-lg text-sm font-semibold border transition-colors ${
                 active
@@ -102,9 +128,9 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
         })}
       </div>
 
-      {/* Phone: fixed bottom tab bar */}
+      {/* Phone: fixed bottom tab bar (a nav, not a second tablist — one
+          logical tablist per surface, this is the thumb-reach navigator). */}
       <nav
-        role="tablist"
         aria-label="Dashboard sections"
         className="md:hidden fixed bottom-0 inset-x-0 z-40 flex items-stretch border-t border-line bg-surface/80 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
       >
@@ -113,11 +139,9 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
           return (
             <button
               key={tab.id}
-              role="tab"
-              aria-selected={active}
-              aria-controls={panelId(tab.id)}
-              tabIndex={active ? 0 : -1}
               onClick={() => handleTabChange(tab.id)}
+              aria-current={active ? 'page' : undefined}
+              title={tab.hint}
               className={`relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 text-[11px] font-semibold ${
                 active ? 'text-accent' : 'text-muted'
               }`}

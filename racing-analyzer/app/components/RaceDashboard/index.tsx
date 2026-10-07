@@ -74,6 +74,11 @@ interface Alert {
   type?: 'info' | 'warning' | 'success' | 'error';
   customContent?: React.ReactNode;
   teamKart?: string; // Add team identifier for pit alerts
+  fleetKartId?: number; // fleet kart identifier for fleet pit alerts
+  /** Persists until dismissed or the live condition clears; skipped by auto-dismiss. */
+  persistent?: boolean;
+  /** Optional inline action button (e.g. Undo). */
+  action?: { label: string; onClick: () => void };
 }
 
 interface Trend {
@@ -349,6 +354,8 @@ const RaceDashboard = () => {
   const [gapHistory, setGapHistory] = useState<GapHistory>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
+  // Non-blocking notice for background data loads that failed (fleet, prefs).
+  const [dataWarning, setDataWarning] = useState<string | null>(null);
   const { isDark: isDarkMode } = useTheme();
   const [trackSheetOpen, setTrackSheetOpen] = useState(false);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
@@ -390,6 +397,8 @@ const RaceDashboard = () => {
   useEffect(() => { fleetRegistryRef.current = fleetRegistry; }, [fleetRegistry]);
   const teamsRef = useRef<Team[]>([]);
   useEffect(() => { teamsRef.current = teams; }, [teams]);
+  const monitoredTeamsRef = useRef<string[]>([]);
+  useEffect(() => { monitoredTeamsRef.current = monitoredTeams; }, [monitoredTeams]);
   const updatedRowsRef = useRef<Map<string, number>>(new Map());
   useEffect(() => { updatedRowsRef.current = updatedRows; }, [updatedRows]);
 
@@ -567,6 +576,7 @@ const RaceDashboard = () => {
             message: `🔴 ALERT: ${team.Team} is in the pits!`,
             type: 'error', // Use error type for more visibility
             teamKart: team.Kart, // Add team identifier
+            persistent: true, // stays until the team exits the pits or user dismisses
             // Adding extra data for styled rendering
             customContent: (
               <div className="flex flex-col gap-1">
@@ -582,9 +592,9 @@ const RaceDashboard = () => {
           // Play a sound alert if browser supports it
           try {
             const audio = new Audio('/notification.mp3');
-            audio.play().catch(e => console.log('Audio play prevented by browser', e));
-          } catch (e) {
-            console.log('Audio not supported', e);
+            audio.play().catch(() => { /* autoplay blocked; the visual alert still shows */ });
+          } catch {
+            /* audio unsupported; the visual alert still shows */
           }
 
           // Fleet Tracker: a tracked team just pitted — prompt the crew to
@@ -610,14 +620,15 @@ const RaceDashboard = () => {
     });
   }, [monitoredTeams, alertedPitTeams]);
 
-  // Auto-dismiss alerts after 5 seconds
+  // Auto-dismiss only transient alerts (info/success). Persistent alerts —
+  // pit alerts, fleet pit alerts — stay until their live condition clears or
+  // the user dismisses them, so a "PIT NOW" call is never timed out.
   useEffect(() => {
-    if (alerts.length > 0) {
-      const timer = setTimeout(() => {
-        setAlerts(prev => prev.slice(1)); // Remove oldest alert
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
+    if (!alerts.some(a => !a.persistent)) return;
+    const timer = setTimeout(() => {
+      setAlerts(prev => prev.filter(a => a.persistent));
+    }, 5000);
+    return () => clearTimeout(timer);
   }, [alerts]);
 
   // Fleet Tracker: raise a one-shot alert when a fast machine enters the pits
@@ -631,6 +642,8 @@ const RaceDashboard = () => {
           id: Date.now(),
           message: `⚡ Fast kart ${kart.label} just entered the pits${kart.holder_team ? ` (was ${kart.holder_team})` : ''}`,
           type: 'warning',
+          fleetKartId: kart.fleet_kart_id,
+          persistent: true, // clears when the kart leaves the pits
         }]);
       } else if (!isFastInPits && alertedFleetPits.has(kart.fleet_kart_id)) {
         setAlertedFleetPits(prev => {
@@ -638,6 +651,7 @@ const RaceDashboard = () => {
           next.delete(kart.fleet_kart_id);
           return next;
         });
+        setAlerts(prev => prev.filter(a => a.fleetKartId !== kart.fleet_kart_id));
       }
     });
   }, [alertedFleetPits]);
@@ -659,8 +673,10 @@ const RaceDashboard = () => {
       setFleetBoard(state.karts || []);
       if (state.session_id != null) setCurrentSessionId(state.session_id);
       checkFleetPitAlerts(state.karts || []);
+      setDataWarning(null);
     } catch (err) {
       console.warn('Failed to load fleet state', err);
+      setDataWarning('Live fleet data failed to load — retrying on the next update.');
     }
   }, [selectedTrackId, checkFleetPitAlerts]);
 
@@ -692,6 +708,7 @@ const RaceDashboard = () => {
       setFleetRegistry(res.karts || []);
     } catch (err) {
       console.warn('Failed to load fleet registry', err);
+      setDataWarning('Could not load your fleet roster for this track.');
     }
     refreshFleetState();
   }, [selectedTrackId, refreshFleetState]);
@@ -774,11 +791,9 @@ const RaceDashboard = () => {
     webSocketService.setCallbacks({
       onConnectionStatusChange: (status) => {
         setConnectionStatus(status);
-        console.log('WebSocket connection status:', status);
       },
       
       onRaceDataUpdate: (data: RaceDataUpdate) => {
-        console.log('Received full race data update');
         detectChanges(data.teams);
         setTeams(data.teams || []);
         setLiveUpdateTick(t => t + 1);
@@ -796,7 +811,6 @@ const RaceDashboard = () => {
       },
 
       onTeamsUpdate: (data: TeamsUpdate) => {
-        console.log('Received teams update');
         detectChanges(data.teams);
         setTeams(data.teams || []);
         setLiveUpdateTick(t => t + 1);
@@ -811,12 +825,10 @@ const RaceDashboard = () => {
       // longer emitted by the backend. Deltas are computed client-side and
       // monitoring + pit config live behind /api/me/prefs.
       onSessionUpdate: (data: SessionUpdate) => {
-        console.log('Received session update');
         setSessionInfo(data.session_info || {});
       },
       
       onRaceDataReset: () => {
-        console.log('Received race data reset');
         // Reset all race-related state
         setTeams([]);
         setSessionInfo({});
@@ -837,7 +849,6 @@ const RaceDashboard = () => {
       },
 
       onSessionStatus: (data) => {
-        console.log('Received session status:', data);
         setSessionStatus({
           active: data.active,
           message: data.message,
@@ -855,7 +866,6 @@ const RaceDashboard = () => {
       },
 
       onAllTracksStatus: (data: AllTracksStatusUpdate) => {
-        console.log('Received all tracks status:', data);
         setAllTracksStatus(data.tracks);
       }
     });
@@ -934,7 +944,6 @@ const RaceDashboard = () => {
   // Handle track selection changes
   useEffect(() => {
     if (selectedTrackId) {
-      console.log(`Switching to track ${selectedTrackId}`);
       // Clear stale per-track state immediately. If the new track is broadcasting,
       // the next track_update will repopulate within ~1s. If it's idle, the user
       // sees an honest "no data" view instead of the previous track's standings.
@@ -961,6 +970,7 @@ const RaceDashboard = () => {
           if (state.session_id != null) setCurrentSessionId(state.session_id);
         } catch (err) {
           console.warn('Failed to seed fleet state', err);
+          setDataWarning('Could not load your fleet for this track.');
         }
       })();
 
@@ -984,6 +994,7 @@ const RaceDashboard = () => {
           setDefaultLapTime(fresh.default_lap_time);
         } catch (err) {
           console.warn('Failed to load prefs for track', selectedTrackId, err);
+          setDataWarning('Could not sync your settings for this track.');
         }
       })();
     }
@@ -1040,13 +1051,29 @@ const RaceDashboard = () => {
   }, [selectedTrackId]);
 
   // Stable identity so memoized StandingsRow props don't churn per render.
+  // Un-monitoring offers a one-tap Undo (the row is still visible, but the
+  // toast keeps the reversal one step instead of a re-hunt).
   const toggleTeamMonitoring = useCallback((kartNum: string) => {
     setIsUserUpdate(true);
-    setMonitoredTeams(prev =>
-      prev.includes(kartNum)
-        ? prev.filter(k => k !== kartNum)
-        : [...prev, kartNum]
-    );
+    if (monitoredTeamsRef.current.includes(kartNum)) {
+      const team = teamsRef.current.find(t => t.Kart === kartNum);
+      const label = team ? displayTeamName(team.Team) : `#${kartNum}`;
+      setMonitoredTeams(prev => prev.filter(k => k !== kartNum));
+      setAlerts(prev => [...prev, {
+        id: Date.now(),
+        message: `Stopped monitoring ${label}`,
+        type: 'info',
+        action: {
+          label: 'Undo',
+          onClick: () => {
+            setIsUserUpdate(true);
+            setMonitoredTeams(prev => (prev.includes(kartNum) ? prev : [...prev, kartNum]));
+          },
+        },
+      }]);
+    } else {
+      setMonitoredTeams(prev => [...prev, kartNum]);
+    }
   }, []);
 
   const dismissAlert = (id: number) => {
@@ -1203,6 +1230,15 @@ const RaceDashboard = () => {
               </button>
             </div>
           )}
+          {monitoredTeams.length > 0 && (
+            <button
+              type="button"
+              onClick={() => { setIsUserUpdate(true); setMonitoredTeams([]); }}
+              className="h-8 px-2.5 rounded-md text-xs font-semibold text-muted hover:text-alarm hover:bg-alarm/10"
+            >
+              Clear all
+            </button>
+          )}
         </div>
 
         <div className="p-3 flex flex-col gap-2">
@@ -1334,12 +1370,12 @@ const RaceDashboard = () => {
   );
 
   const tabs = [
-    { id: 'standings', label: 'Standings', icon: <List size={18} />, count: teams.length },
-    { id: 'monitored', label: 'Monitored', icon: <Eye size={18} />, count: monitoredTeams.length },
-    { id: 'pace', label: 'Pace', icon: <Gauge size={18} /> },
-    { id: 'chart', label: 'Delta', icon: <LineChart size={18} /> },
-    { id: 'stints', label: 'Stints', icon: <Clock size={18} /> },
-    { id: 'fleet', label: 'Fleet', icon: <Car size={18} />, count: fleetBoard.length },
+    { id: 'standings', label: 'Standings', icon: <List size={18} />, count: teams.length, hint: 'Live positions and lap times for the whole field' },
+    { id: 'monitored', label: 'Monitored', icon: <Eye size={18} />, count: monitoredTeams.length, hint: 'Your rivals’ gaps, measured from your team' },
+    { id: 'pace', label: 'Pace', icon: <Gauge size={18} />, hint: 'How your lap pace compares to the field right now' },
+    { id: 'chart', label: 'Delta', icon: <LineChart size={18} />, hint: 'Time gap to your team across the last 15 laps' },
+    { id: 'stints', label: 'Stints', icon: <Clock size={18} />, hint: 'Plan driver stints and pit windows' },
+    { id: 'fleet', label: 'Fleet', icon: <Car size={18} />, count: fleetBoard.length, hint: 'Which physical karts are on track vs in the pits' },
     ...(user?.role === 'admin' ? [{ id: 'admin', label: 'Admin', icon: <Settings size={18} /> }] : []),
   ];
 
@@ -1378,6 +1414,31 @@ const RaceDashboard = () => {
             <div className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2">
               <AlertTriangle size={16} className="text-accent shrink-0" />
               <span>{sessionStatus.trackName || selectedTrackName}: no active session right now.</span>
+            </div>
+          )}
+
+          {dataWarning && (
+            <div
+              role="status"
+              className="rounded-lg border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2"
+            >
+              <AlertTriangle size={16} className="text-accent shrink-0" />
+              <span className="flex-1 min-w-0">{dataWarning}</span>
+              <button
+                type="button"
+                onClick={() => { setDataWarning(null); refreshFleetState(); }}
+                className="shrink-0 h-7 px-2.5 rounded-md text-xs font-semibold bg-surface-2 hover:bg-line"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={() => setDataWarning(null)}
+                aria-label="Dismiss warning"
+                className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
 
