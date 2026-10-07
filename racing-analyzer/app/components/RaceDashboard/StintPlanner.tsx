@@ -363,26 +363,22 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
   }, [trackId]);
 
   // Pastel colors for drivers (4 opposite colors on color wheel)
-  const driverColors = useMemo(() => {
-    const colors = [
-      { light: 'rgb(255, 230, 230)', dark: 'rgb(60, 30, 30)' },    // Pastel Red
-      { light: 'rgb(230, 255, 230)', dark: 'rgb(30, 60, 30)' },    // Pastel Green
-      { light: 'rgb(230, 240, 255)', dark: 'rgb(30, 40, 60)' },    // Pastel Blue
-      { light: 'rgb(255, 245, 230)', dark: 'rgb(60, 50, 30)' },    // Pastel Orange
-      { light: 'rgb(255, 230, 255)', dark: 'rgb(60, 30, 60)' },    // Pastel Purple
-      { light: 'rgb(230, 255, 255)', dark: 'rgb(30, 60, 60)' },    // Pastel Cyan
-      { light: 'rgb(255, 255, 230)', dark: 'rgb(60, 60, 30)' },    // Pastel Yellow
-      { light: 'rgb(240, 230, 255)', dark: 'rgb(40, 30, 60)' },    // Pastel Indigo
-      { light: 'rgb(255, 240, 245)', dark: 'rgb(60, 40, 50)' },    // Pastel Pink
-      { light: 'rgb(240, 255, 240)', dark: 'rgb(40, 60, 40)' },    // Pastel Mint
-    ];
-    return colors;
-  }, []);
+  // Vivid livery palette — saturated so blocks read on both themes and sit
+  // in the same world as the pit-wall orange/purple (no washed-out pastels).
+  const driverColors = useMemo(() => [
+    '#E5484D',  // red
+    '#F76B15',  // orange
+    '#3E63DD',  // blue
+    '#30A46C',  // green
+    '#8E4EC6',  // purple
+    '#00A2C7',  // cyan
+    '#D6409F',  // pink
+    '#65A30D',  // lime
+    '#12A594',  // teal
+    '#6366F1',  // indigo
+  ], []);
 
-  const getDriverColor = (index: number) => {
-    const colorIndex = index % driverColors.length;
-    return isDarkMode ? driverColors[colorIndex].dark : driverColors[colorIndex].light;
-  };
+  const getDriverColor = (index: number) => driverColors[index % driverColors.length];
 
   // Calculate available jokers and long stints
   const availableSpecialStints = useMemo(() => {
@@ -1157,7 +1153,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           className={`mb-6 p-4 rounded-none border-2 border-live`}
           style={{
             backgroundColor: getDriverColor(activeStint.driverIndex),
-            color: isDarkMode ? '#ffffff' : '#000000'
+            color: '#fff'
           }}
         >
           <h3 className="text-lg font-cond font-bold tracking-wide mb-2">Active Stint</h3>
@@ -1188,7 +1184,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 onClick={() => setSelectedStintIndex(i)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedStintIndex(i); } }}
                 title={`Stint ${a.stint}: ${driverNames[a.driver - 1]}, ${a.duration} min — drag the right edge to resize`}
-                style={{ flexGrow: Math.max(a.duration, 0.5), flexBasis: 0, backgroundColor: getDriverColor(a.driver - 1), color: isDarkMode ? '#fff' : '#000' }}
+                style={{ flexGrow: Math.max(a.duration, 0.5), flexBasis: 0, backgroundColor: getDriverColor(a.driver - 1), color: '#fff' }}
                 className={`relative flex flex-col items-center justify-center min-w-0 overflow-hidden cursor-pointer select-none hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                   selectedStintIndex === i ? 'ring-2 ring-accent z-10' : ''
                 }`}
@@ -1280,7 +1276,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           }`}
           style={{
             backgroundColor: getDriverColor(currentDriverIndex),
-            color: isDarkMode ? '#ffffff' : '#000000'
+            color: '#fff'
           }}
         >
           {driverNames.map((name, index) => (
@@ -1289,7 +1285,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
               value={index}
               style={{
                 backgroundColor: getDriverColor(index),
-                color: isDarkMode ? '#ffffff' : '#000000'
+                color: '#fff'
               }}
             >
               {name}
@@ -1486,7 +1482,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 }`}
                 style={{
                   backgroundColor: getDriverColor(index),
-                  color: isDarkMode ? '#ffffff' : '#000000'
+                  color: '#fff'
                 }}
               />
             </div>
@@ -1510,7 +1506,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
               }`}
               style={{
                 backgroundColor: getDriverColor(index),
-                color: isDarkMode ? '#ffffff' : '#000000'
+                color: '#fff'
               }}
             >
               <h4 className="font-medium mb-2">{stat.name}</h4>

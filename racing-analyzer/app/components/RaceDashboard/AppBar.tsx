@@ -107,9 +107,13 @@ const AppBar: React.FC<AppBarProps> = ({
       <div className="h-full flex items-center gap-2 md:gap-4 px-3 md:px-5">
         {/* Brand (desktop only; the track button carries identity on phones) */}
         <div className="hidden md:flex items-center gap-2.5 shrink-0">
-          <div className="w-[30px] h-[30px] rounded-none accent-gradient text-accent-ink font-cond font-bold text-[15px] flex items-center justify-center">
-            LT
-          </div>
+          <img
+            src="/logo.png"
+            alt="LT-Analyzer"
+            width={30}
+            height={30}
+            className="w-[30px] h-[30px] rounded-none object-cover"
+          />
           <span className="font-cond font-bold text-[19px] tracking-wide">LT-ANALYZER</span>
           <div className="w-px h-6 bg-line ml-1.5" />
         </div>
