@@ -4,14 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { ThemeProvider, resolveInitialTheme, useTheme, THEME_STORAGE_KEY } from '@/app/contexts/ThemeContext';
 
 describe('resolveInitialTheme', () => {
-  test('explicit saved choice wins over OS preference', () => {
-    expect(resolveInitialTheme('light', true)).toBe('light');
-    expect(resolveInitialTheme('dark', false)).toBe('dark');
+  test('explicit saved choice wins', () => {
+    expect(resolveInitialTheme('light')).toBe('light');
+    expect(resolveInitialTheme('dark')).toBe('dark');
   });
-  test('falls back to OS preference when nothing is saved or the value is junk', () => {
-    expect(resolveInitialTheme(null, true)).toBe('dark');
-    expect(resolveInitialTheme(undefined, false)).toBe('light');
-    expect(resolveInitialTheme('blue', true)).toBe('dark');
+  test('defaults to dark when nothing is saved or the value is junk', () => {
+    expect(resolveInitialTheme(null)).toBe('dark');
+    expect(resolveInitialTheme(undefined)).toBe('dark');
+    expect(resolveInitialTheme('blue')).toBe('dark');
   });
 });
 
@@ -25,20 +25,17 @@ const Probe = () => {
 };
 
 describe('ThemeProvider', () => {
-  let getItem: jest.SpyInstance;
   let setItem: jest.SpyInstance;
   beforeEach(() => {
     document.documentElement.classList.remove('dark');
-    getItem = jest.spyOn(Storage.prototype, 'getItem');
     setItem = jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {});
   });
   afterEach(() => {
-    getItem.mockRestore();
     setItem.mockRestore();
   });
 
-  test('applies the saved theme to <html> and toggles + persists on demand', async () => {
-    getItem.mockReturnValue('dark');
+  test('adopts the boot-script theme from <html> and toggles + persists on demand', async () => {
+    document.documentElement.classList.add('dark'); // simulate the inline boot script
     render(
       <ThemeProvider>
         <Probe />
@@ -54,8 +51,7 @@ describe('ThemeProvider', () => {
     expect(setItem).toHaveBeenCalledWith(THEME_STORAGE_KEY, 'light');
   });
 
-  test('defaults to light when nothing is saved and the OS does not prefer dark', async () => {
-    getItem.mockReturnValue(null);
+  test('renders light when the boot script did not set dark', async () => {
     render(
       <ThemeProvider>
         <Probe />

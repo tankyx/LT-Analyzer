@@ -597,7 +597,7 @@ export default function DataPage() {
 
   if (loading) {
     return (
-      <div className="dark flex items-center justify-center min-h-screen bg-canvas">
+      <div className="dark flex items-center justify-center min-h-screen canvas">
         <div className="text-white">Loading...</div>
       </div>
     );
@@ -608,7 +608,7 @@ export default function DataPage() {
   }
 
   return (
-    <div className="dark min-h-screen bg-canvas p-6">
+    <div className="dark min-h-screen canvas p-6">
       <div className="max-w-7xl mx-auto">
         <h1 className="text-3xl font-bold text-white mb-6">Driver Stats</h1>
 

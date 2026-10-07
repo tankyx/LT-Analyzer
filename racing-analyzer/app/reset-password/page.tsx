@@ -50,7 +50,7 @@ function ResetPasswordInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">
+    <div className="min-h-screen flex items-center justify-center canvas text-ink">
       <div className="max-w-md w-full p-6 bg-surface rounded-md space-y-4">
         <h2 className="text-center text-2xl font-bold">Set a new password</h2>
         <form className="space-y-3" onSubmit={submit}>
@@ -93,7 +93,7 @@ function ResetPasswordInner() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
+    <Suspense fallback={<div className="min-h-screen canvas" />}>
       <ResetPasswordInner />
     </Suspense>
   );

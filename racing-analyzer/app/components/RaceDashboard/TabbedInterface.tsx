@@ -106,7 +106,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
       <nav
         role="tablist"
         aria-label="Dashboard sections"
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 flex items-stretch border-t border-line bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 flex items-stretch border-t border-line bg-surface/80 backdrop-blur-md pb-[env(safe-area-inset-bottom)]"
       >
         {tabs.map((tab) => {
           const active = activeTab === tab.id;

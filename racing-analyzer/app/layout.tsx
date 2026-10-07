@@ -41,9 +41,9 @@ export const viewport: Viewport = {
   ],
 };
 
-// Applies the saved (or OS) theme before first paint so the page never
-// flashes light-then-dark. Mirrors resolveInitialTheme() in ThemeContext.
-const themeBootScript = `(function(){try{var t=localStorage.getItem('${THEME_STORAGE_KEY}');var d=t==='dark'||(t!=='light'&&window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d){document.documentElement.classList.add('dark');}document.documentElement.style.colorScheme=d?'dark':'light';}catch(e){}})();`;
+// Applies the saved theme before first paint, defaulting to the dark pit
+// wall unless the user explicitly chose light. Mirrors resolveInitialTheme().
+const themeBootScript = `(function(){try{var t=localStorage.getItem('${THEME_STORAGE_KEY}');var d=t!=='light';if(d){document.documentElement.classList.add('dark');}document.documentElement.style.colorScheme=d?'dark':'light';}catch(e){}})();`;
 
 export default function RootLayout({
   children,

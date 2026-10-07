@@ -79,7 +79,7 @@ const Stat: React.FC<{ label: string; value: React.ReactNode; sub?: React.ReactN
 }) => (
   <div className="flex flex-col gap-1 min-w-0">
     <span className="text-[10px] md:text-[11px] font-bold tracking-[.08em] uppercase text-muted truncate">{label}</span>
-    <span className={`font-mono tabular text-lg md:text-[22px] font-semibold leading-none ${tone}`}>{value}</span>
+    <span className={`font-mono tabular text-[22px] md:text-[30px] font-bold leading-none tracking-tight ${tone}`}>{value}</span>
     {sub !== undefined && <span className="text-xs text-muted truncate">{sub}</span>}
   </div>
 );

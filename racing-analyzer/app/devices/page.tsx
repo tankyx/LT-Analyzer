@@ -175,7 +175,7 @@ export default function DevicesPage() {
 
   if (authLoading || !user) {
     return (
-      <div className="min-h-screen bg-canvas text-ink flex items-center justify-center">
+      <div className="min-h-screen canvas text-ink flex items-center justify-center">
         <span className="text-muted text-sm">Loading…</span>
       </div>
     );
@@ -187,7 +187,7 @@ export default function DevicesPage() {
   const ss = String(secondsLeft % 60).padStart(2, '0');
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
+    <div className="min-h-screen canvas text-ink">
       <div className="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-5">
         <header className="flex items-center gap-3">
           <button

@@ -31,20 +31,20 @@
 }
 
 .dark {
-  --c-canvas: 11 14 19;
-  --c-surface: 18 22 29;
-  --c-surface-2: 24 30 39;
-  --c-line: 36 44 56;
+  --c-canvas: 8 11 16;
+  --c-surface: 15 19 27;
+  --c-surface-2: 21 27 37;
+  --c-line: 40 50 64;
   --c-ink: 233 237 242;
-  --c-muted: 138 148 166;
-  --c-accent: 242 182 50;
-  --c-accent-hi: 255 208 88;
+  --c-muted: 140 150 168;
+  --c-accent: 255 170 40;
+  --c-accent-hi: 255 200 70;
   --c-accent-ink: 26 18 0;
-  --c-live: 67 209 122;
-  --c-alarm: 240 101 90;
-  --c-info: 90 169 255;
-  --c-class1: 90 169 255;
-  --c-class2: 192 132 252;
+  --c-live: 52 211 153;
+  --c-alarm: 245 108 96;
+  --c-info: 96 172 255;
+  --c-class1: 96 172 255;
+  --c-class2: 194 136 255;
 
   --background: rgb(var(--c-canvas));
   --foreground: rgb(var(--c-ink));
@@ -57,6 +57,15 @@ body {
   font-family: var(--font-sans), "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+/* Page canvas with an ambient pit-wall glow: a faint accent + info wash at
+   the top corners. Tokens flip with theme, so the glow sits on either world. */
+.canvas {
+  background-color: rgb(var(--c-canvas));
+  background-image:
+    radial-gradient(760px 420px at 12% -12%, rgb(var(--c-accent) / 0.16), transparent 62%),
+    radial-gradient(640px 360px at 88% -14%, rgb(var(--c-info) / 0.10), transparent 62%);
 }
 
 /* Signature accent: warm gradient sweep for the brand mark and primary actions.

@@ -4,7 +4,7 @@ export const metadata = { title: 'Privacy — LT-Analyzer' };
 
 export default function PrivacyPage() {
   return (
-    <div className="min-h-screen bg-canvas text-ink">
+    <div className="min-h-screen canvas text-ink">
       <main className="max-w-3xl mx-auto px-4 py-10 space-y-6">
         <Link href="/" className="text-sm text-info hover:underline">← Home</Link>
         <h1 className="text-3xl font-bold">Privacy Policy</h1>

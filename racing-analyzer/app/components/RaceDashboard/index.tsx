@@ -1055,7 +1055,7 @@ const RaceDashboard = () => {
 
   if (isLoading && connectionStatus === 'disconnected') {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-canvas text-ink">
+      <div className="flex items-center justify-center min-h-screen canvas text-ink">
         <div className="flex flex-col items-center gap-4">
           <div className="w-10 h-10 border-[3px] border-accent border-t-transparent rounded-full animate-spin" />
           <div className="text-sm text-muted">Connecting to the timing server…</div>
@@ -1344,7 +1344,7 @@ const RaceDashboard = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
+    <div className="min-h-screen canvas text-ink">
       <AppBar
         trackName={selectedTrackName}
         sessionLabel={sessionLabel}

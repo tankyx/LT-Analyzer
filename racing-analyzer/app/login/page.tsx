@@ -71,7 +71,7 @@ function LoginInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink p-4">
+    <div className="min-h-screen flex items-center justify-center canvas text-ink p-4">
       <div className="w-full max-w-sm flex flex-col gap-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-[9px] accent-gradient text-accent-ink font-cond font-bold text-lg flex items-center justify-center">
@@ -163,7 +163,7 @@ function LoginInner() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
+    <Suspense fallback={<div className="min-h-screen canvas" />}>
       <LoginInner />
     </Suspense>
   );

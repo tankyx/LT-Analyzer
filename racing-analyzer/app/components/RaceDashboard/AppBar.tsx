@@ -100,7 +100,7 @@ const AppBar: React.FC<AppBarProps> = ({
   const cleanTimers = timers.map((t) => (t || '').trim()).filter(Boolean);
 
   return (
-    <header className="sticky top-0 z-40 h-14 border-b border-line bg-surface/95 backdrop-blur">
+    <header className="sticky top-0 z-40 h-14 border-b border-line bg-surface/80 backdrop-blur-md">
       <div className="h-full flex items-center gap-2 md:gap-4 px-3 md:px-5">
         {/* Brand (desktop only; the track button carries identity on phones) */}
         <div className="hidden md:flex items-center gap-2.5 shrink-0">

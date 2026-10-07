@@ -7,9 +7,10 @@ export const THEME_STORAGE_KEY = 'lt-theme';
 
 /**
  * Pick the theme for first render: an explicit saved choice wins, otherwise
- * follow the OS preference. Mirrored by the inline boot script in layout.tsx.
+ * the pit wall defaults to dark (the live-timing scene is low-light).
+ * Mirrored by the inline boot script in layout.tsx.
  */
-export function resolveInitialTheme(stored: string | null | undefined, prefersDark: boolean): Theme {
+export function resolveInitialTheme(stored: string | null | undefined): Theme {
   if (stored === 'dark' || stored === 'light') return stored;
-  return prefersDark ? 'dark' : 'light';
+  return 'dark';
 }

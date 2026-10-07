@@ -2,9 +2,9 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
-import { THEME_STORAGE_KEY, resolveInitialTheme, type Theme } from './themeKey';
+import { THEME_STORAGE_KEY, type Theme } from './themeKey';
 
-export { THEME_STORAGE_KEY, resolveInitialTheme };
+export { THEME_STORAGE_KEY, resolveInitialTheme } from './themeKey';
 export type { Theme };
 
 interface ThemeContextValue {
@@ -22,23 +22,14 @@ const ThemeContext = createContext<ThemeContextValue>({
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Server and first client render agree on 'light'; the effect below then
-  // adopts the saved/OS theme. The <html> class itself is already correct by
-  // then (set by the inline script), so there is no visible flash.
-  const [theme, setThemeState] = useState<Theme>('light');
-
-  useEffect(() => {
-    let stored: string | null = null;
-    try {
-      stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    } catch {
-      /* storage blocked */
+  // First render reads the <html> class the boot script already set, so the
+  // client state matches the pre-paint theme and there is no flash either way.
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof document !== 'undefined') {
+      return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
     }
-    const prefersDark =
-      typeof window.matchMedia === 'function' &&
-      !!window.matchMedia('(prefers-color-scheme: dark)').matches;
-    setThemeState(resolveInitialTheme(stored, prefersDark));
-  }, []);
+    return 'dark';
+  });
 
   useEffect(() => {
     const root = document.documentElement;

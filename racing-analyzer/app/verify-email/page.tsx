@@ -39,7 +39,7 @@ function VerifyEmailInner() {
   }, [token]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">
+    <div className="min-h-screen flex items-center justify-center canvas text-ink">
       <div className="max-w-md p-6 bg-surface rounded-md text-center space-y-4">
         {status === 'pending' && <p>Verifying your email…</p>}
         {status === 'ok' && (
@@ -115,7 +115,7 @@ function ResendForm({ reason }: { reason: 'expired' | 'invalid' }) {
 
 export default function VerifyEmailPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
+    <Suspense fallback={<div className="min-h-screen canvas" />}>
       <VerifyEmailInner />
     </Suspense>
   );
