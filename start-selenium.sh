@@ -2,7 +2,7 @@
 set -e  # Exit on any error
 
 # Activate the Python virtual environment
-cd /home/ubuntu/LT-Analyzer
+cd "$HOME/LT-Analyzer"
 source racing-venv/bin/activate
 
 # Load environment variables from .env (FLASK_SECRET_KEY, CORS_ORIGINS, etc.)

@@ -99,10 +99,14 @@ _PUSHER_KEY_RE = re.compile(r"""pusherKey\s*[:=]\s*['"]([^'"]+)['"]""")
 _PUSHER_CLUSTER_RE = re.compile(r"""pusherCluster\s*[:=]\s*['"]([^'"]+)['"]""")
 _SITE_RE = re.compile(r"""(?:siteSlug|siteName|site)\s*[:=]\s*['"]([a-z0-9_-]+)['"]""", re.I)
 # channelSuffix=":live" → "private-<site>live"
-_CHAN_SUFFIX_RE = re.compile(r"""channelSuffix\s*[:=]\s*['"]([^'"]+)['"]""")
+# (2026-07 site rebuild exposes it as data-pusherChannelSuffix="live" — hence re.I)
+_CHAN_SUFFIX_RE = re.compile(r"""channelSuffix\s*[:=]\s*['"]([^'"]+)['"]""", re.I)
 # per-session auth token (at-pst) baked into the page as a Cookie or window.var
 _AT_PST_COOKIE_RE = re.compile(r"""at-pst=([^;\"']+)""")
 _AT_PST_VAR_RE = re.compile(r"""(?:atPst|at_pst|sessionToken)\s*[:=]\s*['"]([^'"]+)['"]""")
+# 2026-07 site rebuild (htmx shell): the token moved to a data attribute on the
+# #root div, and the cookie was renamed at-pst → <site>-pst (e.g. buckmore-pst).
+_AT_PST_ATTR_RE = re.compile(r"""data-pusherToken\s*=\s*['"]([^'"]+)['"]""")
 # `/buckmore/live` → site=buckmore (last-resort fallback)
 _PATH_SITE_RE = re.compile(r"/([a-z0-9_-]+)/live\b", re.I)
 
@@ -283,10 +287,25 @@ def discover_config(page_url: str, *, session: Optional[requests.Session] = None
     sess = session or requests.Session()
     sess.headers.update(_DEFAULT_HEADERS)
 
+    # 2026-07 site rebuild: a cold GET of /<site>/live returns an "Error" shell
+    # without the config attributes. Visiting the site home first (sets the
+    # <site>-pst cookie) makes /live render; if the shell still lacks config,
+    # one retry with the now-set cookies unlocks it.
     _gate_acquire()
+    home_url = re.sub(r"/live/?$", "", page_url)
+    if home_url != page_url:
+        try:
+            sess.get(home_url, timeout=20, allow_redirects=True)
+        except requests.RequestException:
+            pass  # non-fatal; the /live fetch below may still succeed
     resp = sess.get(page_url, timeout=20, allow_redirects=True)
     resp.raise_for_status()
     body = resp.text
+    if "pusherKey" not in body:
+        _gate_acquire()
+        resp = sess.get(page_url, timeout=20, allow_redirects=True)
+        resp.raise_for_status()
+        body = resp.text
 
     key_m = _PUSHER_KEY_RE.search(body)
     cluster_m = _PUSHER_CLUSTER_RE.search(body)
@@ -310,6 +329,20 @@ def discover_config(page_url: str, *, session: Optional[requests.Session] = None
         path_m = _PATH_SITE_RE.search(urllib.parse.urlparse(page_url).path)
         if path_m:
             site = path_m.group(1)
+
+    # 2026-07 token locations, tried after the legacy ones: the
+    # data-pusherToken attribute (clean value), then the renamed per-site
+    # cookie <site>-pst (URL-encoded — unquote before use as a header).
+    if not at_pst:
+        m = _AT_PST_ATTR_RE.search(body)
+        if m:
+            at_pst = m.group(1)
+    if not at_pst:
+        raw = (site and sess.cookies.get(f"{site}-pst")) or next(
+            (v for k, v in sess.cookies.get_dict().items() if k.endswith("-pst")),
+            None)
+        if raw:
+            at_pst = urllib.parse.unquote(raw)
 
     if not (key_m and site):
         raise ValueError(

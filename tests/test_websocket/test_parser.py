@@ -6,7 +6,7 @@ No database, no WebSocket connection — pure unit tests.
 
 import pytest
 
-from apex_timing_websocket import ApexTimingWebSocketParser
+from apex_timing_websocket import ApexTimingWebSocketParser, parse_runtime_seconds
 
 
 # ---------------------------------------------------------------------------
@@ -344,3 +344,50 @@ class TestProcessInitMessage:
         })
         assert parser.column_map == cm_before
         assert parser.grid_data == {}
+
+
+# ---------------------------------------------------------------------------
+# parse_runtime_seconds
+# ---------------------------------------------------------------------------
+
+class TestParseRuntimeSeconds:
+    """Regression tests for parsing Apex ``RunTime`` cells.
+
+    Apex occasionally emits a trailing period on the seconds component
+    (``"34:50."``); before this helper existed, ``int("50.")`` raised
+    ValueError, spamming the error log and silently dropping the row.
+    """
+
+    def test_mm_ss(self):
+        assert parse_runtime_seconds("34:50") == 34 * 60 + 50
+
+    def test_mm_ss_trailing_period(self):
+        assert parse_runtime_seconds("34:50.") == 34 * 60 + 50
+
+    def test_mm_ss_fractional(self):
+        assert parse_runtime_seconds("1:02.345") == 62
+
+    def test_bare_seconds(self):
+        assert parse_runtime_seconds("90") == 90
+
+    def test_bare_seconds_trailing_period(self):
+        assert parse_runtime_seconds("90.") == 90
+
+    def test_whitespace_is_tolerated(self):
+        assert parse_runtime_seconds("  34:50.  ") == 34 * 60 + 50
+
+    def test_empty_returns_zero(self):
+        assert parse_runtime_seconds("") == 0
+
+    def test_none_returns_zero(self):
+        assert parse_runtime_seconds(None) == 0
+
+    def test_garbage_returns_zero(self):
+        assert parse_runtime_seconds("not a time") == 0
+
+    def test_empty_seconds_returns_zero(self):
+        assert parse_runtime_seconds("34:") == 0
+
+    def test_return_type_is_int(self):
+        result = parse_runtime_seconds("34:50.")
+        assert isinstance(result, int)

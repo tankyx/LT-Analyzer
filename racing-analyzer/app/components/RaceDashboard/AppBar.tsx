@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { BarChart3, ChevronDown, Flag, LogOut, Moon, Sun } from 'lucide-react';
+import { BarChart3, ChevronDown, Cpu, Flag, LogOut, Moon, Sun } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
 export interface AppBarUser {
@@ -23,6 +23,8 @@ interface AppBarProps {
   onLogout: () => void;
   onOpenTracks: () => void;
   onOpenStats: () => void;
+  /** Opens the device-token page (datalogger boards). */
+  onOpenDevices?: () => void;
 }
 
 /** Colour role for a flag string coming from the timing feed. */
@@ -54,6 +56,7 @@ const AppBar: React.FC<AppBarProps> = ({
   onLogout,
   onOpenTracks,
   onOpenStats,
+  onOpenDevices,
 }) => {
   const { isDark, toggleTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -210,6 +213,23 @@ const AppBar: React.FC<AppBarProps> = ({
                   <span className={`w-2 h-2 rounded-full ${connDot}`} />
                   {connLabel}
                 </div>
+                {onOpenDevices && (
+                  <>
+                    <div className="border-t border-line my-1" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onOpenDevices();
+                      }}
+                      className="w-full flex items-center gap-2 h-11 md:h-10 px-3 rounded-lg text-sm font-medium hover:bg-surface-2"
+                    >
+                      <Cpu size={16} />
+                      Devices
+                    </button>
+                  </>
+                )}
                 <div className="border-t border-line my-1" />
                 <button
                   type="button"

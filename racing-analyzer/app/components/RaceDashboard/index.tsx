@@ -12,6 +12,14 @@ import AdminPanel from './AdminPanel';
 import AppBar from './AppBar';
 import TrackRail, { RailTrack } from './TrackRail';
 import MyTeamStrip from './MyTeamStrip';
+import PitAlertTarget, {
+  DeviceToken,
+  PitAlertTargetValue,
+  describeDelivery,
+  loadPitAlertTarget,
+  savePitAlertTarget,
+  targetIdsFor,
+} from './PitAlertTarget';
 import AlertStack from './AlertStack';
 import StandingsRow, { STANDINGS_GRID, PitAlertButton } from './StandingsRow';
 import { getTeamClass, displayTeamName } from './lib/teamName';
@@ -333,6 +341,10 @@ const RaceDashboard = () => {
   const [myTeam, setMyTeam] = useState<string>('');
   const [monitoredTeams, setMonitoredTeams] = useState<string[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  // Datalogger boards registered to this account, and which one PIT NOW
+  // targets. Loaded once per login; `online` refreshes after each alert.
+  const [devices, setDevices] = useState<DeviceToken[]>([]);
+  const [pitAlertTarget, setPitAlertTarget] = useState<PitAlertTargetValue>('all');
   const [deltaData, setDeltaData] = useState<Record<string, DeltaData>>({}); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [gapHistory, setGapHistory] = useState<GapHistory>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -381,6 +393,25 @@ const RaceDashboard = () => {
   const updatedRowsRef = useRef<Map<string, number>>(new Map());
   useEffect(() => { updatedRowsRef.current = updatedRows; }, [updatedRows]);
 
+  const refreshDevices = useCallback(async () => {
+    try {
+      const resp = await apiFetch('/api/device/tokens');
+      if (!resp.ok) return;
+      const body = await resp.json();
+      setDevices(Array.isArray(body.tokens) ? body.tokens : []);
+    } catch {
+      /* boards are optional; the dashboard works without them */
+    }
+  }, [apiFetch]);
+
+  useEffect(() => {
+    if (!user) return;
+    setPitAlertTarget(loadPitAlertTarget());
+    void refreshDevices();
+  }, [user, refreshDevices]);
+
+  const activeBoards = useMemo(() => devices.filter((d) => !d.revoked), [devices]);
+
   const triggerPitAlert = useCallback(async (kartNum: string, teamName: string) => {
     try {
       // Use apiFetch (not raw fetch / not ApiService) so the CSRF token and
@@ -394,6 +425,7 @@ const RaceDashboard = () => {
           track_id: selectedTrackId,
           team_name: teamName,
           alert_message: `PIT NOW! - ${teamName}`,
+          target_device_ids: targetIdsFor(pitAlertTarget) ?? null,
         }),
       });
       if (!resp.ok) {
@@ -401,12 +433,16 @@ const RaceDashboard = () => {
       }
       const response = await resp.json();
       if (response.status === 'success') {
+        // Say what actually happened at the boards: a bare "sent" would hide
+        // a board that is off, on another track, or following another team.
+        const delivery = describeDelivery(response, activeBoards.length);
         setAlerts(prev => [...prev, {
           id: Date.now(),
-          message: `🚨 PIT ALERT sent to ${teamName}`,
-          type: 'success',
+          message: `🚨 PIT ALERT for ${teamName}: ${delivery.text}`,
+          type: delivery.tone,
           teamKart: kartNum
         }]);
+        if (activeBoards.length > 0) void refreshDevices();
       } else {
         throw new Error(response.message || 'Failed to send pit alert');
       }
@@ -419,7 +455,7 @@ const RaceDashboard = () => {
         teamKart: kartNum
       }]);
     }
-  }, [selectedTrackId, apiFetch]);
+  }, [selectedTrackId, apiFetch, pitAlertTarget, activeBoards.length, refreshDevices]);
 
   const filteredTeams = useMemo(() => {
     if (selectedClass === 'all') return teams;
@@ -1321,6 +1357,7 @@ const RaceDashboard = () => {
         onLogout={logout}
         onOpenTracks={() => setTrackSheetOpen(true)}
         onOpenStats={() => router.push('/data')}
+        onOpenDevices={() => router.push('/devices')}
       />
 
       <div className="flex items-start">
@@ -1354,6 +1391,18 @@ const RaceDashboard = () => {
             isQualificationMode={isQualificationMode}
             requiredPitStops={requiredPitStops}
             onPitAlert={(kart, teamName) => triggerPitAlert(kart, teamName)}
+            pitAlertTargetSlot={
+              activeBoards.length > 0 ? (
+                <PitAlertTarget
+                  devices={activeBoards}
+                  value={pitAlertTarget}
+                  onChange={(v) => {
+                    setPitAlertTarget(v);
+                    savePitAlertTarget(v);
+                  }}
+                />
+              ) : undefined
+            }
           />
 
           <TabbedInterface tabs={tabs} defaultTab="standings" isDarkMode={isDarkMode} onTabChange={setActiveTab}>

@@ -38,6 +38,7 @@ import logging
 import ssl
 import threading
 import time
+import urllib.parse
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -247,8 +248,16 @@ class AlphaHubHub:
             'X-Requested-With': 'XMLHttpRequest',
             'at-site': site,
         }
-        if cfg.at_pst:
-            headers['at-pst'] = cfg.at_pst
+        pst = cfg.at_pst
+        if not pst:
+            # 2026-07 site rebuild: the token cookie is now <site>-pst (was
+            # at-pst). Cached sessions carry it, so this fallback lets a
+            # cookie-cache pre-seed authenticate without a page scrape.
+            raw = sess.cookies.get(f"{site}-pst") or sess.cookies.get('at-pst')
+            if raw:
+                pst = urllib.parse.unquote(raw)
+        if pst:
+            headers['at-pst'] = pst
         resp = sess.post(
             cfg.auth_url,
             data={'socket_id': socket_id, 'channel_name': channel_name},
@@ -324,8 +333,26 @@ class AlphaHubHub:
         HTTP call (site scrape if first time, then auth POST) acquires the
         shared HTTP gate independently — so worst case per channel is two
         gate slots (~6s), and a venue already-scraped reuses cookies and
-        only needs one slot."""
-        for ch_name, channel in list(self.channels.items()):
+        only needs one slot.
+
+        Channels whose auth 401s (stale cached token) get ONE immediate
+        second pass within the same connection: the 401 handler drops the
+        site cache, so the retry re-scrapes and auths with a fresh token.
+        Without this, recovery would wait for the next WS reconnect — which
+        on a healthy shared Pusher socket can be hours away."""
+        retry = await self._subscribe_pass(
+            list(self.channels.items()), socket_id)
+        if retry and self._ws is not None:
+            self.logger.info(
+                f"AlphaHubHub: retrying {len(retry)} channel(s) after "
+                f"auth-cache drop (fresh scrape)")
+            await self._subscribe_pass(retry, socket_id)
+
+    async def _subscribe_pass(self, items, socket_id: str) -> list:
+        """One subscribe attempt over `items`; returns the (ch_name,
+        channel) pairs that failed with an auth 401/403."""
+        retry = []
+        for ch_name, channel in items:
             site = self._site_from_channel(ch_name)
             try:
                 # 1) Per-site scrape (gated). No-op if this venue has already
@@ -338,7 +365,7 @@ class AlphaHubHub:
                     self._auth_with_gate, ch_name, socket_id
                 )
                 if self._ws is None:
-                    return
+                    return retry
                 sub_payload = {
                     'event': 'pusher:subscribe',
                     'data': {'auth': auth['auth'], 'channel': ch_name},
@@ -349,15 +376,28 @@ class AlphaHubHub:
                 channel.mark_subscribing()
             except requests.exceptions.HTTPError as e:
                 code = getattr(e.response, 'status_code', None)
-                self.logger.warning(
-                    f"AlphaHubHub: auth/scrape failed for {ch_name} (status {code}); "
-                    f"will retry on next reconnect"
-                )
+                if code in (401, 403):
+                    # Rotated/renamed per-session token (see 2026-07 site
+                    # rebuild): the cached site state can never recover on
+                    # its own, so drop it and queue the channel for the
+                    # immediate retry pass, which re-scrapes fresh.
+                    self._site_state.pop(site, None)
+                    retry.append((ch_name, channel))
+                    self.logger.warning(
+                        f"AlphaHubHub: auth {code} for {ch_name} — dropped cached "
+                        f"site state for {site!r}; queued for fresh-scrape retry"
+                    )
+                else:
+                    self.logger.warning(
+                        f"AlphaHubHub: auth/scrape failed for {ch_name} (status {code}); "
+                        f"will retry on next reconnect"
+                    )
                 # Don't abort the loop — other channels may still succeed.
             except Exception as e:
                 self.logger.warning(
                     f"AlphaHubHub: subscribe failed for {ch_name}: {e}"
                 )
+        return retry
 
     def _auth_with_gate(self, ch_name: str, socket_id: str):
         _gate_acquire()

@@ -23,7 +23,7 @@ import re
 import ssl
 import sys
 
-DEFAULT_HOST = "www.apex-timing.com"
+DEFAULT_HOST = "live-data.apex-timing.com"  # feeds moved off www.apex-timing.com ~2026-06-08
 _SSL = ssl.create_default_context()
 _SSL.check_hostname = False
 _SSL.verify_mode = ssl.CERT_NONE

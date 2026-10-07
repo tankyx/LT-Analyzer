@@ -67,6 +67,8 @@ interface MyTeamStripProps {
   isQualificationMode: boolean;
   requiredPitStops: number;
   onPitAlert?: (kart: string, teamName: string) => Promise<void> | void;
+  /** Optional control rendered beside the pit-alert button (board picker). */
+  pitAlertTargetSlot?: React.ReactNode;
 }
 
 const Stat: React.FC<{ label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: string }> = ({
@@ -93,6 +95,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
   isQualificationMode,
   requiredPitStops,
   onPitAlert,
+  pitAlertTargetSlot,
 }) => {
   const [picking, setPicking] = useState(false);
   const [sending, setSending] = useState(false);
@@ -268,6 +271,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
           )}
         </div>
 
+        {canAlert && pitAlertTargetSlot}
         {canAlert && (
           <button
             type="button"

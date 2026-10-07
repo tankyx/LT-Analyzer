@@ -985,6 +985,45 @@ export const ApiService = {
       throw error;
     }
   },
+
+  // --- Device tokens (datalogger boards) ------------------------------------
+  // Cookie + CSRF like every other authenticated call; the *boards* use the
+  // bearer token these calls mint, never the cookie session.
+
+  /** The caller's device tokens with their live-stream `online` flag. */
+  listDeviceTokens: async () => {
+    const response = await fetch(`${API_BASE_URL}/api/device/tokens`, { credentials: 'include' });
+    if (!response.ok) throw new Error('Failed to list device tokens');
+    return (await response.json()).tokens as Array<{
+      id: number; label: string; created_at: string; expires_at: string;
+      last_seen_at: string | null; revoked: boolean; online: boolean;
+    }>;
+  },
+
+  /** Mint a token. The plaintext `token` in the reply is shown exactly once. */
+  createDeviceToken: async (label: string) => {
+    const response = await fetch(`${API_BASE_URL}/api/device/tokens`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(await getCsrfHeaders()) },
+      body: JSON.stringify({ label }),
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to create device token');
+    }
+    return await response.json();
+  },
+
+  revokeDeviceToken: async (tokenId: number) => {
+    const response = await fetch(`${API_BASE_URL}/api/device/tokens/${tokenId}/revoke`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { ...(await getCsrfHeaders()) },
+    });
+    if (!response.ok) throw new Error('Failed to revoke device token');
+    return await response.json();
+  },
 };
 
 export default ApiService;

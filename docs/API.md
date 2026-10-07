@@ -19,7 +19,13 @@ the data formats. This file is the endpoint-by-endpoint reference.
   endpoints protected by Turnstile instead) is: `/api/auth/login`,
   `/api/auth/register`, `/api/auth/forgot-password`,
   `/api/auth/reset-password`, `/api/auth/verify-email`,
-  `/api/auth/resend-verification`, `/api/auth/csrf`.
+  `/api/auth/resend-verification`, `/api/auth/csrf`. Requests to
+  `/api/device/*` (other than `/api/device/tokens*`) that carry an
+  `Authorization: Bearer` header are also exempt: the bearer token is the
+  credential and no cookie is involved.
+- `/api/device/*` (bearer-authenticated device routes) always answer JSON,
+  even for `404` / `405`, carry `Cache-Control: no-store, no-transform`,
+  and use UTC `Z` timestamps. See "Device API" below.
 - Rate-limit-protected endpoints return `429 {"error": "rate_limited"}`
   when exceeded.
 - Errors are JSON: `{"error": "<machine-readable code>"}`.
@@ -269,6 +275,64 @@ When `ENABLE_TEST_ENDPOINTS=true` (dev only):
 - `POST /api/test/stop-session/<int:track_id>` — admin
 
 In production these routes are never registered (404).
+
+---
+
+## Pit alerts
+
+### `POST /api/trigger-pit-alert` (login)
+
+Body `{track_id, team_name, alert_message?, target_device_ids?}`.
+Emits `pit_alert` to the caller's `user_<id>` room, `pit_alert_broadcast` to
+`track_<id>`, and `event: alert` on the caller's device streams that follow
+the track and team (narrowed to `target_device_ids` when given; ids must be
+the caller's own, else `400 unknown_device`). Both Socket.IO payloads carry
+`origin` (`web` / `device`) and `origin_label`.
+
+Returns `{status: "success", ok: true, delivered_to, devices_online, room, alert}`
+— `delivered_to` is the number of boards the alert was written to,
+`devices_online` the caller's boards with an open stream.
+
+---
+
+## Device API (bearer tokens)
+
+For constrained clients (the ESP32 datalogger). Full guide with formats and
+transport rules: [`DATALOGGER_API.md` §7](DATALOGGER_API.md#7-constrained-devices-bearer-tokens-and-apidevice).
+Implementation: `race_app/device_hub.py` (sequence numbers, SSE
+subscribers, alert routing) and `race_app/blueprints/device_routes.py`.
+
+Token management (cookie session + CSRF):
+
+| Endpoint | Notes |
+|---|---|
+| `POST /api/device/tokens` | Body `{label}` (1–64 printable chars). `201 {id, label, token, created_at, expires_at}` — plaintext returned once; only a SHA-256 is stored (`auth.db` table `device_tokens`). 90-day lifetime. |
+| `GET /api/device/tokens` | `{tokens: [{id, label, created_at, expires_at, last_seen_at, revoked, revoked_at, online}]}` — `online` = has an open stream right now. |
+| `POST /api/device/tokens/<id>/revoke` | Own tokens only (`404` otherwise). Takes effect on the board's next request. |
+| `POST /api/device/pairing-codes` | Body `{label}`. `201 {id, label, code: "ABCD-EFGH", expires_at, expires_in: 600, status}`. 8 symbols from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, 10-minute life, single use; stored as an HMAC keyed by the app secret (table `device_pairing_codes`). |
+| `GET /api/device/pairing-codes/<id>` | `{id, label, status: pending\|paired\|expired, expires_at, token_id}` — own codes only. |
+
+Pairing exchange (anonymous: no cookie, no CSRF — the path is in
+`CSRF_EXEMPT_PATHS` — no bearer; 10 attempts / min per IP → `429`):
+
+| Endpoint | Notes |
+|---|---|
+| `POST /api/device/pair` | Body `{code}` (case-insensitive, dash optional). Atomically claims the code and mints a token: `200 {id, label, token, created_at, expires_at}`. `400 invalid_code` for unknown / used / expired. |
+
+Bearer routes (`Authorization: Bearer <token>`, no cookie, no CSRF; scope:
+live timing + pit alerts only — every other authenticated route refuses a
+bearer with `401`):
+
+| Endpoint | Notes |
+|---|---|
+| `GET /api/device/tracks` | `[{id, name, active}]` — `active` = parser currently receiving data. |
+| `GET /api/device/live?track_id=&team=` | One flat row: `seq, track_id, session_id, team, matched_team, kart, position, gap_to_front, gap_to_behind, last_lap, best_lap, laps, pit_stops, status, updated_at`. `ETag: "<seq>"`; `If-None-Match` match → `304` empty. `404 unknown_track / no_live_session / unknown_team`. Throttle ≈1 req / 2 s per token → `429` + `Retry-After`. Not subject to the heavy-read cap. |
+| `GET /api/device/stream?track_id=&team=` | Server-Sent Events: `retry: 5000`, immediate `event: team` snapshot (or `event: status` while quiet), a `team` frame per change, `event: alert` for pit alerts, `: heartbeat` every 15 s. Max 3 streams per token, 200 total. |
+| `POST /api/device/pit-alert` | Body `{track_id, team_name, alert_message?}`. Same fan-out as `/api/trigger-pit-alert` with `origin: "device"`; the sender is excluded. `{ok, delivered_to, devices_online, timestamp}`. 10 / min per token. |
+
+Gap formats on both `/api/device/live` and `team_specific_update` come from
+`multi_track_manager.compute_team_gaps`: seconds as a string, `"-"` for no
+car on that side, the lapped car's feed string (`"1 Tour"`) across a lap gap.
 
 ---
 

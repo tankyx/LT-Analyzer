@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 from datetime import datetime
 import json
 import pandas as pd
-from apex_timing_websocket import ApexTimingWebSocketParser
+from apex_timing_websocket import ApexTimingWebSocketParser, parse_runtime_seconds
 
 import re as _re
 
@@ -42,6 +42,93 @@ def _any_room_with_prefix(socketio, prefix: str) -> bool:
         return any(name.startswith(prefix) and sids for name, sids in rooms.items())
     except Exception:
         return True
+
+
+# --- Update listeners -------------------------------------------------------
+# Out-of-band consumers of the live feed (the device SSE hub) register a
+# callable here; every parser calls it after each committed update, with
+# (track_id, session_id, timestamp). Listeners must be cheap and non-blocking
+# — they run on the parser's thread.
+_update_listeners: list = []
+_update_listeners_lock = threading.Lock()
+
+
+def add_update_listener(fn) -> None:
+    with _update_listeners_lock:
+        if fn not in _update_listeners:
+            _update_listeners.append(fn)
+
+
+def remove_update_listener(fn) -> None:
+    with _update_listeners_lock:
+        if fn in _update_listeners:
+            _update_listeners.remove(fn)
+
+
+def _notify_update_listeners(track_id: int, session_id, timestamp: str) -> None:
+    with _update_listeners_lock:
+        listeners = list(_update_listeners)
+    for fn in listeners:
+        try:
+            fn(track_id, session_id, timestamp)
+        except Exception as exc:  # pragma: no cover — a listener must never break the parser
+            logging.getLogger(__name__).warning("update listener failed: %s", exc)
+
+
+def _parse_gap_seconds(gap_string):
+    """Gap-to-leader string -> float seconds, or None when it is not a time
+    (leader / empty / lapped "1 Tour")."""
+    if not gap_string or gap_string in ('LEADER', 'Leader', ''):
+        return 0.0
+    try:
+        return float(str(gap_string).replace('+', '').strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def compute_team_gaps(teams: list, idx: int) -> dict:
+    """Head-to-head gaps for the team at `idx` in a position-sorted standings
+    list. Single source of truth for `team_specific_update` (Socket.IO) and
+    `/api/device/live` (bearer devices), so both transports agree.
+
+    Formats: `"S.mmm"` seconds (negative when the feed's ordering disagrees
+    with its gaps), `"-"` when there is no car on that side, and the lapped
+    car's own feed string (`"1 Tour"`) when a lap gap makes the seconds
+    figure meaningless.
+    """
+    team = teams[idx]
+    position_str = str(team.get('Position', '') or '')
+    position = int(position_str) if position_str.isdigit() else idx + 1
+    gap_str = team.get('Gap', '') or ''
+    current_gap = _parse_gap_seconds(gap_str)
+
+    def _diff(a, b, lapped_str):
+        if a is None or b is None:
+            return lapped_str
+        return f"{a - b:.3f}"
+
+    if position > 1 and idx > 0:
+        front_str = teams[idx - 1].get('Gap', '') or ''
+        front_gap = _parse_gap_seconds(front_str)
+        gap_to_front = _diff(current_gap, front_gap,
+                             gap_str if current_gap is None else front_str)
+    else:
+        gap_to_front = '-'
+
+    if idx < len(teams) - 1:
+        behind_str = teams[idx + 1].get('Gap', '') or ''
+        behind_gap = _parse_gap_seconds(behind_str)
+        gap_to_behind = _diff(behind_gap, current_gap,
+                              behind_str if behind_gap is None else gap_str)
+    else:
+        gap_to_behind = '-'
+
+    return {
+        'position': position,
+        'gap': gap_str,
+        'gap_to_front': gap_to_front,
+        'gap_to_behind': gap_to_behind,
+    }
 
 
 class MultiTrackManager:
@@ -912,13 +999,10 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
             try:
                 position = int(row['Position']) if row.get('Position', '').strip() else None
                 kart = int(row['Kart']) if row.get('Kart', '').strip() else None
-                # Parse RunTime from MM:SS format to seconds
-                runtime_str = row.get('RunTime', '0')
-                if ':' in runtime_str:
-                    parts = runtime_str.split(':')
-                    runtime = int(parts[0]) * 60 + int(parts[1])
-                else:
-                    runtime = int(runtime_str) if runtime_str.strip() else 0
+                # Parse RunTime from MM:SS format to seconds.
+                # Apex may emit a trailing period (e.g. "34:50.") or
+                # fractional seconds; the helper handles all of that.
+                runtime = parse_runtime_seconds(row.get('RunTime', '0'))
 
                 # Handle Pit Stops - can be count (e.g. "3") or time (e.g. "00:22")
                 pit_stops_str = row.get('Pit Stops', '0').strip()
@@ -1018,6 +1102,8 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                     conn.commit()
                     self.logger.debug(f"Track {self.track_id}: Stored {len(current_records)} records, {len(lap_history_records)} lap history records")
 
+                _notify_update_listeners(self.track_id, session_id, timestamp)
+
                 # Periodically clean up old session caches (every 10 commits).
                 # Previously used `session_id % 10 == 0` which triggered at most
                 # once per 10 new sessions — effectively never during a single race.
@@ -1071,15 +1157,6 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
         try:
             teams = standings_df.to_dict('records')
 
-            def parse_gap(gap_string):
-                """Convert gap string like '+12.456' or '12.456' to float"""
-                if not gap_string or gap_string in ('LEADER', 'Leader', ''):
-                    return 0.0
-                try:
-                    return float(gap_string.replace('+', '').strip())
-                except (ValueError, AttributeError):
-                    return 0.0
-
             for idx, team in enumerate(teams):
                 team_name = team.get('Team', '')
                 if not team_name:
@@ -1091,26 +1168,11 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                 if not _room_occupied(self.socketio, room):
                     continue
 
-                position_str = team.get('Position', '')
-                position = int(position_str) if position_str and str(position_str).isdigit() else idx + 1
-                gap_str = team.get('Gap', '')
-                current_gap = parse_gap(gap_str)
-
-                # Gap to front: difference between our gap-to-leader and front car's gap-to-leader
-                if position > 1 and idx > 0:
-                    front_gap = parse_gap(teams[idx - 1].get('Gap', ''))
-                    diff = current_gap - front_gap
-                    gap_to_front = f"{diff:.3f}"
-                else:
-                    gap_to_front = '-'
-
-                # Gap to behind: difference between behind car's gap-to-leader and ours
-                if idx < len(teams) - 1:
-                    behind_gap = parse_gap(teams[idx + 1].get('Gap', ''))
-                    diff = behind_gap - current_gap
-                    gap_to_behind = f"{diff:.3f}"
-                else:
-                    gap_to_behind = '-'
+                gaps = compute_team_gaps(teams, idx)
+                position = gaps['position']
+                gap_str = gaps['gap']
+                gap_to_front = gaps['gap_to_front']
+                gap_to_behind = gaps['gap_to_behind']
 
                 team_update = {
                     'Position': str(position),

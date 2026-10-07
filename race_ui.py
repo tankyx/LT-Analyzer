@@ -1936,6 +1936,42 @@ def _ensure_auth_schema():
                 'ON login_attempts(ip_address, attempted_at)'
             )
 
+            # Long-lived bearer tokens for constrained devices (the ESP32
+            # datalogger). Only the SHA-256 of the token is stored; the
+            # plaintext is shown once at creation. See race_app/device_hub.py.
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS device_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    token_hash TEXT UNIQUE NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    last_seen_at TEXT,
+                    revoked_at TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            ''')
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS idx_device_tokens_user '
+                'ON device_tokens(user_id, revoked_at)'
+            )
+            # Short pairing codes (8 chars, 10 min, single use) a board
+            # exchanges for a device token, so nobody types a 43-char secret.
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS device_pairing_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    label TEXT NOT NULL,
+                    code_hash TEXT UNIQUE NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT,
+                    token_id INTEGER,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+            ''')
+
             # --- One-time migration: hash any plaintext session tokens -------
             # Raw tokens are 43-char urlsafe strings; hashed ones are 64 hex
             # chars, so the shape test makes this idempotent. Hashing in place
@@ -2188,6 +2224,9 @@ CSRF_EXEMPT_PATHS = {
     '/api/auth/verify-email',
     '/api/auth/resend-verification',
     '/api/auth/csrf',
+    # A board exchanging a short-lived, single-use pairing code for its token
+    # has no cookie and no bearer yet; the code plus a per-IP throttle guard it.
+    '/api/device/pair',
 }
 
 
@@ -2209,6 +2248,13 @@ def _csrf_guard():
     if path in CSRF_EXEMPT_PATHS:
         return None
     if path.startswith('/api/socket.io') or path.startswith('/socket.io'):
+        return None
+    # Bearer-token device routes carry no cookie, so a cross-site page has
+    # nothing to ride on; the token itself is the credential. The token
+    # management routes (/api/device/tokens*) stay cookie + CSRF.
+    if (path.startswith('/api/device/')
+            and not path.startswith('/api/device/tokens')
+            and request.headers.get('Authorization', '').startswith('Bearer ')):
         return None
     expected = session.get('csrf_token')
     provided = request.headers.get('X-CSRF-Token', '')
@@ -4735,6 +4781,38 @@ def _handle_unknown_track(exc):
     return jsonify({'error': str(exc)}), 404
 
 
+# --- Device transport rules -------------------------------------------------
+# /api/device/* is consumed by a microcontroller over cellular: it cannot use
+# an HTML error page, cannot inflate gzip, and pays for every byte. Errors on
+# that prefix are always JSON, and responses are marked no-transform so the
+# edge (Cloudflare) neither compresses nor caches them.
+from werkzeug.exceptions import HTTPException as _HTTPException  # noqa: E402
+
+
+@app.errorhandler(_HTTPException)
+def _json_errors_for_devices(exc):
+    if not (request.path or '').startswith('/api/device/'):
+        return exc
+    code = exc.code or 500
+    error = {401: 'invalid_token', 404: 'not_found', 405: 'method_not_allowed',
+             429: 'rate_limited'}.get(code, (exc.name or 'error').lower().replace(' ', '_'))
+    resp = jsonify({'error': error})
+    resp.status_code = code
+    return resp
+
+
+@app.after_request
+def _device_transport_headers(resp):
+    if (request.path or '').startswith('/api/device/'):
+        resp.headers['Cache-Control'] = 'no-store, no-transform'
+        resp.headers.setdefault('X-Accel-Buffering', 'no')
+        if resp.status_code == 429:
+            resp.headers.setdefault('Retry-After', '2')
+        if resp.status_code == 401:
+            resp.headers.setdefault('WWW-Authenticate', 'Bearer')
+    return resp
+
+
 # --- Blueprint registration -------------------------------------------------
 # Imports live at the bottom so the blueprints can `from race_ui import ...`
 # the helpers/state defined above without circular-import grief.
@@ -4750,6 +4828,7 @@ _sys.modules.setdefault('race_ui', _sys.modules[__name__])
 from race_app.blueprints.admin_users_routes import admin_users_bp  # noqa: E402
 from race_app.blueprints.aliases_routes import aliases_bp  # noqa: E402
 from race_app.blueprints.auth_routes import auth_bp  # noqa: E402
+from race_app.blueprints.device_routes import device_bp  # noqa: E402
 from race_app.blueprints.driver_consistency_routes import driver_consistency_bp  # noqa: E402
 from race_app.blueprints.driver_fairness_routes import driver_fairness_bp  # noqa: E402
 from race_app.blueprints.fleet_routes import fleet_bp  # noqa: E402
@@ -4764,6 +4843,7 @@ from race_app.blueprints.team_data_routes import team_data_bp  # noqa: E402
 app.register_blueprint(admin_users_bp)
 app.register_blueprint(aliases_bp)
 app.register_blueprint(auth_bp)
+app.register_blueprint(device_bp)
 app.register_blueprint(driver_consistency_bp)
 app.register_blueprint(driver_fairness_bp)
 app.register_blueprint(fleet_bp)

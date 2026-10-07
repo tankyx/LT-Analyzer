@@ -18,6 +18,27 @@ import re
 _LAPTIME_RE = re.compile(r'^\d{1,2}:\d{2}\.\d{3}$')
 
 
+def parse_runtime_seconds(value) -> int:
+    """Parse an Apex ``RunTime`` cell into whole seconds.
+
+    Accepts ``MM:SS`` / ``MM:SS.sss`` and bare-seconds forms. Apex feeds have
+    been observed emitting a trailing period (``"34:50."``), so trailing dots
+    and surrounding whitespace are tolerated. Returns 0 for empty or
+    unparseable input rather than raising, so a single malformed row cannot
+    abort an entire data tick.
+    """
+    runtime_str = str(value or '').strip()
+    if not runtime_str:
+        return 0
+    try:
+        if ':' in runtime_str:
+            minutes, _, seconds = runtime_str.partition(':')
+            return int(float(minutes)) * 60 + int(float(seconds.rstrip('.')))
+        return int(float(runtime_str.rstrip('.')))
+    except ValueError:
+        return 0
+
+
 class ApexTimingWebSocketParser:
     """WebSocket-based parser for Apex Timing live data"""
     
@@ -564,13 +585,10 @@ class ApexTimingWebSocketParser:
             try:
                 position = int(row['Position']) if row.get('Position', '').strip() else None
                 kart = int(row['Kart']) if row.get('Kart', '').strip() else None
-                # Parse RunTime from MM:SS format to seconds
-                runtime_str = row.get('RunTime', '0')
-                if ':' in runtime_str:
-                    parts = runtime_str.split(':')
-                    runtime = int(parts[0]) * 60 + int(parts[1])
-                else:
-                    runtime = int(runtime_str) if runtime_str.strip() else 0
+                # Parse RunTime from MM:SS format to seconds.
+                # Apex may emit a trailing period (e.g. "34:50.") or
+                # fractional seconds; the helper handles all of that.
+                runtime = parse_runtime_seconds(row.get('RunTime', '0'))
                 
                 current_records.append((
                     session_id,

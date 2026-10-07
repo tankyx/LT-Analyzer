@@ -4,17 +4,24 @@
 # were added, but at most once an hour so frequent scans don't thrash live data
 # collection. Intended to run from cron — see the crontab entry alongside it.
 #
-#   crontab:  */15 * * * * /home/ubuntu/LT-Analyzer/scripts/cron_apex_scan.sh
+#   crontab:  */15 * * * * $HOME/LT-Analyzer/scripts/cron_apex_scan.sh
 RESTART_MIN_GAP=3300   # don't restart the backend more than once per ~55 min
 set -u
-cd /home/ubuntu/LT-Analyzer || exit 1
+cd "$HOME/LT-Analyzer" || exit 1
 PY=./racing-venv/bin/python
 LOG=logs/apex_scan.log
 mkdir -p logs
 
-ts() { date '+%Y-%m-%d %H:%M:%S'; }
+# pm2 may live under nvm (Pi) rather than on the system PATH (cron has neither).
+if ! command -v pm2 >/dev/null 2>&1; then
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+fi
 
-before=$(sqlite3 tracks.db "SELECT COUNT(*) FROM tracks;" 2>/dev/null || echo 0)
+ts() { date '+%Y-%m-%d %H:%M:%S'; }
+count_tracks() { "$PY" -c 'import sqlite3;print(sqlite3.connect("tracks.db").execute("SELECT COUNT(*) FROM tracks").fetchone()[0])' 2>/dev/null || echo 0; }
+
+before=$(count_tracks)
 echo "[$(ts)] scan start (tracks=$before)" >> "$LOG"
 
 # --known-only: only add circuits we have a real config venue name for
@@ -25,7 +32,7 @@ echo "[$(ts)] scan start (tracks=$before)" >> "$LOG"
 "$PY" scripts/scan_apex_ports.py --start 6900 --end 9999 --concurrency 60 \
       --names-from apex_known_tracks.json --apply --known-only >> "$LOG" 2>&1
 
-after=$(sqlite3 tracks.db "SELECT COUNT(*) FROM tracks;" 2>/dev/null || echo "$before")
+after=$(count_tracks)
 added=$(( after - before ))
 echo "[$(ts)] scan done (tracks=$after, +$added)" >> "$LOG"
 

@@ -210,6 +210,20 @@ All endpoints are **per-user** (scoped to the logged-in user) and require login.
 
 **Note**: Fleet data is delivered by per-user polling of `/fleet/state` (the frontend refetches on each `track_update`, throttled ~3s, and after mutations) — **not** by a Socket.IO broadcast (a shared broadcast can't carry per-user boards).
 
+### Device API (datalogger boards, bearer tokens)
+Constrained clients (ESP32 over cellular) cannot log in with Turnstile, inflate gzip or speak Engine.IO. They use long-lived bearer tokens instead of the cookie session. Implementation: `race_app/device_hub.py` (pure: token hashing, per-(account, track, team) `seq`, SSE subscribers, alert routing + replay buffer) and `race_app/blueprints/device_routes.py`. Guide: `docs/DATALOGGER_API.md` §7.
+- `POST/GET /api/device/tokens`, `POST /api/device/tokens/<id>/revoke` - token management from the web UI (`/devices` page, cookie + CSRF). Plaintext shown once; `auth.db` table `device_tokens` stores a SHA-256. 90-day lifetime.
+- **Pairing** (the normal way a board gets its token): `POST /api/device/pairing-codes {label}` (login) mints an 8-char code (`ABCD-EFGH`, alphabet without 0/O/1/I, 10 min, single use, HMAC-hashed in `device_pairing_codes`); the board POSTs it to the anonymous `/api/device/pair` (CSRF-exempt, 10/min per IP) and receives the long token. `GET /api/device/pairing-codes/<id>` reports pending/paired/expired; the Devices page polls it every 3 s.
+- `GET /api/device/tracks` - `[{id, name, active}]`
+- `GET /api/device/live?track_id=&team=` - one flat row (position, gap_to_front/behind, last/best lap, status…). `ETag`/`If-None-Match` → `304` empty when nothing changed. ~1 req/2 s per token, `429` + `Retry-After`; exempt from the heavy-read cap.
+- `GET /api/device/stream?track_id=&team=` - Server-Sent Events: snapshot on connect, `event: team` per change, `event: alert` for pit alerts, `: heartbeat` every 15 s. Woken by `multi_track_manager.add_update_listener` after each parser commit. Each stream pins one gunicorn thread (cap 3/token, 200 total).
+- `POST /api/device/pit-alert` - board-raised alert; fans out like `/api/trigger-pit-alert` with `origin: "device"` + `origin_label`.
+- **Alert routing web → board**: `/api/trigger-pit-alert` (and `dispatch_pit_alert` in `pit_alert_routes.py`) writes to the account's streams following the same track + team, narrowed by optional `target_device_ids`; response carries honest `delivered_to` / `devices_online`. Last 5 alerts per board buffered and replayed once on reconnect while inside `duration_ms` (≤2 min).
+- **Transport rules on `/api/device/*`** (in `race_ui.py`): JSON on every HTTP error, `Cache-Control: no-store, no-transform` (edge must not compress), `strict_slashes=False` (no redirects), UTC `Z` timestamps, bearer requests bypass the CSRF guard (token-management routes do not).
+- Gap strings for both transports come from `multi_track_manager.compute_team_gaps` (`"-"` no car, `"1 Tour"` across a lap gap).
+- Frontend: `app/devices/page.tsx` (tokens), `PitAlertTarget.tsx` (board picker beside the pit-alert button in `MyTeamStrip`, delivery sentence via `describeDelivery`), Devices entry in the `AppBar` account menu.
+- Tests: `tests/test_device/` (40 tests: tokens, live/ETag, SSE, alert routing/targeting/replay), `__tests__/redesign/PitAlertTarget.test.tsx`, `__tests__/devices/`.
+
 ### Testing & Development
 - `POST /api/test/simulate-session/<track_id>` - Simulate active session on a track (for testing)
 - `POST /api/test/stop-session/<track_id>` - Stop simulated session on a track
