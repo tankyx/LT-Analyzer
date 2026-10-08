@@ -82,8 +82,10 @@ def backfill_db(path: str, dry_run: bool = False) -> tuple[int, int]:
         cols = [c[1] for c in conn.execute("PRAGMA table_info(lap_history)")]
         if 'gap' not in cols:
             if dry_run:
+                # Every lap row would be missing the column, so report them all.
+                total = conn.execute("SELECT COUNT(*) FROM lap_history").fetchone()[0]
                 print(f"  [dry-run] would add lap_history.gap column")
-                return (0, 0)
+                return (total, 0)
             conn.execute('ALTER TABLE lap_history ADD COLUMN gap TEXT')
 
         missing = conn.execute(
