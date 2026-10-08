@@ -510,6 +510,38 @@ export const ApiService = {
     }
   },
 
+  /**
+   * Per-lap gap-to-leader for a session (Delta chart history). Omit
+   * `sessionId` to use the track's live session; omit `karts` for every kart.
+   * Not per-user state: the caller computes head-to-head deltas against its
+   * own team, so this only returns raw timing data.
+   */
+  getSessionGaps: async (trackId: number, sessionId?: number | null, karts?: string[]) => {
+    const params = new URLSearchParams({ track_id: trackId.toString() });
+    if (sessionId != null) params.set('session_id', sessionId.toString());
+    if (karts && karts.length > 0) params.set('karts', karts.join(','));
+
+    const response = await fetch(`${API_BASE_URL}/api/team-data/session-gaps?${params.toString()}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to fetch session gaps');
+    }
+    return await response.json() as {
+      track_id: number;
+      session_id: number;
+      series: Record<string, {
+        kart: string;
+        team: string;
+        laps: Array<{ lap: number; gap: string; gap_seconds: number | null; lap_time: string; pit_stops: number }>;
+      }>;
+    };
+  },
+
   getDriverConsistency: async (name: string) => {
     try {
       const params = new URLSearchParams({ name });

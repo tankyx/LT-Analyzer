@@ -388,6 +388,77 @@ export const appendLapGapHistory = (
   return changed ? next : prev;
 };
 
+// A completed pit stop is treated (by the live path) as costing this many
+// seconds of track position; the historical seed applies the same constant so
+// the two series join up.
+export const PIT_STOP_COMPENSATION_SECONDS = 150;
+
+export interface SessionGapLap {
+  lap: number;
+  gap: string;
+  gap_seconds: number | null;
+  lap_time: string;
+  pit_stops: number;
+}
+export type SessionGapSeries = Record<
+  string,
+  { kart: string; team: string; laps: SessionGapLap[] }
+>;
+
+/**
+ * Seed the Delta chart from persisted per-lap gaps (endpoint
+ * /api/team-data/session-gaps). The DB stores each team's gap-to-leader per
+ * lap — user-independent timing data — and here we turn that into the
+ * head-to-head series against `myTeam`, applying the same pit-stop
+ * compensation as the live path so the two join seamlessly. Lapped laps
+ * (`gap_seconds === null`) are skipped. Exported for unit tests.
+ */
+export const buildGapHistoryFromSeries = (
+  series: SessionGapSeries,
+  myTeam: string,
+  monitoredTeams: string[],
+  pitStopTime: number,
+  requiredPitStops: number,
+  maxEntries: number = MAX_GAP_HISTORY,
+): GapHistory => {
+  const myLaps = series[myTeam]?.laps || [];
+  if (myLaps.length === 0) return {};
+
+  const out: GapHistory = {};
+  monitoredTeams.forEach(kart => {
+    const laps = series[kart]?.laps || [];
+    if (laps.length === 0) return;
+
+    const gaps: number[] = [];
+    const adjusted: number[] = [];
+    let myGap = 0;
+    for (let i = 0; i < laps.length; i++) {
+      const myLap = myLaps[i];
+      if (myLap && myLap.gap_seconds != null) myGap = myLap.gap_seconds;
+      const xGap = laps[i].gap_seconds;
+      if (xGap == null) continue; // lapped / unknown at this lap
+      const xPit = laps[i].pit_stops || 0;
+      const mPit = myLap?.pit_stops || 0;
+      const real = (xGap - myGap) + (xPit - mPit) * PIT_STOP_COMPENSATION_SECONDS;
+      const remainingComp =
+        (Math.max(0, requiredPitStops - xPit) - Math.max(0, requiredPitStops - mPit)) * pitStopTime;
+      gaps.push(Math.round(real * 1000) / 1000);
+      adjusted.push(Math.round((real + remainingComp) * 1000) / 1000);
+    }
+    if (gaps.length === 0) return;
+
+    out[kart] = {
+      gaps: gaps.slice(-maxEntries),
+      adjusted_gaps: adjusted.slice(-maxEntries),
+      // The latest completed lap, even if its point was skipped, so the live
+      // append effect doesn't re-add it.
+      last_update: laps[laps.length - 1].lap_time || '',
+    };
+  });
+
+  return out;
+};
+
 const RaceDashboard = () => {
   const { user, logout, apiFetch } = useAuth();
   const router = useRouter();
@@ -576,6 +647,30 @@ const RaceDashboard = () => {
     if (!myTeam || monitoredTeams.length === 0) return;
     setGapHistory(prev => appendLapGapHistory(prev, monitoredTeams, frontendDeltaData, teams));
   }, [frontendDeltaData, teams, myTeam, monitoredTeams]);
+
+  // Seed the chart from stored history (one row per completed lap) so it is
+  // populated on load instead of only filling forward. Best-effort: with no
+  // session yet, or on a failed fetch, the live append effect above still
+  // builds the series. Re-runs when the track/session/team selection or the
+  // pit config changes.
+  useEffect(() => {
+    if (!myTeam || monitoredTeams.length === 0) return;
+    const karts = Array.from(new Set([myTeam, ...monitoredTeams]));
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await ApiService.getSessionGaps(selectedTrackId, currentSessionId, karts);
+        if (cancelled) return;
+        const seeded = buildGapHistoryFromSeries(
+          data.series || {}, myTeam, monitoredTeams, pitStopTime, requiredPitStops,
+        );
+        if (Object.keys(seeded).length > 0) setGapHistory(seeded);
+      } catch {
+        /* history is optional; the live append effect fills the chart */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedTrackId, currentSessionId, myTeam, monitoredTeams, pitStopTime, requiredPitStops]);
 
   const handleTeamHover = (kartNum: string | null) => {
     setHoveredTeam(kartNum);

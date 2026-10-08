@@ -219,6 +219,7 @@ class MultiTrackManager:
                         team_name TEXT,
                         lap_number INTEGER,
                         lap_time TEXT,
+                        gap TEXT,
                         position_after_lap INTEGER,
                         pit_this_lap INTEGER,
                         FOREIGN KEY (session_id) REFERENCES race_sessions(session_id)
@@ -259,6 +260,15 @@ class MultiTrackManager:
                     CREATE INDEX IF NOT EXISTS idx_lap_history_team
                     ON lap_history(team_name, session_id)
                 ''')
+
+                # Per-lap gap-to-leader: the Delta chart's data source. The
+                # parser records the live `Gap` on every completed lap (see
+                # store_lap_data); this additive migration backfills only the
+                # column for track DBs created before it existed (historical
+                # rows are filled by migrations/backfill_lap_history_gap.py).
+                cursor.execute("PRAGMA table_info(lap_history)")
+                if 'gap' not in [c[1] for c in cursor.fetchall()]:
+                    conn.execute('ALTER TABLE lap_history ADD COLUMN gap TEXT')
 
                 # --- Fleet Tracker (endurance physical-machine tracking) ---
                 # The timing feed only exposes team identity; the physical kart
@@ -1059,6 +1069,7 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                             row.get('Team', ''),
                             runtime,
                             last_lap_val,
+                            row.get('Gap', ''),
                             position,
                             pit_stops  # Use the already parsed pit_stops value
                         ))
@@ -1095,8 +1106,8 @@ class TrackSpecificParser(ApexTimingWebSocketParser):
                         conn.executemany('''
                             INSERT INTO lap_history
                             (session_id, timestamp, kart_number, team_name,
-                            lap_number, lap_time, position_after_lap, pit_this_lap)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            lap_number, lap_time, gap, position_after_lap, pit_this_lap)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', lap_history_records)
 
                     conn.commit()

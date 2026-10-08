@@ -177,8 +177,20 @@ and cached server-side (60s TTL, invalidated by admin writes).
 | `GET /api/team-data/all-laps?team=&track_id=N` | Paginated raw laps |
 | `GET /api/team-data/cross-track-sessions?team=` | Cached, rate-limited (queries every per-track DB) |
 | `GET /api/team-data/session-laps?team=&track_id=N&session_id=M` | Lap-by-lap for one session |
+| `GET /api/team-data/session-gaps?track_id=N&session_id=M&karts=1,7` | Per-lap gap-to-leader for the Delta chart |
 | `POST /api/team-data/delete-best-lap` | **Admin only.** Nullifies a best-lap record |
 | `POST /api/team-data/mass-delete-laps` | **Admin only.** Threshold-based mass delete |
+
+`GET /api/team-data/session-gaps` returns one series per kart:
+`{track_id, session_id, series: {"7": {kart, team, laps: [{lap, gap,
+ gap_seconds, lap_time, pit_stops}]}}}`. `session_id` defaults to the track's
+live session and `karts` (comma-separated) restricts the response. `gap_seconds`
+is `null` for a lapped car (`"N Tours"`). This is raw, **user-independent**
+timing data — the per-lap gap-to-leader the parser persists in
+`lap_history.gap`; the client derives head-to-head deltas against its own team,
+so no per-user state is exposed. Track DBs created before the column existed get
+it via an additive migration, and historical rows are filled by
+`migrations/backfill_lap_history_gap.py`.
 
 ---
 

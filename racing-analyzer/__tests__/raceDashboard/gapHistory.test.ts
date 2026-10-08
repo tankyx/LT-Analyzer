@@ -14,7 +14,7 @@ jest.mock('@/utils/config', () => ({
   INVITE_REQUIRED: true,
 }));
 
-import { appendLapGapHistory, MAX_GAP_HISTORY } from '@/app/components/RaceDashboard';
+import { appendLapGapHistory, buildGapHistoryFromSeries, MAX_GAP_HISTORY } from '@/app/components/RaceDashboard';
 
 const team = (kart: string, lastLap: string) => ({ Kart: kart, 'Last Lap': lastLap });
 const delta = (gap: number, adjusted_gap?: number) => ({ gap, adjusted_gap });
@@ -80,5 +80,74 @@ describe('appendLapGapHistory', () => {
     }
     expect(history['12'].gaps).toHaveLength(MAX_GAP_HISTORY);
     expect(history['12'].gaps[history['12'].gaps.length - 1]).toBe(MAX_GAP_HISTORY + 9);
+  });
+});
+
+// Per-lap gap (seconds) + cumulative pit count, keyed by kart.
+const lap = (gap_seconds: number | null, pit_stops = 0, lap_time = '1:00.000') =>
+  ({ lap: 0, gap: gap_seconds == null ? '1 Tour' : String(gap_seconds), gap_seconds, lap_time, pit_stops });
+const seriesEntry = (kart: string, laps: ReturnType<typeof lap>[]) => ({ kart, team: `Team ${kart}`, laps });
+
+describe('buildGapHistoryFromSeries', () => {
+  test('turns per-lap gap-to-leader into a head-to-head series', () => {
+    const series = {
+      '1': seriesEntry('1', [lap(0), lap(0), lap(0)]),
+      '7': seriesEntry('7', [lap(2), lap(3.5), lap(5)]),
+    };
+    const history = buildGapHistoryFromSeries(series, '1', ['7'], 158, 7);
+    expect(history['7'].gaps).toEqual([2, 3.5, 5]);
+    expect(history['7'].last_update).toBe('1:00.000');
+  });
+
+  test('subtracts my team gaps when it is not the leader', () => {
+    const series = {
+      '1': seriesEntry('1', [lap(1), lap(1.5)]),
+      '7': seriesEntry('7', [lap(3), lap(5)]),
+    };
+    const history = buildGapHistoryFromSeries(series, '1', ['7'], 158, 7);
+    expect(history['7'].gaps).toEqual([2, 3.5]);
+  });
+
+  test('skips lapped laps where a seconds gap is meaningless', () => {
+    const series = {
+      '1': seriesEntry('1', [lap(0), lap(0), lap(0)]),
+      '7': seriesEntry('7', [lap(2), lap(null), lap(6)]),
+    };
+    const history = buildGapHistoryFromSeries(series, '1', ['7'], 158, 7);
+    expect(history['7'].gaps).toEqual([2, 6]);
+  });
+
+  test('applies completed-stop (150s) and remaining-stop compensation', () => {
+    const series = {
+      '1': seriesEntry('1', [lap(0, 0), lap(0, 0)]),
+      '7': seriesEntry('7', [lap(2, 0), lap(3, 1)]),
+    };
+    const history = buildGapHistoryFromSeries(series, '1', ['7'], 158, 7);
+    // lap 2: +3s track, one completed stop -> +150; remaining stop one fewer
+    // for the rival -> -158 in the adjusted series.
+    expect(history['7'].gaps).toEqual([2, 153]);
+    expect(history['7'].adjusted_gaps).toEqual([2, -5]);
+  });
+
+  test('returns nothing when our own team has no laps recorded', () => {
+    const series = { '7': seriesEntry('7', [lap(2)]) };
+    expect(buildGapHistoryFromSeries(series, '1', ['7'], 158, 7)).toEqual({});
+  });
+
+  test('caps the seeded series to the most recent entries', () => {
+    const laps = Array.from({ length: 8 }, (_, i) => lap(i));
+    const series = { '1': seriesEntry('1', laps.map(() => lap(0))), '7': seriesEntry('7', laps) };
+    const history = buildGapHistoryFromSeries(series, '1', ['7'], 158, 7, 3);
+    expect(history['7'].gaps).toEqual([5, 6, 7]);
+  });
+
+  test('keeps last_update at the latest lap even when its point was skipped', () => {
+    const series = {
+      '1': seriesEntry('1', [lap(0), lap(0)]),
+      '7': seriesEntry('7', [lap(2), lap(null, 0, '1:09.999')]),
+    };
+    const history = buildGapHistoryFromSeries(series, '1', ['7'], 158, 7);
+    expect(history['7'].gaps).toEqual([2]);
+    expect(history['7'].last_update).toBe('1:09.999');
   });
 });

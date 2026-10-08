@@ -1645,3 +1645,115 @@ def get_session_laps():
         print(f"Error getting session laps: {e}")
         traceback.print_exc()
         return race_ui._internal_error(e)
+
+
+def _parse_gap_to_seconds(raw):
+    """Apex gap-to-leader cell -> seconds, or None.
+
+    "" is the leader (0.0); a plain number or M:SS.sss is a time gap; a
+    "N Tours" string means the car is a lap (or more) down, where a seconds
+    figure would be meaningless, so it returns None.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if text == '':
+        return 0.0
+    if 'tour' in text.lower():
+        return None
+    try:
+        if ':' in text:
+            minutes, _, seconds = text.partition(':')
+            return int(minutes) * 60 + float(seconds)
+        return float(text)
+    except ValueError:
+        return None
+
+
+@team_data_bp.route('/api/team-data/session-gaps', methods=['GET'])
+@login_required
+def get_session_gaps():
+    """Per-lap gap-to-leader for a session (the Delta chart's data source).
+
+    Parameters:
+    - track_id (required)
+    - session_id (optional): defaults to the track's live session
+    - karts (optional): comma-separated kart numbers to restrict to
+
+    Returns ``series`` keyed by kart number, each ``{kart, team, laps:[...]}``
+    where a lap is ``{lap, gap, gap_seconds, lap_time, pit_stops}``.
+    ``gap_seconds`` is None for a lapped ("N Tours") car. The gap is written
+    by the parser on every completed lap (lap_history.gap) and is
+    user-independent timing data; the caller computes head-to-head deltas
+    against its own team, so no per-user state is exposed here.
+    """
+    try:
+        track_id = request.args.get('track_id', type=int)
+        session_id = request.args.get('session_id', type=int)
+        if not track_id:
+            return jsonify({'error': 'track_id parameter is required'}), 400
+        if not session_id:
+            session_id = race_ui._live_session_id(track_id)
+        if not session_id:
+            return jsonify({'error': 'no_live_session', 'series': {}}), 404
+
+        kart_filter = []
+        karts_raw = request.args.get('karts', '').strip()
+        if karts_raw:
+            for token in karts_raw.split(','):
+                token = token.strip()
+                if token.lstrip('-').isdigit():
+                    kart_filter.append(int(token))
+            if not kart_filter:
+                return jsonify({'error': 'invalid_karts'}), 400
+
+        where = ["session_id = ?", "lap_time IS NOT NULL", "lap_time != ''"]
+        params = [session_id]
+        if kart_filter:
+            where.append(f"kart_number IN ({','.join('?' * len(kart_filter))})")
+            params.extend(kart_filter)
+
+        conn = race_ui.get_track_db_connection(track_id)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"""
+                SELECT kart_number, team_name, gap, lap_time, pit_this_lap,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY kart_number ORDER BY timestamp ASC
+                       ) AS lap
+                  FROM lap_history
+                 WHERE {' AND '.join(where)}
+                 ORDER BY kart_number ASC, timestamp ASC
+                """,
+                params,
+            )
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+
+        series = {}
+        for kart_number, team_name, gap, lap_time, pit_this_lap, lap in rows:
+            key = str(kart_number)
+            entry = series.get(key)
+            if entry is None:
+                entry = {'kart': key, 'team': team_name, 'laps': []}
+                series[key] = entry
+            entry['laps'].append({
+                'lap': lap,
+                'gap': gap or '',
+                'gap_seconds': _parse_gap_to_seconds(gap),
+                'lap_time': lap_time,
+                'pit_stops': int(pit_this_lap) if pit_this_lap is not None else 0,
+            })
+
+        return jsonify({
+            'track_id': track_id,
+            'session_id': session_id,
+            'series': series,
+        })
+
+    except Exception as e:
+        print(f"Error getting session gaps: {e}")
+        traceback.print_exc()
+        return race_ui._internal_error(e)

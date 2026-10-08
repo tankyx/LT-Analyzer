@@ -134,11 +134,18 @@ class ApexTimingWebSocketParser:
                         team_name TEXT,
                         lap_number INTEGER,
                         lap_time TEXT,
+                        gap TEXT,
                         position_after_lap INTEGER,
                         pit_this_lap INTEGER,
                         FOREIGN KEY (session_id) REFERENCES race_sessions(session_id)
                     )
                 ''')
+                # Additive migration for DBs created before the per-lap gap
+                # column existed (Delta chart data source).
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(lap_history)")
+                if 'gap' not in [c[1] for c in cursor.fetchall()]:
+                    conn.execute('ALTER TABLE lap_history ADD COLUMN gap TEXT')
             self.logger.debug("Database setup complete")
         except Exception as e:
             self.logger.error(f"Database setup error: {e}")
@@ -619,6 +626,7 @@ class ApexTimingWebSocketParser:
                                 row.get('Team', ''),
                                 runtime,
                                 current_last_lap,
+                                row.get('Gap', ''),
                                 position,
                                 int(row.get('Pit Stops', '0'))
                             ))
@@ -641,8 +649,8 @@ class ApexTimingWebSocketParser:
                         conn.executemany('''
                             INSERT INTO lap_history 
                             (session_id, timestamp, kart_number, team_name, 
-                            lap_number, lap_time, position_after_lap, pit_this_lap)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            lap_number, lap_time, gap, position_after_lap, pit_this_lap)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', lap_history_records)
                     
                     self.logger.debug(f"Stored {len(current_records)} current records and {len(lap_history_records)} lap history records")
