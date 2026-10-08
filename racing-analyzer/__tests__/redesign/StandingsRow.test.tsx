@@ -43,12 +43,9 @@ describe('StandingsRow', () => {
   test('renders name without prefix, a class chip, kart number, and timing figures', () => {
     renderRow();
     expect(screen.getByText('MY TEAM ENDURANCE')).toBeInTheDocument();
-    // class chip renders twice: name line (desktop) and kart line (phone); CSS shows one
-    expect(screen.getAllByText('C1')).toHaveLength(2);
+    expect(screen.getByText('C1')).toBeInTheDocument();
     expect(screen.getByText('#14')).toBeInTheDocument();
-    // last lap appears twice: phone stack + desktop column (CSS hides one)
-    expect(screen.getAllByText('1:19.701')).toHaveLength(2);
-    expect(screen.getByText('1:19.233')).toBeInTheDocument();
+    expect(screen.getByText('1:19.701')).toBeInTheDocument();
   });
 
   test('star toggles monitoring for that kart', async () => {

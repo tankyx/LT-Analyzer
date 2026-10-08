@@ -10,6 +10,7 @@ jest.mock('@/utils/config', () => ({
 }));
 
 import { AuthProvider, useAuth } from '@/app/contexts/AuthContext';
+import type { LoginResult } from '@/app/contexts/AuthContext';
 
 function Capture({ onReady }: { onReady: (v: ReturnType<typeof useAuth>) => void }) {
   const ctx = useAuth();
@@ -85,7 +86,7 @@ describe('AuthContext', () => {
       }),
     );
 
-    let result: Awaited<ReturnType<typeof ctx.login>> | null = null;
+    let result: LoginResult | null = null;
     await act(async () => {
       result = await ctx!.login('a', 'a-very-long-password', 't');
     });
@@ -115,10 +116,10 @@ describe('AuthContext', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
     });
 
-    let result: Awaited<ReturnType<typeof ctx.login>> | null = null;
+    let result: LoginResult | null = null;
     await act(async () => {
       result = await ctx!.login('u', 'a-very-long-password', 't');
     });
-    expect(result?.ok).toBe(true);
+    expect(result).toEqual(expect.objectContaining({ ok: true }));
   });
 });

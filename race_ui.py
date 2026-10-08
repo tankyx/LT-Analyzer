@@ -36,6 +36,12 @@ from email_service import (
 from multi_track_manager import MultiTrackManager
 from turnstile import require_turnstile
 
+# Anchor the working directory to the repo root. Relative paths used below
+# ('auth.db', 'tracks.db', 'race_data_track_N.db', logs) would otherwise
+# depend on the launch CWD, which differs between `python race_ui.py`,
+# gunicorn and PM2. Anchoring once here makes every relative path stable.
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 
 def _parse_cors_origins():
     raw = os.environ.get('CORS_ORIGINS', '')
@@ -134,6 +140,12 @@ PIT_STOP_INTERVAL_MAX = 47  # Max laps between pit stops
 PIT_STOP_DURATION = 35      # Pit stop duration in seconds (more realistic)
 PIT_STOP_CHANCE = 0.001      # Random chance of an early pit stop per lap
 
+# Single source of truth for live timing state. Written by the parser thread
+# (and the sim/start endpoints) and read by Socket.IO/HTTP handlers WITHOUT a
+# lock. Safe only because every mutation is a single atomic whole-key
+# assignment (race_data['teams'] = [...], race_data['gap_history'][k] = {...});
+# the GIL makes single dict ops atomic. Do NOT refactor into multi-step
+# read-modify-write mutations without adding a lock first.
 race_data = {
     'teams': [],
     'session_info': {},
@@ -2322,6 +2334,33 @@ def get_race_data():
 # /api/update-monitoring removed in Phase 2 — superseded by PUT /api/me/prefs/<track_id>.
 # /api/update-pit-config removed in Phase 2 — same replacement.
 
+_ALLOW_PRIVATE_TIMING = os.environ.get('ALLOW_PRIVATE_TIMING_URLS', 'false').lower() == 'true'
+_TIMING_SCHEMES = {'http', 'https', 'ws', 'wss'}
+
+
+def _validate_timing_url(url: str, label: str) -> None:
+    """Reject non-http(s)/ws(s) schemes and hosts that resolve to private,
+    loopback or reserved addresses (SSRF guard). Admin-supplied timing URLs
+    should point at a public Apex/AlphaHub endpoint; set
+    ALLOW_PRIVATE_TIMING_URLS=true for local dev against a LAN timing server.
+    """
+    parsed = urlsplit(url or '')
+    if parsed.scheme.lower() not in _TIMING_SCHEMES or not parsed.hostname:
+        raise ValueError(f'{label} must be an http(s)/ws(s) URL')
+    if _ALLOW_PRIVATE_TIMING:
+        return
+    try:
+        port = parsed.port or (443 if parsed.scheme in ('https', 'wss') else 80)
+        infos = socket_module.getaddrinfo(parsed.hostname, port, proto=socket_module.IPPROTO_TCP)
+    except (socket_module.gaierror, ValueError):
+        raise ValueError(f'{label} host does not resolve')
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise ValueError(f'{label} host resolves to a non-public address')
+
+
 @app.route('/api/start-simulation', methods=['POST'])
 @admin_required
 def start_simulation():
@@ -2360,7 +2399,12 @@ def start_simulation():
         # Validate WebSocket URL for real data mode
         if not simulation_mode and not websocket_url:
             return jsonify({'status': 'error', 'message': 'WebSocket URL is required for real data mode. Please select a track with WebSocket URL configured or provide one manually.'}), 400
-        
+
+        # SSRF guard: only public http(s)/ws(s) endpoints are reachable.
+        if not simulation_mode:
+            _validate_timing_url(timing_url, 'Timing URL')
+            _validate_timing_url(websocket_url, 'WebSocket URL')
+
         print(f"Starting with simulation mode: {simulation_mode}, URL: {timing_url}, WebSocket URL: {websocket_url}")
         
         # Stop any existing thread
@@ -2386,6 +2430,8 @@ def start_simulation():
         
         mode_text = 'simulation' if simulation_mode else f'real data collection from {timing_url}'
         return jsonify({'status': 'success', 'message': f'Started {mode_text}'})
+    except ValueError as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
     except Exception as e:
         print(f"Error in start_simulation: {e}")
         print(traceback.format_exc())
