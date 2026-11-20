@@ -1280,7 +1280,7 @@ const RaceDashboard = () => {
         )}
       </div>
 
-      <div className="border border-line bg-surface overflow-hidden tower-sweep" role="table" aria-label="Standings">
+      <div className="border border-line bg-surface overflow-hidden" role="table" aria-label="Standings">
         {filteredTeams.length > 0 ? (
           sortedTeams.map(team => (
             <StandingsRow

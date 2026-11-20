@@ -163,8 +163,9 @@ body {
 }
 
 /* ---- Race-broadcast motion layer ----
-   The pit wall must read as *live*, not static. Each class is one small,
-   purposeful beat tied to the data it displays. */
+   Motion follows data: each class is one small beat that fires when the feed
+   just changed something. Nothing loops while the data is still, except the
+   live dot and a pit alert — no ambient sheen, no glow on chrome. */
 
 /* A number the live feed just rewrote: quick pop, like a timing board
    flipping a digit. Re-mounted per value via key={value} so every change
@@ -215,23 +216,6 @@ body {
   animation: rise-in 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 
-/* The timing tower never looks frozen: a slow ambient sheen drifts across
-   it even when no lap has landed in a while. */
-@keyframes tower-sweep {
-  0% { background-position: 200% 50%; }
-  100% { background-position: -100% 50%; }
-}
-.tower-sweep {
-  background-image: linear-gradient(
-    105deg,
-    transparent 42%,
-    rgb(var(--c-info) / 0.05) 50%,
-    transparent 58%
-  );
-  background-size: 200% 100%;
-  animation: tower-sweep 7s linear infinite;
-}
-
 /* Thin, theme-aware scrollbars for the rails and sheets. */
 .scroll-thin {
   scrollbar-width: thin;
@@ -270,8 +254,7 @@ body {
   .row-gain,
   .row-loss,
   .best-flash,
-  .rise-in,
-  .tower-sweep {
+  .rise-in {
     animation: none;
   }
   .rise-in {

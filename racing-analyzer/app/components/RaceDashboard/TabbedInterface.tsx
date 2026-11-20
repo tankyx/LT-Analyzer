@@ -152,7 +152,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
                   onClick={() => handleTabChange(tab.id)}
                   className={`relative flex flex-col items-center justify-center gap-1 min-w-[72px] px-3 py-2 border text-xs font-semibold transition-all ${
                     active
-                      ? 'bg-accent-hi text-accent-ink border-accent-hi shadow-[0_0_18px_-2px_rgb(var(--c-accent)/0.9)]'
+                      ? 'bg-accent-hi text-accent-ink border-accent-hi'
                       : 'bg-surface text-muted border-line hover:text-ink hover:bg-surface-2 hover:border-muted'
                   }`}
                 >
@@ -191,7 +191,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
                 }`}
               >
                 {active && (
-                  <span className="absolute top-0 inset-x-0 h-[3px] bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.9)]" aria-hidden />
+                  <span className="absolute top-0 inset-x-0 h-[3px] bg-accent" aria-hidden />
                 )}
                 {tab.icon}
                 {/* Below 360px six labels cannot fit: go icon-only, keep the name for screen readers. */}
