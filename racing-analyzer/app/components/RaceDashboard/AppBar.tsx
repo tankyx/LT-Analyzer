@@ -38,11 +38,12 @@ export function flagTone(flag: string | undefined): 'live' | 'alarm' | 'accent' 
   return 'muted';
 }
 
+// Same rule as StatusPill: ink label on a 15% ground, hue in the icon.
 const FLAG_CLASSES = {
-  live: 'bg-live/15 text-live',
-  alarm: 'bg-alarm/15 text-alarm',
-  accent: 'bg-accent/15 text-accent',
-  muted: 'bg-muted/15 text-muted',
+  live: { chip: 'bg-live/15', icon: 'text-live' },
+  alarm: { chip: 'bg-alarm/15', icon: 'text-alarm' },
+  accent: { chip: 'bg-accent/15', icon: 'text-accent' },
+  muted: { chip: 'bg-muted/15', icon: 'text-muted' },
 };
 
 const AppBar: React.FC<AppBarProps> = ({
@@ -139,9 +140,9 @@ const AppBar: React.FC<AppBarProps> = ({
         {/* Flag */}
         {flag && (
           <span
-            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-full text-sm font-semibold ${FLAG_CLASSES[tone]}`}
+            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-full text-sm font-semibold text-ink ${FLAG_CLASSES[tone].chip}`}
           >
-            <Flag size={14} />
+            <Flag size={14} className={FLAG_CLASSES[tone].icon} />
             {flag}
           </span>
         )}

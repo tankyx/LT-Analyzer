@@ -24,6 +24,14 @@ describe('StatusPill', () => {
     const pill = screen.getByText('Pit in');
     expect(pill).toHaveAttribute('data-tone', 'alarm');
   });
+  test('pill label is ink on a tinted ground; the hue stays in the dot', () => {
+    render(<StatusPill status="Pit-out" />);
+    const pill = screen.getByText('Pit out');
+    expect(pill.className).toContain('text-ink');
+    expect(pill.className).toContain('bg-accent/15');
+    expect(pill.className).not.toContain('text-accent');
+    expect(pill.querySelector('span')?.className).toContain('bg-accent');
+  });
   test('inline variant has no capsule background', () => {
     render(<StatusPill status="On Track" variant="inline" />);
     const el = screen.getByText('On track');

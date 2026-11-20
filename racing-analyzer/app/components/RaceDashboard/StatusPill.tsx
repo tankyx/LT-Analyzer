@@ -27,12 +27,15 @@ export function describeStatus(status: string | undefined): { tone: StatusTone; 
   }
 }
 
+// Pill: the label is ink; the hue lives in the dot and the 15% ground. Tone
+// text on its own tint reads at 3.6-4.2:1 in the light theme at this size.
+// Inline (no ground) keeps the coloured word, which passes on `surface`.
 const TONE_CLASSES: Record<StatusTone, { pill: string; dot: string; text: string }> = {
-  live: { pill: 'bg-live/15 text-live', dot: 'bg-live', text: 'text-live' },
-  alarm: { pill: 'bg-alarm/15 text-alarm', dot: 'bg-alarm', text: 'text-alarm' },
-  accent: { pill: 'bg-accent/15 text-accent', dot: 'bg-accent', text: 'text-accent' },
-  info: { pill: 'bg-info/15 text-info', dot: 'bg-info', text: 'text-info' },
-  muted: { pill: 'bg-muted/15 text-muted', dot: 'bg-muted', text: 'text-muted' },
+  live: { pill: 'bg-live/15 text-ink', dot: 'bg-live', text: 'text-live' },
+  alarm: { pill: 'bg-alarm/15 text-ink', dot: 'bg-alarm', text: 'text-alarm' },
+  accent: { pill: 'bg-accent/15 text-ink', dot: 'bg-accent', text: 'text-accent' },
+  info: { pill: 'bg-info/15 text-ink', dot: 'bg-info', text: 'text-info' },
+  muted: { pill: 'bg-muted/15 text-ink', dot: 'bg-muted', text: 'text-muted' },
 };
 
 export const toneClasses = (tone: StatusTone) => TONE_CLASSES[tone];
