@@ -1313,7 +1313,7 @@ function RandomnessVerdictPanel({ block }: { block: FairnessResponse['sprint'] }
       {n > 0 && (
         <div className="grid grid-cols-4 gap-2 text-xs">
           {block.quartile_counts.map((c, i) => (
-            <div key={i} className="bg-black bg-opacity-30 px-2 py-1">
+            <div key={i} className="bg-surface-2 px-2 py-1">
               <div className="opacity-70">Q{i + 1}{i === 0 ? ' (best)' : ''}</div>
               <div className="font-mono text-base">{c}</div>
               <div className="opacity-60">exp {(n / 4).toFixed(1)}</div>

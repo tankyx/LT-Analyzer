@@ -1,3 +1,35 @@
 {
-  "extends": ["next/core-web-vitals", "next/typescript"]
+  "extends": [
+    "next/core-web-vitals",
+    "next/typescript"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "app/**/*.ts",
+        "app/**/*.tsx"
+      ],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "Literal[value=/(^|\\s)(dark:[a-z]|text-white(\\s|$)|rounded(-[trbl]{1,2})?-none(\\s|$)|focus(-visible)?:(ring|outline-none)|text-\\[\\d+px\\]|bg-black\\b)/]",
+            "message": "Use the design tokens and scales: no dark: variants, text-white (text-on-signal / text-ink), rounded-none (a base rule squares controls), per-element focus rings (one global :focus-visible), arbitrary text-[Npx] sizes, or bg-black (bg-scrim). See CLAUDE.md, 'Scales'."
+          },
+          {
+            "selector": "TemplateElement[value.raw=/(^|\\s)(dark:[a-z]|text-white(\\s|$)|rounded(-[trbl]{1,2})?-none(\\s|$)|focus(-visible)?:(ring|outline-none)|text-\\[\\d+px\\]|bg-black\\b)/]",
+            "message": "Use the design tokens and scales: no dark: variants, text-white (text-on-signal / text-ink), rounded-none (a base rule squares controls), per-element focus rings (one global :focus-visible), arbitrary text-[Npx] sizes, or bg-black (bg-scrim). See CLAUDE.md, 'Scales'."
+          },
+          {
+            "selector": "Literal[value=/^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/]",
+            "message": "No hex colours in components: use a token class, or CHART / seriesColor from app/ui/chartTheme."
+          },
+          {
+            "selector": "Identifier[name='isDarkMode']",
+            "message": "Components do not take the theme as a prop; every colour is a CSS variable. Use token classes or app/ui/chartTheme."
+          }
+        ]
+      }
+    }
+  ]
 }

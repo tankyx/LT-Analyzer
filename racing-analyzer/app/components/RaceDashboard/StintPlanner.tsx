@@ -1113,7 +1113,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     <button
                       onClick={() => overwritePreset(clashingPresetId)}
                       className={`px-2 py-1 font-semibold ${
-                        'bg-accent hover:bg-accent text-white'
+                        'accent-block text-accent-ink hover:brightness-95'
                       }`}
                     >
                       Overwrite it
@@ -1179,7 +1179,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                   onPointerMove={onResizeMove}
                   onPointerUp={onResizeEnd}
                   onPointerCancel={onResizeEnd}
-                  className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize touch-none hover:bg-black/25"
+                  className="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize touch-none hover:bg-ink/25"
                 />
               </div>
             </React.Fragment>

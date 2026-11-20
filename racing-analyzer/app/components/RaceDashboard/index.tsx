@@ -5,9 +5,7 @@ import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
 import webSocketService, { RaceDataUpdate, TeamsUpdate, SessionUpdate, AllTracksStatusUpdate, TrackStatus, FleetKartState } from '../../services/WebSocketService';
 import StatusPill from '../../ui/StatusPill';
-import { Panel, PanelHeader, EmptyState } from '../../ui/Panel';
-import SegmentedControl from '../../ui/SegmentedControl';
-import Button from '../../ui/Button';
+import MonitoredPanel from './MonitoredPanel';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
 import StintPlanner from './StintPlanner';
@@ -24,9 +22,9 @@ import PitAlertTarget, {
   targetIdsFor,
 } from './PitAlertTarget';
 import AlertStack from './AlertStack';
-import StandingsRow, { PitAlertButton } from './StandingsRow';
+import StandingsRow from './StandingsRow';
 import { getTeamClass, displayTeamName } from './lib/teamName';
-import { AlertTriangle, Car, Clock, Eye, Gauge, Info, LineChart, List, Settings, Star, X } from 'lucide-react';
+import { AlertTriangle, Car, Clock, Eye, Gauge, LineChart, List, Settings, X } from 'lucide-react';
 import FleetTracker, { FleetKart } from './FleetTracker';
 import PaceMonitor from './PaceMonitor';
 import KartAssignmentEntry from './KartAssignmentEntry';
@@ -44,422 +42,18 @@ import {
   getSelectedTrack,
   putSelectedTrack,
 } from '../../services/SelectedTrackService';
-import { parseTimeToSeconds } from '../../../utils/raceMath';
 
-// Types
-interface Team {
-  Kart: string;
-  Team: string;
-  Position: string;
-  'Last Lap': string;
-  'Best Lap': string;
-  'Pit Stops': string;
-  Gap: string;
-  RunTime: string;
-  Status?: string;
-  lastPitCount?: number;
-}
+import {
+  calculateTeamGaps,
+  shouldPollFleet,
+  appendLapGapHistory,
+  buildGapHistoryFromSeries,
+} from './lib/gaps';
+import type { Team, SessionInfo, Alert, DeltaData, GapHistory } from './lib/gaps';
 
-interface SessionInfo {
-  dyn1?: string;
-  dyn2?: string;
-  light?: string;
-  title?: string;
-  title1?: string;
-  title2?: string;
-  [key: string]: string | undefined; // Allow other string fields from backend
-}
-
-interface Alert {
-  id: number;
-  message: string;
-  type?: 'info' | 'warning' | 'success' | 'error';
-  customContent?: React.ReactNode;
-  teamKart?: string; // Add team identifier for pit alerts
-  fleetKartId?: number; // fleet kart identifier for fleet pit alerts
-  /** Persists until dismissed or the live condition clears; skipped by auto-dismiss. */
-  persistent?: boolean;
-  /** Optional inline action button (e.g. Undo). */
-  action?: { label: string; onClick: () => void };
-}
-
-interface Trend {
-  value: number;
-  arrow: number;
-}
-
-interface DeltaData {
-  gap: number;
-  adjusted_gap?: number;
-  team_name: string;
-  position: number;
-  last_lap: string;
-  best_lap: string;
-  pit_stops: string;
-  remaining_stops?: number;
-  trends: {
-    lap_1: Trend;
-    lap_5: Trend;
-    lap_10: Trend;
-  };
-  adjusted_trends?: {
-    lap_1: Trend;
-    lap_5: Trend;
-    lap_10: Trend;
-  };
-}
-
-interface GapHistory {
-  [kart: string]: {
-    gaps: number[];
-    adjusted_gaps?: number[];
-    last_update: string;
-  };
-}
-
-const TrendArrows = ({ trend }: { trend: Trend | undefined }) => {
-  if (!trend || trend.arrow === 0) {
-    return <span className="text-muted">~</span>;
-  }
-  
-  const getArrows = () => {
-    const arrow = trend.value < 0 ? '↓' : '↑';
-    return arrow.repeat(trend.arrow);
-  };
-  
-  const getColor = () => {
-    // Simplified logic based on trend direction
-    return trend.value < 0 ? 'text-live' : 'text-alarm';
-  };
-  
-  return (
-    <span className={`font-bold ${getColor()}`}>
-      {getArrows()}
-    </span>
-  );
-};
-
-// parseTimeToSeconds imported from utils/raceMath.ts (canonical implementation)
-
-// Helper function to calculate gaps between teams
-const calculateTeamGaps = (teams: Team[], myTeamKart: string, monitoredKarts: string[], pitStopTime: number, requiredPitStops: number, isQualification: boolean = false): Record<string, DeltaData> => {
-  const myTeam = teams.find(t => t.Kart === myTeamKart);
-  if (!myTeam) return {};
-
-  const myPitStops = isQualification ? 0 : parseInt(myTeam['Pit Stops'] || '0');
-  const myRemainingStops = isQualification ? 0 : Math.max(0, requiredPitStops - myPitStops);
-  
-  // Parse my team's gap
-  let myGapToLeader = 0;
-  let myLapsBehind = 0;
-  if (myTeam.Position !== '1') {
-    const gapStr = myTeam.Gap;
-    // Handle lapped teams
-    if (gapStr.includes('Tour')) {
-      myLapsBehind = parseInt(gapStr.split(' ')[0]);
-      // Use my last lap time or default
-      const avgLapTime = myTeam['Last Lap'] && myTeam['Last Lap'].includes(':') 
-        ? parseTimeToSeconds(myTeam['Last Lap'])
-        : 90;
-      myGapToLeader = myLapsBehind * avgLapTime;
-    } else {
-      try {
-        myGapToLeader = parseTimeToSeconds(gapStr);
-      } catch {
-        myGapToLeader = 0;
-      }
-    }
-  }
-  
-  // Count laps difference between positions
-  const countLapDifference = (myPos: number, monPos: number): number => {
-    if (myPos === monPos) return 0;
-    
-    const startPos = Math.min(myPos, monPos);
-    const endPos = Math.max(myPos, monPos);
-    let lapDiff = 0;
-    
-    // Check all teams between the two positions
-    teams.forEach(t => {
-      const teamPos = parseInt(t.Position);
-      if (startPos < teamPos && teamPos < endPos) {
-        if (t.Gap.includes('Tour')) {
-          lapDiff += parseInt(t.Gap.split(' ')[0]);
-        }
-      }
-    });
-    
-    return lapDiff;
-  };
-  
-  const myPosition = parseInt(myTeam.Position);
-
-  const deltas: Record<string, DeltaData> = {};
-
-  monitoredKarts.forEach(kart => {
-    const monitoredTeam = teams.find(t => t.Kart === kart);
-    if (!monitoredTeam) return;
-
-    const monPitStops = isQualification ? 0 : parseInt(monitoredTeam['Pit Stops'] || '0');
-    const monRemainingStops = isQualification ? 0 : Math.max(0, requiredPitStops - monPitStops);
-    
-    const monPosition = parseInt(monitoredTeam.Position);
-    
-    // Parse monitored team's gap
-    let monGapToLeader = 0;
-    let monLapsBehind = 0;
-    if (monPosition !== 1) {
-      const gapStr = monitoredTeam.Gap;
-      // Handle lapped teams and special cases
-      if (gapStr.includes('Tour')) {
-        // Check if this is P1 showing total laps (e.g., "Tour 56")
-        if (monPosition === 1) {
-          // This is the winner showing total laps completed
-          monGapToLeader = 0; // Leader has no gap
-          monLapsBehind = 0;
-        } else {
-          // This is laps behind the leader (e.g., "1 Tour", "2 Tours")
-          monLapsBehind = parseInt(gapStr.split(' ')[0]);
-          
-          // Check if there are lapped teams between us
-          const lapsBetween = countLapDifference(myPosition, monPosition);
-          
-          // Calculate actual lap difference
-          let actualLapDiff = 0;
-          if (myPosition < monPosition) {
-            // Monitored team is behind us
-            actualLapDiff = monLapsBehind - myLapsBehind - lapsBetween;
-          } else {
-            // Monitored team is ahead of us
-            actualLapDiff = monLapsBehind - myLapsBehind + lapsBetween;
-          }
-          
-          // If actual lap diff is 0, we're on the same lap
-          if (actualLapDiff === 0) {
-            // We're on the same lap, calculate based on position
-            // This will be handled by the normal gap calculation below
-            monGapToLeader = myGapToLeader; // Start with same base
-          } else {
-            // Different laps, calculate based on lap difference using best lap time
-            const bestLapTime = monitoredTeam['Best Lap'] && monitoredTeam['Best Lap'].includes(':') 
-              ? parseTimeToSeconds(monitoredTeam['Best Lap'])
-              : 90;
-            monGapToLeader = myGapToLeader + (actualLapDiff * bestLapTime);
-          }
-        }
-      } else {
-        // Gap is in seconds (time format)
-        try {
-          monGapToLeader = parseTimeToSeconds(gapStr);
-          
-          // Check if there are lapped teams between us
-          const lapsBetween = countLapDifference(myPosition, monPosition);
-          
-          // If there are lapped teams between us, we need to account for the lap difference
-          if (lapsBetween > 0) {
-            const bestLapTime = monitoredTeam['Best Lap'] && monitoredTeam['Best Lap'].includes(':') 
-              ? parseTimeToSeconds(monitoredTeam['Best Lap'])
-              : 90;
-            
-            if (myPosition < monPosition) {
-              // Monitored team is behind us but with lapped teams in between
-              monGapToLeader += lapsBetween * bestLapTime;
-            } else {
-              // Monitored team is ahead of us but with lapped teams in between
-              monGapToLeader -= lapsBetween * bestLapTime;
-            }
-          }
-          // If no lapped teams between us, we're on the same lap and can use the gap as is
-        } catch {
-          monGapToLeader = 0;
-        }
-      }
-    }
-
-    // Calculate gap based on session type
-    let realGap: number;
-    let adjustedGap: number;
-    
-    if (isQualification) {
-      // In qualification mode, use best lap times for gap calculation
-      const myBestLap = myTeam['Best Lap'] && myTeam['Best Lap'].includes(':') 
-        ? parseTimeToSeconds(myTeam['Best Lap'])
-        : Infinity;
-      const monBestLap = monitoredTeam['Best Lap'] && monitoredTeam['Best Lap'].includes(':')
-        ? parseTimeToSeconds(monitoredTeam['Best Lap'])
-        : Infinity;
-      
-      // Gap is the difference in best lap times
-      realGap = monBestLap - myBestLap;
-      adjustedGap = realGap; // No pit stop adjustments in qualification
-    } else {
-      // Normal race mode - calculate with pit stops
-      // Calculate real gap including pit stop compensation for completed stops
-      // Using 150 second compensation as base (standard Apex Timing value)
-      realGap = (monGapToLeader - myGapToLeader) + ((monPitStops - myPitStops) * 150);
-      
-      // Calculate adjusted gap accounting for remaining required pit stops
-      adjustedGap = realGap + ((monRemainingStops - myRemainingStops) * pitStopTime);
-    }
-
-    deltas[kart] = {
-      gap: Math.round(realGap * 1000) / 1000, // Round to 3 decimals
-      adjusted_gap: Math.round(adjustedGap * 1000) / 1000,
-      team_name: monitoredTeam.Team,
-      position: parseInt(monitoredTeam.Position),
-      last_lap: monitoredTeam['Last Lap'],
-      best_lap: monitoredTeam['Best Lap'],
-      pit_stops: monitoredTeam['Pit Stops'],
-      remaining_stops: isQualification ? 0 : monRemainingStops,
-      trends: {
-        lap_1: { value: 0, arrow: 0 },
-        lap_5: { value: 0, arrow: 0 },
-        lap_10: { value: 0, arrow: 0 }
-      },
-      adjusted_trends: {
-        lap_1: { value: 0, arrow: 0 },
-        lap_5: { value: 0, arrow: 0 },
-        lap_10: { value: 0, arrow: 0 }
-      }
-    };
-  });
-
-  return deltas;
-};
-
-// Gate for live /fleet/state polling. Exported for unit tests.
-// Hidden browser tabs never poll; users without a fleet only poll while the
-// Fleet tab is open; users WITH a fleet poll in the background so the
-// "fast kart in the pits" alerts still fire from other tabs.
-export const shouldPollFleet = (
-  visibilityState: DocumentVisibilityState | undefined,
-  activeTab: string,
-  registrySize: number,
-): boolean => {
-  if (visibilityState === 'hidden') return false;
-  return activeTab === 'fleet' || registrySize > 0;
-};
-
-// Phase 2 dropped the backend's `gap_history`, which left the Delta chart with
-// no data source (it always rendered "No data available"). Rebuild the series
-// client-side from the deltas we already compute: one point per completed lap,
-// appended when a monitored kart's `Last Lap` changes — the same trigger the
-// old backend used. The first sample is seeded immediately so the chart draws
-// at once, and the arrays are capped to bound memory. Exported for unit tests.
-export const MAX_GAP_HISTORY = 60;
-export const appendLapGapHistory = (
-  prev: GapHistory,
-  monitoredTeams: string[],
-  deltas: Record<string, { gap: number; adjusted_gap?: number }>,
-  teams: Array<{ Kart: string; 'Last Lap'?: string }>,
-  maxEntries: number = MAX_GAP_HISTORY,
-): GapHistory => {
-  const next: GapHistory = { ...prev };
-  let changed = false;
-
-  monitoredTeams.forEach(kart => {
-    const data = deltas[kart];
-    const team = teams.find(t => t.Kart === kart);
-    const lastLap = team?.['Last Lap'] || '';
-    if (!data || !lastLap) return;
-
-    const adjusted = data.adjusted_gap ?? data.gap;
-    const existing = next[kart];
-    if (!existing) {
-      next[kart] = { gaps: [data.gap], adjusted_gaps: [adjusted], last_update: lastLap };
-      changed = true;
-    } else if (existing.last_update !== lastLap) {
-      next[kart] = {
-        gaps: [...existing.gaps, data.gap].slice(-maxEntries),
-        adjusted_gaps: [...(existing.adjusted_gaps || []), adjusted].slice(-maxEntries),
-        last_update: lastLap,
-      };
-      changed = true;
-    }
-  });
-
-  // Forget karts the user stopped monitoring.
-  const monitored = new Set(monitoredTeams);
-  Object.keys(next).forEach(kart => {
-    if (!monitored.has(kart)) {
-      delete next[kart];
-      changed = true;
-    }
-  });
-
-  return changed ? next : prev;
-};
-
-// A completed pit stop is treated (by the live path) as costing this many
-// seconds of track position; the historical seed applies the same constant so
-// the two series join up.
-export const PIT_STOP_COMPENSATION_SECONDS = 150;
-
-export interface SessionGapLap {
-  lap: number;
-  gap: string;
-  gap_seconds: number | null;
-  lap_time: string;
-  pit_stops: number;
-}
-export type SessionGapSeries = Record<
-  string,
-  { kart: string; team: string; laps: SessionGapLap[] }
->;
-
-/**
- * Seed the Delta chart from persisted per-lap gaps (endpoint
- * /api/team-data/session-gaps). The DB stores each team's gap-to-leader per
- * lap — user-independent timing data — and here we turn that into the
- * head-to-head series against `myTeam`, applying the same pit-stop
- * compensation as the live path so the two join seamlessly. Lapped laps
- * (`gap_seconds === null`) are skipped. Exported for unit tests.
- */
-export const buildGapHistoryFromSeries = (
-  series: SessionGapSeries,
-  myTeam: string,
-  monitoredTeams: string[],
-  pitStopTime: number,
-  requiredPitStops: number,
-  maxEntries: number = MAX_GAP_HISTORY,
-): GapHistory => {
-  const myLaps = series[myTeam]?.laps || [];
-  if (myLaps.length === 0) return {};
-
-  const out: GapHistory = {};
-  monitoredTeams.forEach(kart => {
-    const laps = series[kart]?.laps || [];
-    if (laps.length === 0) return;
-
-    const gaps: number[] = [];
-    const adjusted: number[] = [];
-    let myGap = 0;
-    for (let i = 0; i < laps.length; i++) {
-      const myLap = myLaps[i];
-      if (myLap && myLap.gap_seconds != null) myGap = myLap.gap_seconds;
-      const xGap = laps[i].gap_seconds;
-      if (xGap == null) continue; // lapped / unknown at this lap
-      const xPit = laps[i].pit_stops || 0;
-      const mPit = myLap?.pit_stops || 0;
-      const real = (xGap - myGap) + (xPit - mPit) * PIT_STOP_COMPENSATION_SECONDS;
-      const remainingComp =
-        (Math.max(0, requiredPitStops - xPit) - Math.max(0, requiredPitStops - mPit)) * pitStopTime;
-      gaps.push(Math.round(real * 1000) / 1000);
-      adjusted.push(Math.round((real + remainingComp) * 1000) / 1000);
-    }
-    if (gaps.length === 0) return;
-
-    out[kart] = {
-      gaps: gaps.slice(-maxEntries),
-      adjusted_gaps: adjusted.slice(-maxEntries),
-      // The latest completed lap, even if its point was skipped, so the live
-      // append effect doesn't re-add it.
-      last_update: laps[laps.length - 1].lap_time || '',
-    };
-  });
-
-  return out;
-};
+// Re-exported for the unit tests and any external importers.
+export { shouldPollFleet, appendLapGapHistory, buildGapHistoryFromSeries, MAX_GAP_HISTORY, PIT_STOP_COMPENSATION_SECONDS } from './lib/gaps';
+export type { SessionGapLap, SessionGapSeries } from './lib/gaps';
 
 const RaceDashboard = () => {
   const { user, logout, apiFetch } = useAuth();
@@ -1351,122 +945,22 @@ const RaceDashboard = () => {
         />
       )}
 
-      <Panel as="div" className="overflow-hidden">
-        <PanelHeader
-          title="Monitored"
-          icon={<Eye size={18} />}
-          count={monitoredTeams.length}
-          actions={
-            <>
-              {!isQualificationMode && (
-                <SegmentedControl
-                  label="Gap mode"
-                  value={showAdjustedGap ? 'adjusted' : 'raw'}
-                  onChange={(v) => setShowAdjustedGap(v === 'adjusted')}
-                  options={[
-                    { value: 'raw', label: 'Raw' },
-                    { value: 'adjusted', label: 'Adjusted' },
-                  ]}
-                />
-              )}
-              {monitoredTeams.length > 0 && (
-                <Button variant="quiet" size="sm" className="hover:text-alarm" onClick={() => { setIsUserUpdate(true); setMonitoredTeams([]); }}>
-                  Clear all
-                </Button>
-              )}
-            </>
-          }
-        />
-
-        <div className="p-3 flex flex-col gap-2">
-          {Object.entries(frontendDeltaData)
-            .sort((a, b) => a[1].position - b[1].position)
-            .map(([kart, data]) => {
-              const team = teams.find(t => t.Kart === kart);
-              const inPit = team?.Status === 'Pit-in';
-              const gapValue = showAdjustedGap ? (data.adjusted_gap ?? data.gap) : data.gap;
-              const trend = data.trends?.lap_1?.arrow ? data.trends.lap_1
-                : data.trends?.lap_5?.arrow ? data.trends.lap_5
-                : data.trends?.lap_10?.arrow ? data.trends.lap_10 : undefined;
-              return (
-                <div
-                  key={kart}
-                  className={`border p-3 flex flex-col gap-2 transition-colors ${
-                    inPit ? 'border-alarm/50 bg-alarm/8' : 'border-line bg-canvas'
-                  } ${hoveredTeam === kart ? 'ring-2 ring-info/60' : ''}`}
-                  style={{ boxShadow: teamColors[kart] ? `inset 3px 0 0 ${teamColors[kart]}` : undefined }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-surface-2 font-cond font-bold text-base flex items-center justify-center shrink-0">
-                      {data.position}
-                    </div>
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-sm font-semibold truncate">{displayTeamName(data.team_name)}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono tabular text-2xs text-muted">#{kart}</span>
-                        {team?.Status !== undefined && <StatusPill status={team.Status} variant="inline" />}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {team && !['Pit-in', 'Finished', 'DNF', 'DSQ'].includes(team.Status || '') && (
-                        <PitAlertButton kartNum={kart} teamName={team.Team} trackId={selectedTrackId} onTriggerAlert={triggerPitAlert} />
-                      )}
-                      <span className={`font-mono tabular text-lg font-semibold ${gapValue >= 0 ? 'text-live' : 'text-alarm'}`}>
-                        {gapValue >= 0 ? '+' : '−'}{Math.abs(gapValue).toFixed(3)}
-                      </span>
-                      {trend ? <TrendArrows trend={showAdjustedGap ? (data.adjusted_trends?.lap_1 ?? trend) : trend} /> : null}
-                      <button
-                        type="button"
-                        onClick={() => toggleTeamMonitoring(kart)}
-                        aria-label={`Stop monitoring ${data.team_name}`}
-                        className="w-9 h-9 flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="flex flex-col">
-                      <span className="eyebrow text-muted">Last</span>
-                      <span className="font-mono tabular text-sm">{data.last_lap || '—'}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="eyebrow text-muted">Best</span>
-                      <span className="font-mono tabular text-sm">{data.best_lap || '—'}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="eyebrow text-muted">{isQualificationMode ? 'Laps' : 'Stops'}</span>
-                      <span className="font-mono tabular text-sm">
-                        {data.pit_stops || '0'}
-                        {!isQualificationMode && showAdjustedGap && data.remaining_stops !== undefined && (
-                          <span className="text-muted"> · {data.remaining_stops > 0 ? `${data.remaining_stops} to go` : 'done'}</span>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          {Object.keys(frontendDeltaData).length === 0 && (
-            !myTeam ? (
-              <EmptyState icon={<Star size={36} />} title="Pick your team first">
-                Gaps are measured from your team, so choose it in the card above.
-              </EmptyState>
-            ) : (
-              <EmptyState icon={<Star size={36} />} title="No teams monitored yet">
-                Tap the star on a standings row to track its gap to you.
-              </EmptyState>
-            )
-          )}
-        </div>
-
-        {!isQualificationMode && showAdjustedGap && Object.keys(frontendDeltaData).length > 0 && (
-          <div className="px-4 py-2 text-xs text-muted border-t border-line bg-surface-2 flex items-center gap-1.5">
-            <Info size={14} className="text-info shrink-0" />
-            Adjusted gap accounts for remaining pit stops ({Math.floor(pitStopTime / 60)}:{String(pitStopTime % 60).padStart(2, '0')} per stop). Positive = they are behind you.
-          </div>
-        )}
-      </Panel>
+      <MonitoredPanel
+        deltas={frontendDeltaData}
+        teams={teams}
+        monitoredTeams={monitoredTeams}
+        myTeam={myTeam}
+        isQualificationMode={isQualificationMode}
+        showAdjustedGap={showAdjustedGap}
+        onShowAdjustedGapChange={setShowAdjustedGap}
+        pitStopTime={pitStopTime}
+        hoveredTeam={hoveredTeam}
+        teamColors={teamColors}
+        selectedTrackId={selectedTrackId}
+        onStopMonitoring={toggleTeamMonitoring}
+        onClearAll={() => { setIsUserUpdate(true); setMonitoredTeams([]); }}
+        onTriggerAlert={triggerPitAlert}
+      />
     </div>
   );
 

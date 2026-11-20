@@ -35,10 +35,14 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // The browser chrome colour is a <meta> value, so it cannot read the CSS
+  // tokens; these two mirror --c-canvas in globals.css.
+  /* eslint-disable no-restricted-syntax */
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ebeef2" },
     { media: "(prefers-color-scheme: dark)", color: "#0a0d13" },
   ],
+  /* eslint-enable no-restricted-syntax */
 };
 
 // Applies the saved theme before first paint, defaulting to the dark pit

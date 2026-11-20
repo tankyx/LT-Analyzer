@@ -1162,7 +1162,7 @@ export default function DataPage() {
                   <YAxis stroke={CHART.axis} />
                   <Tooltip
                     contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }}
-                    labelStyle={{ color: '#fff' }}
+                    labelStyle={{ color: CHART.ink }}
                   />
                   <Legend />
                   <Bar dataKey="best_lap_time" fill={seriesColor(2)} name="Best Lap Time" />
@@ -1180,7 +1180,7 @@ export default function DataPage() {
                   <YAxis stroke={CHART.axis} />
                   <Tooltip
                     contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }}
-                    labelStyle={{ color: '#fff' }}
+                    labelStyle={{ color: CHART.ink }}
                   />
                   <Legend />
                   <Bar dataKey="avg_lap_seconds" fill={seriesColor(3)} name="Avg Lap Time (s)" />
@@ -1275,7 +1275,7 @@ export default function DataPage() {
                       />
                       <Tooltip
                         contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }}
-                        labelStyle={{ color: '#fff' }}
+                        labelStyle={{ color: CHART.ink }}
                         formatter={(value: number) => [formatLapTime(value), 'Lap Time']}
                       />
                       <Legend />
@@ -1324,7 +1324,7 @@ export default function DataPage() {
                       />
                       <Tooltip
                         contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }}
-                        labelStyle={{ color: '#fff' }}
+                        labelStyle={{ color: CHART.ink }}
                         formatter={(value: number) => [formatLapTime(value), '10-Lap Avg']}
                       />
                       <Legend />
