@@ -44,7 +44,7 @@ function VerifyEmailInner() {
         {status === 'pending' && <p>Verifying your email…</p>}
         {status === 'ok' && (
           <>
-            <h2 className="text-2xl font-bold">Email verified ✓</h2>
+            <h2 className="text-2xl font-bold">Email verified</h2>
             <p className="text-sm text-ink">You can now sign in.</p>
             <Link href="/login" className="inline-block px-4 py-2 bg-info text-on-signal">Sign in</Link>
           </>

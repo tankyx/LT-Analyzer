@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { X } from 'lucide-react';
+import IconButton from '../../ui/IconButton';
 import { ApiService } from '../../services/ApiService';
 
 export interface LayoutEntry {
@@ -103,7 +105,7 @@ export default function LayoutsModal(
       <div className="bg-surface text-ink p-6 max-w-2xl w-full">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">Layouts — {track.name}</h3>
-          <button onClick={onClose} className="text-muted hover:text-ink">✕</button>
+          <IconButton label="Close layouts" onClick={onClose}><X size={16} /></IconButton>
         </div>
 
         <p className="text-sm text-muted mb-4">
@@ -188,7 +190,7 @@ export default function LayoutsModal(
                   <td className="px-3 py-2 text-ink">{l.name}</td>
                   <td className="px-3 py-2 text-ink">{l.min_field_best ?? '—'}</td>
                   <td className="px-3 py-2 text-ink">{l.max_field_best ?? '—'}</td>
-                  <td className="px-3 py-2 text-ink">{l.is_default ? '★' : ''}</td>
+                  <td className="px-3 py-2 text-ink">{l.is_default ? 'Default' : ''}</td>
                   <td className="px-3 py-2 text-right">
                     <button onClick={() => startEdit(l)} className="text-info hover:text-info mr-3">Edit</button>
                     <button onClick={() => remove(l.id)} className="text-alarm hover:text-alarm">Delete</button>

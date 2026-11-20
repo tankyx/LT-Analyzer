@@ -4,9 +4,14 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import ApiService from '../services/ApiService';
+import { BarChart3, Check, Trash2, Wrench, X } from 'lucide-react';
+import PageShell from '../shell/PageShell';
+import SegmentedControl from '../ui/SegmentedControl';
+import { CHART, seriesColor } from '../ui/chartTheme';
+import TrackFairnessPanel from './TrackFairnessPanel';
+import type { Track } from './types';
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ScatterChart, Scatter, ZAxis, ReferenceLine, Cell,
 } from 'recharts';
 
 interface Team {
@@ -84,12 +89,6 @@ interface TeamStints {
   stints: Stint[];
 }
 
-interface Track {
-  id: number;
-  track_name: string;
-  timing_url: string;
-  websocket_url: string;
-}
 
 interface TopTeam {
   name: string;
@@ -597,8 +596,8 @@ export default function DataPage() {
 
   if (loading) {
     return (
-      <div className="dark flex items-center justify-center min-h-screen bg-canvas">
-        <div className="text-white">Loading...</div>
+      <div className="flex items-center justify-center min-h-screen bg-canvas">
+        <div className="text-muted text-sm">Loading…</div>
       </div>
     );
   }
@@ -608,44 +607,26 @@ export default function DataPage() {
   }
 
   return (
-    <div className="dark min-h-screen bg-canvas p-6">
-      <div className="max-w-7xl mx-auto">
-        <h1 className="text-3xl font-bold text-white mb-6">Driver Stats</h1>
-
-        <div className="border-b border-line mb-4 flex gap-2">
-          <button
-            onClick={() => setActiveTab('search')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'search' ? 'text-white border-info' : 'text-muted border-transparent hover:text-ink'
-            }`}
-          >
-            Driver Search
-          </button>
-          <button
-            onClick={() => setActiveTab('fairness')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'fairness' ? 'text-white border-info' : 'text-muted border-transparent hover:text-ink'
-            }`}
-          >
-            Kart-Draw Fairness
-          </button>
-          <button
-            onClick={() => setActiveTab('leaderboard')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'leaderboard' ? 'text-white border-info' : 'text-muted border-transparent hover:text-ink'
-            }`}
-          >
-            Leaderboard & Compare
-          </button>
-        </div>
+    <PageShell title="Driver stats" icon={<BarChart3 size={18} />}>
+        <SegmentedControl
+          label="Driver stats view"
+          value={activeTab}
+          onChange={setActiveTab}
+          className="mb-4 max-w-full overflow-x-auto"
+          options={[
+            { value: 'search', label: 'Driver search', short: 'Search' },
+            { value: 'fairness', label: 'Kart-draw fairness', short: 'Fairness' },
+            { value: 'leaderboard', label: 'Leaderboard & compare', short: 'Leaderboard' },
+          ]}
+        />
 
         {activeTab === 'fairness' && (
           <TrackFairnessPanel tracks={tracks} />
         )}
 
         {activeTab === 'search' && (
-          <div className="bg-surface p-6 mb-6">
-            <h2 className="text-xl font-semibold text-white mb-2">Find a driver</h2>
+          <div className="bg-surface p-6 mb-6 border border-line">
+            <h2 className="text-xl font-semibold text-ink mb-2">Find a driver</h2>
             <p className="text-sm text-muted mb-4">
               Search by driver/team name. Click a result to open the full profile with cross-track history, consistency stats,
               and kart-fairness analysis.
@@ -656,7 +637,7 @@ export default function DataPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Start typing a name..."
-                className="w-full px-4 py-3 bg-surface-2 text-white text-lg"
+                className="w-full px-4 py-3 bg-surface-2 text-ink text-lg border border-line-strong"
                 autoFocus
               />
               {searching && <div className="absolute right-3 top-3 text-muted">Searching...</div>}
@@ -670,7 +651,7 @@ export default function DataPage() {
                     onClick={() => router.push(`/team/${encodeURIComponent(team.name)}`)}
                     className="px-4 py-3 hover:bg-line cursor-pointer flex justify-between items-center border-b border-line last:border-b-0"
                   >
-                    <span className="text-white">{team.name}</span>
+                    <span className="text-ink">{team.name}</span>
                     <span className="text-sm text-muted">Classes: {team.classes || '—'}</span>
                   </div>
                 ))}
@@ -695,12 +676,12 @@ export default function DataPage() {
         <>
 
         {/* Track Selector */}
-        <div className="bg-surface p-6 mb-6">
-          <h2 className="text-xl font-semibold text-white mb-4">Select Track</h2>
+        <div className="bg-surface p-6 mb-6 border border-line">
+          <h2 className="text-xl font-semibold text-ink mb-4">Select Track</h2>
           <select
             value={selectedTrackId}
             onChange={(e) => setSelectedTrackId(parseInt(e.target.value))}
-            className="w-full px-4 py-2 bg-surface-2 text-white"
+            className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
           >
             {tracks.map((track) => (
               <option key={track.id} value={track.id}>
@@ -711,12 +692,12 @@ export default function DataPage() {
         </div>
 
         {/* Session Selector */}
-        <div className="bg-surface p-6 mb-6">
-          <h2 className="text-xl font-semibold text-white mb-4">Filter by Session (Optional)</h2>
+        <div className="bg-surface p-6 mb-6 border border-line">
+          <h2 className="text-xl font-semibold text-ink mb-4">Filter by Session (Optional)</h2>
           <select
             value={globalSessionFilter || ''}
             onChange={(e) => setGlobalSessionFilter(e.target.value ? parseInt(e.target.value) : null)}
-            className="w-full px-4 py-2 bg-surface-2 text-white"
+            className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
           >
             <option value="">All Sessions</option>
             {allSessions.map((session) => (
@@ -733,15 +714,15 @@ export default function DataPage() {
         </div>
 
         {/* Search Section */}
-        <div className="bg-surface p-6 mb-6">
-          <h2 className="text-xl font-semibold text-white mb-4">Search Teams</h2>
+        <div className="bg-surface p-6 mb-6 border border-line">
+          <h2 className="text-xl font-semibold text-ink mb-4">Search Teams</h2>
           <div className="relative">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search for a team name..."
-              className="w-full px-4 py-2 bg-surface-2 text-white"
+              className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
             />
             {searching && (
               <div className="absolute right-3 top-2.5 text-muted">Searching...</div>
@@ -757,7 +738,7 @@ export default function DataPage() {
                   onClick={() => addTeamToComparison(team.name)}
                   className="px-4 py-2 hover:bg-line cursor-pointer flex justify-between items-center border-b border-line last:border-b-0"
                 >
-                  <span className="text-white">{team.name}</span>
+                  <span className="text-ink">{team.name}</span>
                   <span className="text-sm text-muted">Classes: {team.classes}</span>
                 </div>
               ))}
@@ -766,13 +747,13 @@ export default function DataPage() {
         </div>
 
         {/* Top Teams Section */}
-        <div className="bg-surface p-6 mb-6">
+        <div className="bg-surface p-6 mb-6 border border-line">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-white">Top Teams</h2>
+            <h2 className="text-xl font-semibold text-ink">Top Teams</h2>
             <select
               value={topTeamsLimit}
               onChange={(e) => setTopTeamsLimit(parseInt(e.target.value))}
-              className="px-4 py-2 bg-surface-2 text-white"
+              className="px-4 py-2 bg-surface-2 text-ink"
             >
               <option value={10}>Top 10</option>
               <option value={20}>Top 20</option>
@@ -812,8 +793,8 @@ export default function DataPage() {
                             : 'hover:bg-surface-2'
                         }`}
                       >
-                        <td className="px-4 py-3 text-white font-medium">{index + 1}</td>
-                        <td className="px-4 py-3 text-white capitalize">
+                        <td className="px-4 py-3 text-ink font-medium">{index + 1}</td>
+                        <td className="px-4 py-3 text-ink capitalize">
                           <div className="flex items-center gap-2">
                             <span
                               className="cursor-pointer hover:text-info"
@@ -822,14 +803,15 @@ export default function DataPage() {
                               {team.name}
                             </span>
                             {isSelected && (
-                              <span className="text-live text-xs">✓</span>
+                              <Check size={14} className="text-live" aria-label="Selected" />
                             )}
                             <button
                               onClick={() => router.push(`/team/${encodeURIComponent(team.name)}`)}
                               className="text-info hover:text-info text-xs ml-2"
                               title="View team profile"
+                              aria-label={`View ${team.name} profile`}
                             >
-                              📊
+                              <BarChart3 size={14} />
                             </button>
                           </div>
                         </td>
@@ -861,8 +843,9 @@ export default function DataPage() {
                               }}
                               className="text-alarm hover:text-alarm transition-colors"
                               title="Delete best lap"
+                              aria-label={`Delete best lap of ${team.name}`}
                             >
-                              🗑️
+                              <Trash2 size={16} />
                             </button>
                           </td>
                         )}
@@ -881,8 +864,8 @@ export default function DataPage() {
 
         {/* Mass Delete Section - Admin Only */}
         {user?.role === 'admin' && (
-          <div className="bg-surface p-6 mb-6">
-            <h2 className="text-xl font-semibold text-white mb-4">
+          <div className="bg-surface p-6 mb-6 border border-line">
+            <h2 className="text-xl font-semibold text-ink mb-4">
               Mass Delete Laps (Track-Wide)
             </h2>
             <p className="text-muted text-sm mb-4">
@@ -902,7 +885,7 @@ export default function DataPage() {
                   placeholder="e.g., 55.0"
                   value={massDeleteThreshold || ''}
                   onChange={(e) => setMassDeleteThreshold(parseFloat(e.target.value) || 0)}
-                  className="w-full px-4 py-2 bg-surface-2 text-white"
+                  className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
                 />
                 <p className="text-xs text-muted mt-1">
                   Laps under {massDeleteThreshold || 0}s will be deleted
@@ -914,7 +897,7 @@ export default function DataPage() {
                 <select
                   value={massDeleteType}
                   onChange={(e) => setMassDeleteType(e.target.value)}
-                  className="w-full px-4 py-2 bg-surface-2 text-white"
+                  className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
                 >
                   <option value="lap_history">Individual Laps (lap_history)</option>
                   <option value="best_laps">Best Lap Records (lap_times)</option>
@@ -958,22 +941,23 @@ export default function DataPage() {
 
         {/* Selected Teams */}
         {selectedTeams.length > 0 && (
-          <div className="bg-surface p-6 mb-6">
-            <h2 className="text-xl font-semibold text-white mb-4">
+          <div className="bg-surface p-6 mb-6 border border-line">
+            <h2 className="text-xl font-semibold text-ink mb-4">
               Selected Teams ({selectedTeams.length})
             </h2>
             <div className="flex flex-wrap gap-2">
               {selectedTeams.map((team) => (
                 <div
                   key={team}
-                  className="bg-info text-on-signal px-4 py-2 flex items-center gap-2"
+                  className="accent-block text-accent-ink px-4 py-2 flex items-center gap-2"
                 >
                   <span>{team}</span>
                   <button
                     onClick={() => removeTeamFromComparison(team)}
-                    className="text-white hover:text-alarm"
+                    className="text-ink hover:text-alarm"
+                    aria-label={`Remove ${team} from comparison`}
                   >
-                    ✕
+                    <X size={14} />
                   </button>
                 </div>
               ))}
@@ -994,14 +978,14 @@ export default function DataPage() {
 
         {/* Session Selector */}
         {commonSessions.length > 0 && (
-          <div className="bg-surface p-6 mb-6">
-            <h2 className="text-xl font-semibold text-white mb-4">
+          <div className="bg-surface p-6 mb-6 border border-line">
+            <h2 className="text-xl font-semibold text-ink mb-4">
               Select Session (showing only sessions where all teams participated)
             </h2>
             <select
               value={selectedSession || ''}
               onChange={(e) => setSelectedSession(e.target.value ? parseInt(e.target.value) : null)}
-              className="w-full px-4 py-2 bg-surface-2 text-white"
+              className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
             >
               <option value="">All Sessions</option>
               {commonSessions.map((session) => (
@@ -1028,34 +1012,34 @@ export default function DataPage() {
               if (!stats) return null;
 
               return (
-                <div key={teamName} className="bg-surface p-6">
-                  <h3 className="text-lg font-semibold text-white mb-4 capitalize">{teamName}</h3>
+                <div key={teamName} className="bg-surface p-6 border border-line">
+                  <h3 className="text-lg font-semibold text-ink mb-4 capitalize">{teamName}</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                       <p className="text-muted">Best Lap Time</p>
-                      <p className="text-white font-semibold">{stats.best_lap_time || 'N/A'}</p>
+                      <p className="text-ink font-semibold">{stats.best_lap_time || 'N/A'}</p>
                     </div>
                     <div>
                       <p className="text-muted">Avg Lap Time</p>
-                      <p className="text-white font-semibold">
+                      <p className="text-ink font-semibold">
                         {stats.avg_lap_seconds ? formatLapTime(stats.avg_lap_seconds) : 'N/A'}
                       </p>
                     </div>
                     <div>
                       <p className="text-muted">Total Laps</p>
-                      <p className="text-white font-semibold">{stats.total_laps_completed}</p>
+                      <p className="text-ink font-semibold">{stats.total_laps_completed}</p>
                     </div>
                     <div>
                       <p className="text-muted">Sessions</p>
-                      <p className="text-white font-semibold">{stats.sessions_participated}</p>
+                      <p className="text-ink font-semibold">{stats.sessions_participated}</p>
                     </div>
                     <div>
                       <p className="text-muted">Total Pit Stops</p>
-                      <p className="text-white font-semibold">{stats.total_pit_stops}</p>
+                      <p className="text-ink font-semibold">{stats.total_pit_stops}</p>
                     </div>
                     <div>
                       <p className="text-muted">Classes</p>
-                      <p className="text-white font-semibold">{stats.classes_raced.join(', ')}</p>
+                      <p className="text-ink font-semibold">{stats.classes_raced.join(', ')}</p>
                     </div>
                   </div>
                 </div>
@@ -1066,16 +1050,16 @@ export default function DataPage() {
 
         {/* All Laps Section - Single Team Only */}
         {selectedTeams.length === 1 && (
-          <div className="bg-surface p-6 mb-6">
+          <div className="bg-surface p-6 mb-6 border border-line">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-semibold text-white">
+              <h2 className="text-xl font-semibold text-ink">
                 All Laps - {selectedTeams[0]} ({allLapsTotalCount} total)
               </h2>
               <button
                 onClick={() => router.push(`/team/${encodeURIComponent(selectedTeams[0])}`)}
-                className="px-4 py-2 bg-info text-on-signal hover:bg-info transition-colors flex items-center gap-2"
+                className="px-4 py-2 accent-block text-accent-ink hover:brightness-95 transition-colors flex items-center gap-2"
               >
-                📊 View Full Profile
+                <BarChart3 size={16} /> View full profile
               </button>
             </div>
 
@@ -1103,7 +1087,7 @@ export default function DataPage() {
                           key={`${lap.session_id}-${lap.lap_number}-${index}`}
                           className="border-b border-line hover:bg-surface-2 transition-colors"
                         >
-                          <td className="px-4 py-3 text-white">{lap.lap_number}</td>
+                          <td className="px-4 py-3 text-ink">{lap.lap_number}</td>
                           <td className="px-4 py-3 text-info">{lap.lap_time}</td>
                           <td className="px-4 py-3 text-muted">{lap.session_name}</td>
                           <td className="px-4 py-3 text-muted text-xs">
@@ -1121,7 +1105,7 @@ export default function DataPage() {
                           </td>
                           <td className="px-4 py-3 text-center">
                             {lap.pit_this_lap ? (
-                              <span className="text-accent">🛠️</span>
+                              <Wrench size={14} className="text-accent inline" aria-label="Pit stop" />
                             ) : (
                               <span className="text-muted">-</span>
                             )}
@@ -1142,14 +1126,14 @@ export default function DataPage() {
                       <button
                         onClick={() => setAllLapsPage(Math.max(0, allLapsPage - 1))}
                         disabled={allLapsPage === 0}
-                        className="px-4 py-2 bg-surface-2 text-white hover:bg-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-4 py-2 bg-surface-2 text-ink hover:bg-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Previous
                       </button>
                       <button
                         onClick={() => setAllLapsPage(allLapsPage + 1)}
                         disabled={(allLapsPage + 1) * allLapsPerPage >= allLapsTotalCount}
-                        className="px-4 py-2 bg-surface-2 text-white hover:bg-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="px-4 py-2 bg-surface-2 text-ink hover:bg-line transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         Next
                       </button>
@@ -1169,37 +1153,37 @@ export default function DataPage() {
         {comparisonData.length >= 2 && (
           <div className="space-y-6">
             {/* Best Lap Time Comparison */}
-            <div className="bg-surface p-6">
-              <h2 className="text-xl font-semibold text-white mb-4">Best Lap Time Comparison</h2>
+            <div className="bg-surface p-6 border border-line">
+              <h2 className="text-xl font-semibold text-ink mb-4">Best Lap Time Comparison</h2>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={comparisonData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="team_name" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                  <XAxis dataKey="team_name" stroke={CHART.axis} />
+                  <YAxis stroke={CHART.axis} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#1F2937', border: 'none' }}
+                    contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }}
                     labelStyle={{ color: '#fff' }}
                   />
                   <Legend />
-                  <Bar dataKey="best_lap_time" fill="#3B82F6" name="Best Lap Time" />
+                  <Bar dataKey="best_lap_time" fill={seriesColor(2)} name="Best Lap Time" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
 
             {/* Average Lap Time Comparison */}
-            <div className="bg-surface p-6">
-              <h2 className="text-xl font-semibold text-white mb-4">Average Lap Time Comparison</h2>
+            <div className="bg-surface p-6 border border-line">
+              <h2 className="text-xl font-semibold text-ink mb-4">Average Lap Time Comparison</h2>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={comparisonData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="team_name" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                  <XAxis dataKey="team_name" stroke={CHART.axis} />
+                  <YAxis stroke={CHART.axis} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#1F2937', border: 'none' }}
+                    contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }}
                     labelStyle={{ color: '#fff' }}
                   />
                   <Legend />
-                  <Bar dataKey="avg_lap_seconds" fill="#10B981" name="Avg Lap Time (s)" />
+                  <Bar dataKey="avg_lap_seconds" fill={seriesColor(3)} name="Avg Lap Time (s)" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1208,8 +1192,8 @@ export default function DataPage() {
             {Object.keys(lapDetails).length > 0 && (
               <>
                 {/* Stint Selector */}
-                <div className="bg-surface p-6">
-                  <h2 className="text-xl font-semibold text-white mb-4">Select Stint or Lap Range</h2>
+                <div className="bg-surface p-6 border border-line">
+                  <h2 className="text-xl font-semibold text-ink mb-4">Select Stint or Lap Range</h2>
 
                   {/* Stint Dropdown */}
                   {teamStints.length > 0 && (
@@ -1218,7 +1202,7 @@ export default function DataPage() {
                       <select
                         value={selectedStint}
                         onChange={(e) => handleStintSelection(e.target.value)}
-                        className="w-full px-4 py-2 bg-surface-2 text-white"
+                        className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
                       >
                         <option value="">Custom Range</option>
                         {teamStints.map((teamStint) =>
@@ -1246,7 +1230,7 @@ export default function DataPage() {
                           setStintStart(parseInt(e.target.value) || 1);
                           setSelectedStint(''); // Clear stint selection when manually changing
                         }}
-                        className="w-full px-4 py-2 bg-surface-2 text-white"
+                        className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
                         min={1}
                       />
                     </div>
@@ -1259,7 +1243,7 @@ export default function DataPage() {
                           setStintEnd(parseInt(e.target.value) || 50);
                           setSelectedStint(''); // Clear stint selection when manually changing
                         }}
-                        className="w-full px-4 py-2 bg-surface-2 text-white"
+                        className="w-full px-4 py-2 bg-surface-2 text-ink border border-line-strong"
                         min={stintStart}
                       />
                     </div>
@@ -1270,33 +1254,33 @@ export default function DataPage() {
                 </div>
 
                 {/* Selected Stint Lap Times */}
-                <div className="bg-surface p-6">
-                  <h2 className="text-xl font-semibold text-white mb-4">
+                <div className="bg-surface p-6 border border-line">
+                  <h2 className="text-xl font-semibold text-ink mb-4">
                     Lap Times Comparison (Laps {stintStart}-{stintEnd})
                   </h2>
                   <ResponsiveContainer width="100%" height={400}>
                     <LineChart>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
                       <XAxis
                         dataKey="lap_number"
                         type="number"
                         domain={[stintStart, stintEnd]}
-                        stroke="#9CA3AF"
+                        stroke={CHART.axis}
                         label={{ value: 'Lap Number', position: 'insideBottom', offset: -5 }}
                       />
                       <YAxis
-                        stroke="#9CA3AF"
+                        stroke={CHART.axis}
                         domain={['dataMin - 2', 'dataMax + 2']}
                         label={{ value: 'Lap Time', angle: -90, position: 'insideLeft' }}
                       />
                       <Tooltip
-                        contentStyle={{ backgroundColor: '#1F2937', border: 'none' }}
+                        contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }}
                         labelStyle={{ color: '#fff' }}
                         formatter={(value: number) => [formatLapTime(value), 'Lap Time']}
                       />
                       <Legend />
                       {Object.entries(lapDetails).map(([teamName, laps], idx) => {
-                        const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+                        const colors = [seriesColor(2), seriesColor(3), seriesColor(1), seriesColor(0), seriesColor(4)];
                         const filteredLaps = laps.filter(
                           lap => lap.lap_number >= stintStart && lap.lap_number <= stintEnd
                         );
@@ -1320,32 +1304,32 @@ export default function DataPage() {
                 </div>
 
                 {/* Full Race with 10-Lap Moving Average */}
-                <div className="bg-surface p-6">
-                  <h2 className="text-xl font-semibold text-white mb-4">
+                <div className="bg-surface p-6 border border-line">
+                  <h2 className="text-xl font-semibold text-ink mb-4">
                     Full Race Pace (10-Lap Rolling Average)
                   </h2>
                   <ResponsiveContainer width="100%" height={500}>
                     <LineChart>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
                       <XAxis
                         dataKey="lap_number"
                         type="number"
-                        stroke="#9CA3AF"
+                        stroke={CHART.axis}
                         label={{ value: 'Lap Number', position: 'insideBottom', offset: -5 }}
                       />
                       <YAxis
-                        stroke="#9CA3AF"
+                        stroke={CHART.axis}
                         domain={['dataMin - 1', 'dataMax + 1']}
                         label={{ value: 'Average Lap Time', angle: -90, position: 'insideLeft' }}
                       />
                       <Tooltip
-                        contentStyle={{ backgroundColor: '#1F2937', border: 'none' }}
+                        contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }}
                         labelStyle={{ color: '#fff' }}
                         formatter={(value: number) => [formatLapTime(value), '10-Lap Avg']}
                       />
                       <Legend />
                       {Object.entries(lapDetails).map(([teamName, laps], idx) => {
-                        const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+                        const colors = [seriesColor(2), seriesColor(3), seriesColor(1), seriesColor(0), seriesColor(4)];
                         const movingAvg = calculateMovingAverage(laps, 10);
 
                         return (
@@ -1372,8 +1356,8 @@ export default function DataPage() {
 
                 {/* Lap-by-Lap Comparison Table */}
                 {selectedTeams.length === 2 && (
-                  <div className="bg-surface p-6">
-                    <h2 className="text-xl font-semibold text-white mb-4">
+                  <div className="bg-surface p-6 border border-line">
+                    <h2 className="text-xl font-semibold text-ink mb-4">
                       Lap-by-Lap Comparison
                     </h2>
                     <div className="text-sm text-muted mb-4">
@@ -1412,7 +1396,7 @@ export default function DataPage() {
 
                               rows.push(
                                 <tr key={i} className="border-b border-line hover:bg-surface">
-                                  <td className="px-4 py-2 text-white font-medium">{lapNum}</td>
+                                  <td className="px-4 py-2 text-ink font-medium">{lapNum}</td>
                                   <td className={`px-4 py-2 ${team1IsPit ? 'text-accent font-bold' : 'text-info'}`}>
                                     {team1Time ? formatLapTime(team1Time) : '-'}
                                   </td>
@@ -1445,7 +1429,7 @@ export default function DataPage() {
         )}
 
         {loadingStats && (
-          <div className="text-center text-white py-8">
+          <div className="text-center text-ink py-8">
             Loading team statistics...
           </div>
         )}
@@ -1459,8 +1443,8 @@ export default function DataPage() {
         {/* Delete Confirmation Dialog */}
         {deleteDialogOpen && teamToDelete && (
           <div className="fixed inset-0 bg-scrim flex items-center justify-center z-50">
-            <div className="bg-surface p-6 max-w-md w-full mx-4">
-              <h3 className="text-xl font-semibold text-white mb-4">Delete Best Lap?</h3>
+            <div className="bg-surface p-6 max-w-md w-full mx-4 border border-line">
+              <h3 className="text-xl font-semibold text-ink mb-4">Delete Best Lap?</h3>
               <p className="text-ink mb-6">
                 Are you sure you want to delete the best lap time of{' '}
                 <span className="font-bold text-info">{teamToDelete.bestLap}</span> for team{' '}
@@ -1472,7 +1456,7 @@ export default function DataPage() {
                 <button
                   onClick={cancelDeleteBestLap}
                   disabled={deletingLap}
-                  className="px-4 py-2 bg-line text-white hover:bg-line transition-colors disabled:opacity-50"
+                  className="px-4 py-2 bg-line text-ink hover:bg-line transition-colors disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -1489,746 +1473,10 @@ export default function DataPage() {
         )}
         </>
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }
 
 // ============================================================================
 // Track Fairness Leaderboard panel
 // ============================================================================
-
-type VarDefVerdict = 'consistent' | 'deficit_flagged' | 'insufficient_data';
-
-interface TrackFairnessDriver {
-  name: string;
-  sessions: number;
-  pb: string;
-  pb_seconds: number;
-  mean_session_best_seconds: number;
-  stddev_session_best_seconds: number;
-  mean_gap_to_pb_pct: number;
-  max_gap_to_pb_pct: number;
-  pct_within_1pct_pb: number;
-  pct_within_0_5pct_pb: number;
-  mean_relative_pace: number | null;
-  stddev_relative_pace: number | null;
-  best_relative_pace: number | null;
-  worst_relative_pace: number | null;
-  vardef_n_sessions: number;
-  vardef_observed_sd_seconds: number | null;
-  vardef_expected_sd_seconds: number | null;
-  vardef_ratio: number | null;
-  vardef_p_value: number | null;
-  vardef_verdict: VarDefVerdict;
-}
-
-type FairnessSortKey =
-  | 'mean_gap_to_pb_pct'
-  | 'stddev_session_best_seconds'
-  | 'pct_within_1pct_pb'
-  | 'sessions'
-  | 'pb_seconds'
-  | 'stddev_relative_pace'
-  | 'mean_relative_pace'
-  | 'vardef_ratio'
-  | 'vardef_p_value';
-
-interface SessionConfigsResponse {
-  track_id: number;
-  track_name: string;
-  session_count: number;
-  field_best_min: number | null;
-  field_best_max: number | null;
-  histogram: { field_best_bin: number; count: number }[];
-  suggested_splits: { gap: number; below: number; above: number }[];
-}
-
-interface LayoutEntry {
-  id: number;
-  name: string;
-  min_field_best: number | null;
-  max_field_best: number | null;
-  is_default: boolean;
-}
-
-function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
-  const router = useRouter();
-  const [trackId, setTrackId] = useState<number | null>(null);
-  const [minSessions, setMinSessions] = useState<number>(5);
-  const [minFieldBest, setMinFieldBest] = useState<string>('');
-  const [maxFieldBest, setMaxFieldBest] = useState<string>('');
-  const [layoutId, setLayoutId] = useState<number | null>(null);
-  const [windowMonths, setWindowMonths] = useState<number>(12);
-  const [layouts, setLayouts] = useState<LayoutEntry[]>([]);
-  const [data, setData] = useState<TrackFairnessDriver[] | null>(null);
-  const [configs, setConfigs] = useState<SessionConfigsResponse | null>(null);
-  const [trackName, setTrackName] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<FairnessSortKey>('stddev_relative_pace');
-  const [sortDesc, setSortDesc] = useState(false);
-
-  // Default to first track once tracks load
-  useEffect(() => {
-    if (trackId === null && tracks.length > 0) setTrackId(tracks[0].id);
-  }, [tracks, trackId]);
-
-  // Load session-config histogram to help pick layout thresholds
-  useEffect(() => {
-    if (trackId === null) return;
-    let cancelled = false;
-    ApiService.getTrackSessionConfigs(trackId)
-      .then(res => { if (!cancelled) setConfigs(res); })
-      .catch(() => { if (!cancelled) setConfigs(null); });
-    return () => { cancelled = true; };
-  }, [trackId]);
-
-  // Load layouts for the selected track
-  useEffect(() => {
-    if (trackId === null) { setLayouts([]); setLayoutId(null); return; }
-    let cancelled = false;
-    ApiService.getTrackLayouts(trackId)
-      .then(res => {
-        if (cancelled) return;
-        const list: LayoutEntry[] = res?.layouts || [];
-        setLayouts(list);
-        // Reset selection whenever track changes; user opts in per track.
-        setLayoutId(null);
-      })
-      .catch(() => {
-        if (!cancelled) { setLayouts([]); setLayoutId(null); }
-      });
-    return () => { cancelled = true; };
-  }, [trackId]);
-
-  useEffect(() => {
-    if (trackId === null) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setData(null);
-    const minFB = minFieldBest.trim() === '' ? undefined : parseFloat(minFieldBest);
-    const maxFB = maxFieldBest.trim() === '' ? undefined : parseFloat(maxFieldBest);
-    ApiService.getTrackKartFairness(trackId, minSessions, minFB, maxFB, layoutId, windowMonths)
-      .then(res => {
-        if (cancelled) return;
-        setData(res.drivers || []);
-        setTrackName(res.track_name || '');
-      })
-      .catch(err => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Failed to load kart fairness');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [trackId, minSessions, minFieldBest, maxFieldBest, layoutId, windowMonths]);
-
-  const sortedDrivers = (() => {
-    if (!data) return [];
-    const copy = [...data];
-    copy.sort((a, b) => {
-      const dir = sortDesc ? -1 : 1;
-      switch (sortKey) {
-        case 'mean_gap_to_pb_pct':
-          return dir * (a.mean_gap_to_pb_pct - b.mean_gap_to_pb_pct);
-        case 'stddev_session_best_seconds':
-          return dir * (a.stddev_session_best_seconds - b.stddev_session_best_seconds);
-        case 'pct_within_1pct_pb':
-          return dir * (b.pct_within_1pct_pb - a.pct_within_1pct_pb);
-        case 'sessions':
-          return dir * (a.sessions - b.sessions);
-        case 'pb_seconds':
-          return dir * (a.pb_seconds - b.pb_seconds);
-        case 'stddev_relative_pace': {
-          const av = a.stddev_relative_pace ?? 1e9;
-          const bv = b.stddev_relative_pace ?? 1e9;
-          return dir * (av - bv);
-        }
-        case 'mean_relative_pace': {
-          const av = a.mean_relative_pace ?? 1e9;
-          const bv = b.mean_relative_pace ?? 1e9;
-          return dir * (av - bv);
-        }
-        case 'vardef_ratio': {
-          // Lower ratio = less variance than typical fleet → suspect.
-          const av = a.vardef_ratio ?? 99;
-          const bv = b.vardef_ratio ?? 99;
-          return dir * (av - bv);
-        }
-        case 'vardef_p_value': {
-          // Smaller p = more significant variance deficit.
-          const av = a.vardef_p_value ?? 2;
-          const bv = b.vardef_p_value ?? 2;
-          return dir * (av - bv);
-        }
-      }
-    });
-    return copy;
-  })();
-
-  const toggleSort = (k: FairnessSortKey) => {
-    if (sortKey === k) {
-      setSortDesc(!sortDesc);
-    } else {
-      setSortKey(k);
-      setSortDesc(false);
-    }
-  };
-
-  const headerCell = (k: FairnessSortKey, label: string) => (
-    <th
-      onClick={() => toggleSort(k)}
-      className="px-3 py-2 text-ink cursor-pointer hover:text-white select-none"
-    >
-      {label} {sortKey === k && (sortDesc ? '↓' : '↑')}
-    </th>
-  );
-
-  // Scatter: each point is one driver. X = σRel, Y = MeanRel. Axis positions
-  // are descriptive — tight, fast-relative-to-field drivers are in the
-  // lower-left, but this mixes skill and kart-luck and is NOT by itself
-  // evidence of favoritism. The variance-deficit panel above is the test
-  // that speaks to "is the fleet's kart variation showing up in this
-  // driver's outcomes?"
-  const scatterData = (data || [])
-    .filter(r => r.stddev_relative_pace !== null && r.mean_relative_pace !== null)
-    .map(r => ({
-      name: r.name,
-      x: r.stddev_relative_pace as number,
-      y: r.mean_relative_pace as number,
-      sessions: r.sessions,
-      pb: r.pb,
-      worst: r.worst_relative_pace,
-      vardefVerdict: r.vardef_verdict,
-    }));
-
-  const vardefFlagged = scatterData.filter(p => p.vardefVerdict === 'deficit_flagged');
-
-  const fmtRel = (v: number) => v.toFixed(4);
-
-  return (
-    <div className="bg-surface p-6 mb-6">
-      <h2 className="text-xl font-semibold text-white mb-2">Kart-Draw Fairness — {trackName || 'select a track'}</h2>
-      <p className="text-sm text-muted mb-4">
-        The direct test for kart-draw favouritism is the <b>variance-deficit test</b> below. For each of a driver&apos;s
-        sessions we subtract that day&apos;s field-median from their session-best — this cancels the part of the swing
-        that comes from track conditions (grip, temperature, wear), since those move the whole field together. What&apos;s
-        left is the driver-specific variation: kart effect + execution noise. Under random kart draws the remaining
-        spread should look similar across drivers. When a driver&apos;s residual σ is significantly smaller than the
-        fleet-typical residual σ, the fleet&apos;s kart-to-kart noise isn&apos;t showing up in their outcomes —
-        evidence of systematically favourable draws. The test doesn&apos;t need stable kart numbers across sessions;
-        kart plates being shuffled between races doesn&apos;t break it.{' '}
-        <span className="text-muted">
-          σRel / MeanRel are shown for reference (consistency of relative pace) but mix skill and luck, so they
-          are <u>not</u> by themselves evidence of favouritism.
-        </span>
-      </p>
-
-      <div className="flex items-end gap-4 mb-4 flex-wrap">
-        <div>
-          <label className="block text-xs text-muted mb-1">Track</label>
-          <select
-            value={trackId ?? ''}
-            onChange={e => setTrackId(parseInt(e.target.value))}
-            className="px-3 py-2 bg-surface-2 text-white"
-          >
-            {tracks.map(t => (
-              <option key={t.id} value={t.id}>{t.track_name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Min sessions</label>
-          <input
-            type="number"
-            min={2}
-            max={50}
-            value={minSessions}
-            onChange={e => {
-              const v = parseInt(e.target.value);
-              if (!isNaN(v)) setMinSessions(Math.max(2, Math.min(50, v)));
-            }}
-            className="w-20 px-3 py-2 bg-surface-2 text-white"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Layout</label>
-          <select
-            value={layoutId ?? ''}
-            onChange={e => setLayoutId(e.target.value === '' ? null : parseInt(e.target.value))}
-            disabled={layouts.length === 0}
-            className="px-3 py-2 bg-surface-2 text-white disabled:opacity-50"
-          >
-            <option value="">
-              {layouts.length === 0 ? 'no layouts configured' : 'all layouts'}
-            </option>
-            {layouts.map(l => {
-              const band = [
-                l.min_field_best !== null ? `${l.min_field_best}s+` : '',
-                l.max_field_best !== null ? `<${l.max_field_best}s` : '',
-              ].filter(Boolean).join(' ');
-              return (
-                <option key={l.id} value={l.id}>
-                  {l.name}{band ? ` (${band})` : ''}{l.is_default ? ' ★' : ''}
-                </option>
-              );
-            })}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Window (months)</label>
-          <select
-            value={windowMonths}
-            onChange={e => setWindowMonths(parseInt(e.target.value))}
-            className="px-3 py-2 bg-surface-2 text-white"
-          >
-            <option value={3}>3</option>
-            <option value={6}>6</option>
-            <option value={12}>12</option>
-            <option value={24}>24</option>
-            <option value={0}>all</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Min field best (s)</label>
-          <input
-            type="number"
-            step={0.5}
-            value={minFieldBest}
-            onChange={e => setMinFieldBest(e.target.value)}
-            placeholder="any"
-            className="w-24 px-3 py-2 bg-surface-2 text-white"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-muted mb-1">Max field best (s)</label>
-          <input
-            type="number"
-            step={0.5}
-            value={maxFieldBest}
-            onChange={e => setMaxFieldBest(e.target.value)}
-            placeholder="any"
-            className="w-24 px-3 py-2 bg-surface-2 text-white"
-          />
-        </div>
-        <div className="flex flex-col text-xs text-muted max-w-xs">
-          <span>Layout = physical track configuration (admins define bands in the admin panel).</span>
-          <span>Window caps fleet-drift: a kart labelled #7 today isn&apos;t always the same hardware a year ago.</span>
-        </div>
-      </div>
-
-      {configs && configs.session_count > 0 && (
-        <div className="bg-canvas p-3 mb-4">
-          <div className="text-xs text-muted mb-2">
-            Session field-best distribution ({configs.session_count} sessions, {configs.field_best_min}s–{configs.field_best_max}s).
-            Peaks = layouts. Suggested splits at largest gaps:{' '}
-            {configs.suggested_splits.slice(0, 3).map((s, i) => (
-              <span key={i} className="text-accent mr-2">
-                {s.below}s ⇢ {s.above}s ({s.gap.toFixed(1)}s gap)
-              </span>
-            ))}
-          </div>
-          <div style={{ height: 100 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={configs.histogram} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-                <XAxis
-                  dataKey="field_best_bin"
-                  stroke="#6b7280"
-                  tick={{ fill: '#9ca3af', fontSize: 10 }}
-                  tickFormatter={v => `${v}s`}
-                />
-                <YAxis stroke="#6b7280" tick={{ fill: '#9ca3af', fontSize: 10 }} />
-                <Tooltip
-                  contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 12 }}
-                  labelFormatter={v => `${v}s field best`}
-                />
-                <Bar dataKey="count" fill="#6366f1" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {data && !loading && (
-        <div className="text-sm text-muted mb-3">
-          {data.length} driver{data.length === 1 ? '' : 's'} at {trackName}
-          {vardefFlagged.length > 0 && (
-            <span className="ml-3 text-alarm">
-              ⚠️ {vardefFlagged.length} driver{vardefFlagged.length === 1 ? '' : 's'} with a statistically significant variance deficit
-            </span>
-          )}
-        </div>
-      )}
-
-      {loading && <div className="text-ink py-4">Loading fairness data — this can take a few seconds for large tracks…</div>}
-      {error && <div className="text-alarm py-4">{error}</div>}
-
-      {data && !loading && <VarianceDeficitPanel drivers={data} router={router} />}
-
-      {data && !loading && scatterData.length > 0 && (
-        <div className="bg-canvas p-3 mb-4">
-          <div className="text-xs text-ink mb-2">
-            <b>Consistency of relative pace</b> — each dot is a driver. X = σ of their session-best ÷ field median
-            (low = tight), Y = mean of that ratio (&lt; 1 = faster than field). Descriptive only: low-σ / fast drivers
-            mix skill and kart-luck. Red dots are the drivers formally flagged by the variance-deficit test above —
-            those are the kart-favoritism candidates, not position on this scatter.
-          </div>
-          <div style={{ height: 360 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart margin={{ top: 10, right: 20, bottom: 40, left: 50 }}>
-                <CartesianGrid stroke="#374151" />
-                <XAxis
-                  type="number"
-                  dataKey="x"
-                  stroke="#9ca3af"
-                  tick={{ fill: '#9ca3af', fontSize: 10 }}
-                  tickFormatter={v => v.toFixed(3)}
-                  label={{
-                    value: 'σRel (relative-pace variance, lower = tighter)',
-                    position: 'bottom',
-                    fill: '#9ca3af',
-                    offset: 15,
-                    fontSize: 11,
-                  }}
-                  domain={[0, 'auto']}
-                />
-                <YAxis
-                  type="number"
-                  dataKey="y"
-                  stroke="#9ca3af"
-                  tick={{ fill: '#9ca3af', fontSize: 10 }}
-                  tickFormatter={v => v.toFixed(3)}
-                  label={{
-                    value: 'MeanRel (pace vs field median, < 1 = faster)',
-                    angle: -90,
-                    position: 'insideLeft',
-                    fill: '#9ca3af',
-                    offset: -5,
-                    fontSize: 11,
-                  }}
-                  domain={['auto', 'auto']}
-                />
-                <ZAxis type="number" dataKey="sessions" range={[40, 320]} />
-                <Tooltip
-                  contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 12 }}
-                  formatter={(value: number | string, name: string) => {
-                    if (name === 'x' || name === 'σRel') return [Number(value).toFixed(4), 'σRel'];
-                    if (name === 'y' || name === 'MeanRel') return [Number(value).toFixed(4), 'MeanRel'];
-                    return [value, name];
-                  }}
-                  labelFormatter={() => ''}
-                  content={({ active, payload }) => {
-                    if (!active || !payload || payload.length === 0) return null;
-                    const p = payload[0].payload as typeof scatterData[0];
-                    return (
-                      <div className="bg-surface border border-line px-3 py-2 text-xs">
-                        <div className="text-white font-semibold">{p.name}</div>
-                        <div className="text-ink">Sessions: {p.sessions} · PB: {p.pb}</div>
-                        <div className="text-ink">σRel: {fmtRel(p.x)}</div>
-                        <div className="text-ink">MeanRel: {fmtRel(p.y)}</div>
-                        <div className="text-muted">Worst rel: {p.worst ? fmtRel(p.worst) : '—'}</div>
-                      </div>
-                    );
-                  }}
-                />
-                {/* Prominent baseline at the field median. Above the line =
-                    slower than median, below = faster. */}
-                <ReferenceLine
-                  y={1.0}
-                  stroke="#e5e7eb"
-                  strokeWidth={2}
-                  strokeDasharray="6 3"
-                  label={{ value: 'field median (y = 1.000)', position: 'insideTopRight', fill: '#e5e7eb', fontSize: 11 }}
-                />
-                <Scatter data={scatterData} onClick={(p: { name?: string }) => { if (p?.name) router.push(`/team/${encodeURIComponent(p.name)}`); }} cursor="pointer">
-                  {scatterData.map((p, i) => {
-                    const isFlagged = p.vardefVerdict === 'deficit_flagged';
-                    return (
-                      <Cell
-                        key={i}
-                        fill={isFlagged ? '#ef4444' : '#60a5fa'}
-                        stroke={isFlagged ? '#fca5a5' : '#1f2937'}
-                      />
-                    );
-                  })}
-                </Scatter>
-              </ScatterChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="text-xs text-muted mt-2">
-            Dot size scales with session count (bigger = more data = more reliable). Click a dot to open that driver&apos;s profile.
-          </div>
-        </div>
-      )}
-
-      {data && !loading && (
-        data.length === 0 ? (
-          <div className="text-muted">No drivers reached the minimum sample threshold for this track.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="tabular w-full text-sm">
-              <thead className="bg-surface-2">
-                <tr className="text-left">
-                  <th className="px-3 py-2 text-ink">#</th>
-                  <th className="px-3 py-2 text-ink">Driver</th>
-                  {headerCell('sessions', 'Sess')}
-                  {headerCell('pb_seconds', 'PB')}
-                  {headerCell('stddev_relative_pace', 'σRel')}
-                  {headerCell('mean_relative_pace', 'MeanRel')}
-                  {headerCell('vardef_ratio', 'VarDef σ/σ*')}
-                  {headerCell('vardef_p_value', 'p')}
-                  <th className="px-3 py-2 text-ink">Verdict</th>
-                  {headerCell('mean_gap_to_pb_pct', 'PB gap')}
-                  {headerCell('pct_within_1pct_pb', '<1% PB')}
-                </tr>
-              </thead>
-              <tbody>
-                {sortedDrivers.map((dr, i) => {
-                  // σRel thresholds: < 0.002 = extreme, < 0.003 = flag, < 0.005
-                  // = tight, > 0.010 = wide/normal-ish. MeanRel: < 1.00 means
-                  // consistently faster than field median. Combined lucky = both.
-                  const sig = dr.stddev_relative_pace;
-                  const mean = dr.mean_relative_pace;
-                  const sigClass =
-                    sig === null ? 'text-muted' :
-                    sig < 0.002 ? 'text-alarm font-semibold' :
-                    sig < 0.003 ? 'text-accent' :
-                    sig > 0.010 ? 'text-info' : 'text-ink';
-                  const meanClass =
-                    mean === null ? 'text-muted' :
-                    mean < 0.99 ? 'text-live font-semibold' :
-                    mean < 1.00 ? 'text-live' :
-                    mean > 1.02 ? 'text-info' : 'text-ink';
-                  const pbgapClass =
-                    dr.mean_gap_to_pb_pct < 0.5 ? 'text-alarm' :
-                    dr.mean_gap_to_pb_pct > 2.0 ? 'text-info' : 'text-ink';
-                  // Variance-deficit formatting
-                  const v = dr.vardef_verdict;
-                  const ratio = dr.vardef_ratio;
-                  const vp = dr.vardef_p_value;
-                  const obsSd = dr.vardef_observed_sd_seconds;
-                  const expSd = dr.vardef_expected_sd_seconds;
-                  const verdictLabel =
-                    v === 'deficit_flagged' ? '⚠️ variance deficit'
-                    : v === 'consistent' ? 'consistent'
-                    : `(n=${dr.vardef_n_sessions}/15)`;
-                  const verdictClass =
-                    v === 'deficit_flagged' ? 'text-alarm font-semibold'
-                    : v === 'consistent' ? 'text-live'
-                    : 'text-muted';
-                  const ratioClass =
-                    ratio === null ? 'text-muted'
-                    : ratio < 0.5 ? 'text-alarm font-semibold'
-                    : ratio < 0.8 ? 'text-accent'
-                    : ratio < 1.2 ? 'text-ink'
-                    : 'text-info';
-                  const pClass =
-                    vp === null ? 'text-muted'
-                    : vp < 0.01 ? 'text-alarm font-semibold'
-                    : vp < 0.05 ? 'text-accent'
-                    : 'text-ink';
-                  const rowHighlight =
-                    v === 'deficit_flagged' ? 'bg-alarm/15 bg-opacity-25 hover:bg-opacity-40'
-                    : 'hover:bg-surface-2';
-
-                  return (
-                    <tr
-                      key={`${dr.name}-${i}`}
-                      className={`border-b border-line cursor-pointer ${rowHighlight}`}
-                      onClick={() => router.push(`/team/${encodeURIComponent(dr.name)}`)}
-                    >
-                      <td className="px-3 py-2 text-muted">{i + 1}</td>
-                      <td className="px-3 py-2 text-white">{dr.name}</td>
-                      <td className="px-3 py-2 text-ink">{dr.sessions}</td>
-                      <td className="px-3 py-2 text-live">{dr.pb}</td>
-                      <td className={`px-3 py-2 font-mono ${sigClass}`}>
-                        {sig !== null ? sig.toFixed(4) : '—'}
-                      </td>
-                      <td className={`px-3 py-2 font-mono ${meanClass}`}>
-                        {mean !== null ? mean.toFixed(4) : '—'}
-                      </td>
-                      <td
-                        className={`px-3 py-2 font-mono ${ratioClass}`}
-                        title={
-                          obsSd !== null && expSd !== null
-                            ? `Observed σ=${obsSd.toFixed(2)}s · fleet-typical σ=${expSd.toFixed(2)}s`
-                            : ''
-                        }
-                      >
-                        {ratio !== null ? ratio.toFixed(2) : '—'}
-                      </td>
-                      <td className={`px-3 py-2 font-mono ${pClass}`}>
-                        {vp !== null ? (vp < 0.0001 ? '<0.0001' : vp.toFixed(4)) : '—'}
-                      </td>
-                      <td className={`px-3 py-2 text-xs ${verdictClass}`}>
-                        {verdictLabel}
-                      </td>
-                      <td className={`px-3 py-2 ${pbgapClass}`}>{dr.mean_gap_to_pb_pct.toFixed(2)}%</td>
-                      <td className="px-3 py-2 text-ink">{(dr.pct_within_1pct_pb * 100).toFixed(0)}%</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <p className="text-xs text-muted mt-3">
-              <b>σRel</b> / <b>MeanRel</b> describe <i>outcome</i> consistency (session-best ÷ field median) — a
-              mix of skill and kart-luck that is <u>not</u> by itself evidence of favouritism. The direct test is{' '}
-              <b>VarDef σ/σ*</b> — the ratio of the driver&apos;s own σ of (session-best − session-median) vs. the
-              fleet-typical σ. The subtraction cancels track conditions (grip, weather, wear) that move the whole
-              field together, so what&apos;s left is each driver&apos;s own kart-effect + execution-noise spread.
-              Under random kart draws the ratio should be ≈ 1. A ratio well below 1, with a significant <b>p</b>,
-              means the fleet&apos;s kart-to-kart variation isn&apos;t showing up in this driver&apos;s results —
-              the telltale of systematically favourable draws.{' '}
-              <b>Verdict</b> fires only at n ≥ 15 sessions AND ratio &lt; 0.8 AND p &lt; 0.05; below that threshold the
-              cell shows <span className="text-muted">(n/15)</span> so we don&apos;t cry wolf on small samples.
-              Click any header to resort — try <b>VarDef σ/σ*</b> ascending to surface the tightest-variance drivers.
-            </p>
-          </div>
-        )
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// Variance-Deficit Panel — flags drivers whose session-best spread is tighter
-// than the fleet's inherent kart variation should impose under random draws.
-// ============================================================================
-
-function VardefCard({
-  dr,
-  tone,
-  router,
-}: {
-  dr: TrackFairnessDriver;
-  tone: 'red' | 'yellow';
-  router: ReturnType<typeof useRouter>;
-}) {
-  const obs = dr.vardef_observed_sd_seconds;
-  const exp = dr.vardef_expected_sd_seconds;
-  const ratio = dr.vardef_ratio;
-  const p = dr.vardef_p_value;
-  const fmtP = (v: number | null) => v === null ? '—' : (v < 0.0001 ? '<0.0001' : v.toFixed(4));
-  const border =
-    tone === 'red' ? 'border-alarm bg-alarm/15 bg-opacity-25'
-    : 'border-accent bg-accent/15 bg-opacity-20';
-  return (
-    <div
-      onClick={() => router.push(`/team/${encodeURIComponent(dr.name)}`)}
-      className={`border ${border} p-3 cursor-pointer hover:brightness-110`}
-    >
-      <div className="flex items-baseline justify-between mb-1">
-        <span className="text-white font-semibold">{dr.name}</span>
-        <span className="text-xs text-muted">{dr.vardef_n_sessions} sessions</span>
-      </div>
-      <div className="text-xs text-ink font-mono">
-        Observed σ: <b>{obs !== null ? `${obs.toFixed(2)}s` : '—'}</b> ·
-        Fleet-typical σ: <b>{exp !== null ? `${exp.toFixed(2)}s` : '—'}</b> ·
-        Ratio: <b>{ratio !== null ? ratio.toFixed(2) : '—'}</b>
-      </div>
-      <div className="text-xs text-muted font-mono">
-        One-sided χ² p = {fmtP(p)}
-      </div>
-    </div>
-  );
-}
-
-function VarianceDeficitPanel({
-  drivers,
-  router,
-}: {
-  drivers: TrackFairnessDriver[];
-  router: ReturnType<typeof useRouter>;
-}) {
-  // Buckets: formally flagged (n >= 15, ratio < 0.8, p < 0.05), watch
-  // (ratio < 0.8 and p < 0.05 but n < 15), and everyone else.
-  const flagged: TrackFairnessDriver[] = [];
-  const watch: TrackFairnessDriver[] = [];
-  let eligible = 0;
-  let expectedSd: number | null = null;
-  for (const d of drivers) {
-    if (expectedSd === null && d.vardef_expected_sd_seconds !== null) {
-      expectedSd = d.vardef_expected_sd_seconds;
-    }
-    if (d.vardef_n_sessions >= 3) eligible += 1;
-    const ratio = d.vardef_ratio;
-    const p = d.vardef_p_value;
-    if (ratio === null || p === null) continue;
-    if (d.vardef_verdict === 'deficit_flagged') {
-      flagged.push(d);
-    } else if (ratio < 0.8 && p < 0.05) {
-      watch.push(d);
-    }
-  }
-  const byRatioAsc = (a: TrackFairnessDriver, b: TrackFairnessDriver) =>
-    (a.vardef_ratio ?? 99) - (b.vardef_ratio ?? 99);
-  flagged.sort(byRatioAsc);
-  watch.sort(byRatioAsc);
-
-  if (eligible === 0) {
-    return (
-      <div className="bg-canvas p-4 mb-4 text-sm text-muted border border-line">
-        🎯 <b>Variance-deficit shortlist</b>: no driver has enough sessions in the current filter. Widen the window or
-        loosen min-sessions.
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-canvas p-4 mb-4 border border-line">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="text-white font-semibold">🎯 Variance-deficit shortlist</h3>
-        <span className="text-xs text-muted">
-          Scanned {eligible} driver{eligible === 1 ? '' : 's'} · fleet-typical σ ≈ {expectedSd !== null ? `${expectedSd.toFixed(2)}s` : '—'} · {flagged.length + watch.length} candidate{flagged.length + watch.length === 1 ? '' : 's'}
-        </span>
-      </div>
-      <p className="text-xs text-muted mb-3">
-        For each driver we compute the standard deviation of (session-best − session-median) — this cancels track
-        conditions so only driver-specific variation remains. Then we compare it to the median residual σ across all
-        qualifying drivers (fleet-typical σ). Under random kart assignment the ratio should be ≈ 1. A ratio
-        significantly below 1 means the fleet&apos;s kart-to-kart variation isn&apos;t showing up in this
-        driver&apos;s results — consistent with systematically favourable draws.
-        <b> Flagged</b> = formal verdict (n ≥ 15, ratio &lt; 0.8, p &lt; 0.05).
-        <b> Watch list</b> = same magnitude + p-value but fewer than 15 sessions yet. Click any card for the profile.
-      </p>
-
-      {flagged.length === 0 && watch.length === 0 && (
-        <div className="text-sm text-live">
-          No driver&apos;s session-best spread is tighter than the fleet&apos;s inherent variation allows — consistent
-          with random kart draws. 👍
-        </div>
-      )}
-
-      {flagged.length > 0 && (
-        <div className="mb-3">
-          <div className="text-sm text-alarm font-semibold mb-2">
-            ⚠️ Variance deficit — formal verdict (n ≥ 15)
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {flagged.map(d => (
-              <VardefCard key={d.name} dr={d} tone="red" router={router} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {watch.length > 0 && (
-        <div>
-          <div className="text-sm text-accent font-semibold mb-2">
-            👀 Watch list — tight σ + p &lt; 0.05 but fewer than 15 sessions
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {watch.map(d => (
-              <VardefCard key={d.name} dr={d} tone="yellow" router={router} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}

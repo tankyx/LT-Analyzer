@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Check, Copy, Cpu, Link2, Plus, Trash2 } from 'lucide-react';
+import { Check, Copy, Cpu, Link2, Plus, Trash2 } from 'lucide-react';
+import PageShell from '../shell/PageShell';
 import { useAuth } from '../contexts/AuthContext';
 import type { DeviceToken } from '../components/RaceDashboard/PitAlertTarget';
 import { formatSeen } from './formatSeen';
@@ -187,22 +188,8 @@ export default function DevicesPage() {
   const ss = String(secondsLeft % 60).padStart(2, '0');
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
-      <div className="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-5">
-        <header className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => router.push('/dashboard')}
-            aria-label="Back to dashboard"
-            className="w-10 h-10 flex items-center justify-center hover:bg-surface-2"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <h1 className="text-xl font-bold flex items-center gap-2">
-            <Cpu size={20} className="text-accent" />
-            Devices
-          </h1>
-        </header>
+    <PageShell title="Devices" icon={<Cpu size={18} />} width="narrow">
+      <div className="flex flex-col gap-5">
 
         <p className="text-sm text-muted">
           A datalogger board reads your live timing and raises pit alerts without a browser login. Pair
@@ -396,6 +383,6 @@ export default function DevicesPage() {
           </div>
         </details>
       </div>
-    </div>
+    </PageShell>
   );
 }

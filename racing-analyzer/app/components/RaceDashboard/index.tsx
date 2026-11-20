@@ -570,7 +570,7 @@ const RaceDashboard = () => {
         const delivery = describeDelivery(response, activeBoards.length);
         setAlerts(prev => [...prev, {
           id: Date.now(),
-          message: `🚨 PIT ALERT for ${teamName}: ${delivery.text}`,
+          message: `Pit alert for ${teamName}: ${delivery.text}`,
           type: delivery.tone,
           teamKart: kartNum
         }]);
@@ -582,7 +582,7 @@ const RaceDashboard = () => {
       console.error('Error triggering pit alert:', error);
       setAlerts(prev => [...prev, {
         id: Date.now(),
-        message: `❌ Failed to send pit alert to ${teamName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        message: `Could not send the pit alert to ${teamName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
         type: 'error',
         teamKart: kartNum
       }]);
@@ -733,7 +733,7 @@ const RaceDashboard = () => {
           // Create a more prominent pit alert with custom styling and action buttons
           setAlerts(prev => [...prev, {
             id: Date.now(),
-            message: `🔴 ALERT: ${team.Team} is in the pits!`,
+            message: `${team.Team} is in the pits`,
             type: 'error', // Use error type for more visibility
             teamKart: team.Kart, // Add team identifier
             persistent: true, // stays until the team exits the pits or user dismisses
@@ -800,7 +800,7 @@ const RaceDashboard = () => {
         setAlertedFleetPits(prev => new Set(prev).add(kart.fleet_kart_id));
         setAlerts(prev => [...prev, {
           id: Date.now(),
-          message: `⚡ Fast kart ${kart.label} just entered the pits${kart.holder_team ? ` (was ${kart.holder_team})` : ''}`,
+          message: `Fast kart ${kart.label} just entered the pits${kart.holder_team ? ` (was ${kart.holder_team})` : ''}`,
           type: 'warning',
           fleetKartId: kart.fleet_kart_id,
           persistent: true, // clears when the kart leaves the pits
@@ -882,7 +882,7 @@ const RaceDashboard = () => {
         selectedTrackId, currentSessionId, args.teamName, args.fleetKartId, args.stintIndex);
       setAssignmentEntry(null);
       setAlerts(prev => [...prev, {
-        id: Date.now(), message: `✓ Recorded kart for ${args.teamName}`, type: 'info',
+        id: Date.now(), message: `Recorded kart for ${args.teamName}`, type: 'info',
       }]);
       refreshFleetState();
     } catch (err) {

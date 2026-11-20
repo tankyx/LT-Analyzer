@@ -16,6 +16,9 @@ import {
   ReferenceLine,
 } from 'recharts';
 import ApiService from '../../services/ApiService';
+import { X } from 'lucide-react';
+import PageShell from '../../shell/PageShell';
+import { CHART, seriesColor } from '../../ui/chartTheme';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface TeamSession {
@@ -441,23 +444,23 @@ export default function TeamProfilePage() {
 
   if (authLoading || loading) {
     return (
-      <div className="dark min-h-screen bg-gradient-to-br from-canvas via-surface to-canvas flex items-center justify-center">
-        <div className="text-white text-xl">Loading team profile...</div>
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
+        <div className="text-muted text-sm">Loading team profile…</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="dark min-h-screen bg-gradient-to-br from-canvas via-surface to-canvas flex items-center justify-center">
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
         <div className="bg-alarm/15 text-alarm p-6 max-w-md">
           <h2 className="text-xl font-bold mb-2">Error</h2>
           <p>{error}</p>
           <button
             onClick={() => router.push('/data')}
-            className="mt-4 px-4 py-2 bg-alarm text-on-signal hover:bg-alarm transition-colors"
+            className="mt-4 px-4 py-2 bg-alarm text-on-signal hover:brightness-95 transition-colors"
           >
-            Back to Data Page
+            Back to Driver stats
           </button>
         </div>
       </div>
@@ -469,7 +472,7 @@ export default function TeamProfilePage() {
       onClick={() => setActiveTab(tab)}
       className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
         activeTab === tab
-          ? 'text-white border-info'
+          ? 'text-ink border-accent'
           : 'text-muted border-transparent hover:text-ink'
       }`}
     >
@@ -478,22 +481,12 @@ export default function TeamProfilePage() {
   );
 
   return (
-    <div className="dark min-h-screen bg-gradient-to-br from-canvas via-surface to-canvas p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <button
-            onClick={() => router.push('/data')}
-            className="text-info hover:text-info mb-4 flex items-center gap-2"
-          >
-            ← Back to Data Page
-          </button>
-          <h1 className="text-4xl font-bold text-white capitalize">{teamName}</h1>
-          <p className="text-muted mt-2">Complete racing history across all tracks</p>
-        </div>
+    <PageShell title={teamName} backHref="/data" backLabel="Driver stats">
+        <p className="text-muted text-sm mb-4">Complete racing history across all tracks</p>
 
         {overallStats && (
-          <div className="bg-surface p-6 mb-6">
-            <h2 className="text-2xl font-semibold text-white mb-4">Overall Statistics</h2>
+          <div className="bg-surface p-6 mb-6 border border-line">
+            <h2 className="text-2xl font-semibold text-ink mb-4">Overall Statistics</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <StatCard label="Total Sessions" value={overallStats.total_sessions} color="text-info" />
               <StatCard label="Total Laps" value={overallStats.total_laps} color="text-live" />
@@ -599,8 +592,7 @@ export default function TeamProfilePage() {
             setWindowMonths={setFairnessWindowMonths}
           />
         )}
-      </div>
-    </div>
+    </PageShell>
   );
 }
 
@@ -679,7 +671,7 @@ function AliasPanel({
   ]);
 
   return (
-    <div className="bg-surface p-4 mb-6">
+    <div className="bg-surface p-4 mb-6 border border-line">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-sm font-semibold text-ink uppercase tracking-wide">Aliases</h3>
         {aliases && !viewingIsCanonical && (
@@ -707,7 +699,7 @@ function AliasPanel({
                   className="text-alarm hover:text-alarm disabled:opacity-50"
                   aria-label={`Remove alias ${a.alias_name}`}
                 >
-                  ✕
+                  <X size={14} />
                 </button>
               )}
             </span>
@@ -733,7 +725,7 @@ function AliasPanel({
                 onFocus={() => setShowSuggestions(true)}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                 placeholder={`Search for a name to alias to "${canonical}"`}
-                className="w-full px-3 py-1.5 bg-surface-2 text-white text-sm"
+                className="w-full px-3 py-1.5 bg-surface-2 text-ink text-sm"
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !showSuggestions) onAdd();
                 }}
@@ -745,7 +737,7 @@ function AliasPanel({
             <button
               onClick={onAdd}
               disabled={busy || !newAlias.trim()}
-              className="px-3 py-1.5 bg-info hover:bg-info disabled:opacity-50 text-on-signal text-sm"
+              className="px-3 py-1.5 accent-block hover:brightness-95 disabled:opacity-50 text-accent-ink text-sm"
             >
               {busy ? '...' : 'Add'}
             </button>
@@ -766,7 +758,7 @@ function AliasPanel({
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-white">{s.name}</span>
+                      <span className="text-ink">{s.name}</span>
                       <span className="text-xs text-muted">
                         {s.via_alias && !s.track_count ? 'alias record' : `${s.track_count} track${s.track_count === 1 ? '' : 's'}`}
                       </span>
@@ -834,15 +826,15 @@ function SessionsTab({
   onToggle: (trackId: number, sessionId: number) => void;
 }) {
   return (
-    <div className="bg-surface p-6">
+    <div className="bg-surface p-6 border border-line">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl font-semibold text-white">Session History</h2>
+        <h2 className="text-2xl font-semibold text-ink">Session History</h2>
         <div className="flex items-center gap-2">
           <label className="text-muted text-sm">Filter by Track:</label>
           <select
             value={selectedTrack || ''}
             onChange={e => setSelectedTrack(e.target.value ? parseInt(e.target.value) : null)}
-            className="px-4 py-2 bg-surface-2 text-white"
+            className="px-4 py-2 bg-surface-2 text-ink"
           >
             <option value="">All Tracks</option>
             {uniqueTracks.map(track => (
@@ -857,17 +849,17 @@ function SessionsTab({
           <table className="tabular w-full text-sm">
             <thead className="bg-surface-2">
               <tr className="text-left border-b border-line">
-                <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('date')}>
+                <th className="px-4 py-3 text-ink cursor-pointer hover:text-ink" onClick={() => onSort('date')}>
                   Date {sortBy === 'date' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('track')}>
+                <th className="px-4 py-3 text-ink cursor-pointer hover:text-ink" onClick={() => onSort('track')}>
                   Track {sortBy === 'track' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
                 <th className="px-4 py-3 text-ink">Session</th>
-                <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('laps')}>
+                <th className="px-4 py-3 text-ink cursor-pointer hover:text-ink" onClick={() => onSort('laps')}>
                   Total Laps {sortBy === 'laps' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
-                <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('best_lap')}>
+                <th className="px-4 py-3 text-ink cursor-pointer hover:text-ink" onClick={() => onSort('best_lap')}>
                   Best Lap {sortBy === 'best_lap' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
                 <th className="px-4 py-3 text-ink">Avg Lap</th>
@@ -890,7 +882,7 @@ function SessionsTab({
                           : 'N/A'}
                       </td>
                       <td className="px-4 py-3 text-info">{session.track_name}</td>
-                      <td className="px-4 py-3 text-white">{session.session_name}</td>
+                      <td className="px-4 py-3 text-ink">{session.session_name}</td>
                       <td className="px-4 py-3 text-accent">{session.total_laps}</td>
                       <td className="px-4 py-3 text-live">{session.best_lap || 'N/A'}</td>
                       <td className="px-4 py-3 text-class2">{session.avg_lap || 'N/A'}</td>
@@ -902,7 +894,7 @@ function SessionsTab({
                             <div className="text-center text-muted py-4">Loading laps...</div>
                           ) : sessionLaps.length > 0 ? (
                             <div className="max-h-96 overflow-y-auto">
-                              <h4 className="text-white font-semibold mb-2">Lap Details ({sessionLaps.length} laps)</h4>
+                              <h4 className="text-ink font-semibold mb-2">Lap Details ({sessionLaps.length} laps)</h4>
                               <table className="tabular w-full text-xs">
                                 <thead className="bg-surface-2 sticky top-0">
                                   <tr className="text-left">
@@ -920,9 +912,9 @@ function SessionsTab({
                                       className={`border-b border-line ${lap.pit_this_lap ? 'bg-accent/15 bg-opacity-20' : ''}`}
                                     >
                                       <td className="px-3 py-2 text-ink">{lap.lap_number}</td>
-                                      <td className="px-3 py-2 text-white">{lap.lap_time}</td>
+                                      <td className="px-3 py-2 text-ink">{lap.lap_time}</td>
                                       <td className="px-3 py-2 text-accent">{lap.position_after_lap || 'N/A'}</td>
-                                      <td className="px-3 py-2 text-accent">{lap.pit_this_lap ? '🔧 Pit' : ''}</td>
+                                      <td className="px-3 py-2 text-accent">{lap.pit_this_lap ? 'Pit' : ''}</td>
                                       <td className="px-3 py-2 text-muted">
                                         {lap.timestamp ? new Date(lap.timestamp).toLocaleTimeString() : 'N/A'}
                                       </td>
@@ -966,13 +958,13 @@ function ConsistencyTab({
   data: ConsistencyResponse | null;
 }) {
   if (loading) {
-    return <div className="bg-surface p-6 text-ink">Loading consistency stats...</div>;
+    return <div className="bg-surface p-6 text-ink border border-line">Loading consistency stats...</div>;
   }
   if (error) {
     return <div className="bg-alarm/15 p-6 text-alarm">{error}</div>;
   }
   if (!data || data.sessions.length === 0) {
-    return <div className="bg-surface p-6 text-muted">No consistency data available.</div>;
+    return <div className="bg-surface p-6 text-muted border border-line">No consistency data available.</div>;
   }
 
   const trendData = data.trend.map(t => ({
@@ -990,8 +982,8 @@ function ConsistencyTab({
 
   return (
     <div className="space-y-6">
-      <div className="bg-surface p-6">
-        <h3 className="text-xl font-semibold text-white mb-4">Career Consistency</h3>
+      <div className="bg-surface p-6 border border-line">
+        <h3 className="text-xl font-semibold text-ink mb-4">Career Consistency</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             label="Career σ (s)"
@@ -1015,18 +1007,18 @@ function ConsistencyTab({
         </p>
       </div>
 
-      <div className="bg-surface p-6">
-        <h3 className="text-xl font-semibold text-white mb-4">σ Over Time (older → newer)</h3>
+      <div className="bg-surface p-6 border border-line">
+        <h3 className="text-xl font-semibold text-ink mb-4">σ Over Time (older → newer)</h3>
         {trendData.length > 1 ? (
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="date" stroke="#9ca3af" tick={{ fontSize: 11 }} />
-                <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} label={{ value: 'σ (s)', angle: -90, position: 'insideLeft', fill: '#9ca3af' }} />
-                <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} labelStyle={{ color: '#d1d5db' }} />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                <XAxis dataKey="date" stroke={CHART.axis} tick={{ fontSize: 11 }} />
+                <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} label={{ value: 'σ (s)', angle: -90, position: 'insideLeft', fill: CHART.axis }} />
+                <Tooltip contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }} labelStyle={{ color: CHART.ink }} />
                 <Legend />
-                <Line type="monotone" dataKey="stddev" stroke="#60a5fa" name="σ (s)" dot={false} />
+                <Line type="monotone" dataKey="stddev" stroke={seriesColor(2)} name="σ (s)" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -1035,23 +1027,23 @@ function ConsistencyTab({
         )}
       </div>
 
-      <div className="bg-surface p-6">
-        <h3 className="text-xl font-semibold text-white mb-4">Per-Session σ (last 20)</h3>
+      <div className="bg-surface p-6 border border-line">
+        <h3 className="text-xl font-semibold text-ink mb-4">Per-Session σ (last 20)</h3>
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={barData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis dataKey="label" stroke="#9ca3af" tick={{ fontSize: 10 }} interval={0} angle={-40} textAnchor="end" height={80} />
-              <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
-              <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} labelStyle={{ color: '#d1d5db' }} />
-              <Bar dataKey="stddev" fill="#60a5fa" name="σ (s)" />
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+              <XAxis dataKey="label" stroke={CHART.axis} tick={{ fontSize: 10 }} interval={0} angle={-40} textAnchor="end" height={80} />
+              <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
+              <Tooltip contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }} labelStyle={{ color: CHART.ink }} />
+              <Bar dataKey="stddev" fill={seriesColor(2)} name="σ (s)" />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      <div className="bg-surface p-6">
-        <h3 className="text-xl font-semibold text-white mb-4">Session Detail</h3>
+      <div className="bg-surface p-6 border border-line">
+        <h3 className="text-xl font-semibold text-ink mb-4">Session Detail</h3>
         <div className="overflow-x-auto">
           <table className="tabular w-full text-sm">
             <thead className="bg-surface-2">
@@ -1122,12 +1114,12 @@ function FairnessTab({
 }) {
   return (
     <div className="space-y-6">
-      <div className="bg-surface p-4 flex items-center gap-3 flex-wrap">
+      <div className="bg-surface p-4 flex items-center gap-3 flex-wrap border border-line">
         <label className="text-ink text-sm">Track:</label>
         <select
           value={trackId || ''}
           onChange={e => setTrackId(parseInt(e.target.value))}
-          className="px-4 py-2 bg-surface-2 text-white"
+          className="px-4 py-2 bg-surface-2 text-ink"
         >
           {tracks.map(t => (
             <option key={t.id} value={t.id}>{t.track_name}</option>
@@ -1138,18 +1130,18 @@ function FairnessTab({
           value={layoutId ?? ''}
           onChange={e => setLayoutId(e.target.value === '' ? null : parseInt(e.target.value))}
           disabled={layouts.length === 0}
-          className="px-4 py-2 bg-surface-2 text-white disabled:opacity-50"
+          className="px-4 py-2 bg-surface-2 text-ink disabled:opacity-50"
         >
           <option value="">{layouts.length === 0 ? 'no layouts' : 'all layouts'}</option>
           {layouts.map(l => (
-            <option key={l.id} value={l.id}>{l.name}{l.is_default ? ' ★' : ''}</option>
+            <option key={l.id} value={l.id}>{l.name}{l.is_default ? ' (default)' : ''}</option>
           ))}
         </select>
         <label className="text-ink text-sm ml-2">Window:</label>
         <select
           value={windowMonths}
           onChange={e => setWindowMonths(parseInt(e.target.value))}
-          className="px-4 py-2 bg-surface-2 text-white"
+          className="px-4 py-2 bg-surface-2 text-ink"
         >
           <option value={3}>3 mo</option>
           <option value={6}>6 mo</option>
@@ -1162,7 +1154,7 @@ function FairnessTab({
         </p>
       </div>
 
-      {loading && <div className="bg-surface p-6 text-ink">Loading fairness analysis...</div>}
+      {loading && <div className="bg-surface p-6 text-ink border border-line">Loading fairness analysis...</div>}
       {error && <div className="bg-alarm/15 p-6 text-alarm">{error}</div>}
 
       {data && !loading && (
@@ -1186,9 +1178,9 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
   });
 
   return (
-    <div className="bg-surface p-6">
+    <div className="bg-surface p-6 border border-line">
       <div className="flex items-baseline justify-between mb-4">
-        <h3 className="text-xl font-semibold text-white">Sprint — Kart Draw Fairness</h3>
+        <h3 className="text-xl font-semibold text-ink">Sprint — Kart Draw Fairness</h3>
         <span className={`text-xs px-2 py-1 ${block.enabled ? 'bg-live/15 text-live' : 'bg-accent/15 text-accent'}`}>
           {block.enabled ? 'Aggregate enabled' : `Needs ≥ ${threshold} sprint sessions`}
         </span>
@@ -1225,12 +1217,12 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
           <div className="h-64 mb-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={histogram}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="range" stroke="#9ca3af" tick={{ fontSize: 11 }} />
-                <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
-                <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} labelStyle={{ color: '#d1d5db' }} />
-                <ReferenceLine x="1.00–1.02" stroke="#f59e0b" strokeDasharray="3 3" />
-                <Bar dataKey="count" fill="#60a5fa" name="Kart samples" />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
+                <XAxis dataKey="range" stroke={CHART.axis} tick={{ fontSize: 11 }} />
+                <YAxis stroke={CHART.axis} tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={{ backgroundColor: CHART.tooltipBg, border: `1px solid ${CHART.grid}`, color: CHART.ink }} labelStyle={{ color: CHART.ink }} />
+                <ReferenceLine x="1.00–1.02" stroke={seriesColor(1)} strokeDasharray="3 3" />
+                <Bar dataKey="count" fill={seriesColor(2)} name="Kart samples" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -1255,7 +1247,7 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
                       <td className="px-3 py-2 text-muted">
                         {s.session_date ? new Date(s.session_date).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit' }) : ''}
                       </td>
-                      <td className="px-3 py-2 text-white">{s.kart_number}</td>
+                      <td className="px-3 py-2 text-ink">{s.kart_number}</td>
                       <td className={`px-3 py-2 ${topQ ? 'text-live font-bold' : 'text-ink'}`}>
                         {s.kart_rank} / {s.karts_in_session}
                       </td>
@@ -1341,9 +1333,9 @@ function RandomnessVerdictPanel({ block }: { block: FairnessResponse['sprint'] }
 
 function EnduranceFairnessPanel({ block, threshold }: { block: FairnessResponse['endurance']; threshold: number }) {
   return (
-    <div className="bg-surface p-6">
+    <div className="bg-surface p-6 border border-line">
       <div className="flex items-baseline justify-between mb-4">
-        <h3 className="text-xl font-semibold text-white">Endurance — Stint-Pace Stability</h3>
+        <h3 className="text-xl font-semibold text-ink">Endurance — Stint-Pace Stability</h3>
         <span className={`text-xs px-2 py-1 ${block.enabled ? 'bg-live/15 text-live' : 'bg-accent/15 text-accent'}`}>
           {block.enabled ? 'Aggregate enabled' : `Needs ≥ ${threshold} endurance sessions`}
         </span>
@@ -1396,7 +1388,7 @@ function EnduranceFairnessPanel({ block, threshold }: { block: FairnessResponse[
                     {s.stddev_percentile !== null ? `${s.stddev_percentile.toFixed(0)}%` : 'N/A'}
                   </td>
                   <td className="px-3 py-2">
-                    {s.flagged ? <span className="text-alarm">⚠️ investigate</span> : <span className="text-live">ok</span>}
+                    {s.flagged ? <span className="text-alarm">investigate</span> : <span className="text-live">ok</span>}
                   </td>
                 </tr>
               ))}

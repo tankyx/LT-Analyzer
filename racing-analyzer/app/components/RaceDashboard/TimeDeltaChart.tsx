@@ -219,7 +219,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                     </div>
                     <div className="flex items-center mt-1">
                       <span className={`text-sm ${status === 'Pit-in' ? 'text-alarm font-semibold' : ('text-muted')}`}>
-                        {status === 'Pit-in' ? '🔴 In Pits' : status || 'On Track'}
+                        {status === 'Pit-in' ? 'In pits' : status || 'On Track'}
                       </span>
                       {gapMode === 'adjusted' && (
                         <span className="text-xs ml-2 px-1.5 py-0.5 bg-info/15 text-info">

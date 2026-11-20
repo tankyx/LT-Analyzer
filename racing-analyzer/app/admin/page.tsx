@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
+import { Settings } from 'lucide-react';
+import PageShell from '../shell/PageShell';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import AdminManager from '../components/AdminManager';
@@ -24,21 +26,9 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-canvas text-ink">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold">Admin Dashboard</h1>
-          <button
-            onClick={() => router.push('/dashboard')}
-            className="px-4 py-2 bg-surface-2 border border-line hover:bg-line"
-          >
-            Back to Dashboard
-          </button>
-        </div>
-
+    <PageShell title="Admin" icon={<Settings size={18} />}>
         {/* Shared admin UI (users + tracks + per-track layouts) */}
         <AdminManager />
-      </div>
-    </div>
+    </PageShell>
   );
 }

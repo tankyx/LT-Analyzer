@@ -528,7 +528,8 @@ Constrained clients (ESP32 over cellular) cannot log in with Turnstile, inflate 
       - Top teams query: ~6s (complex aggregation, acceptable for one-time load)
 
 21. **Dashboard Navigation**:
-    - **Driver stats** (`/data`) is reachable from the app bar on desktop and from the account menu on phones. The `/data` and `/team/[teamName]` pages still use the older hard-coded dark styling and have not been moved to the token system yet.
+    - **Driver stats** (`/data`) is reachable from the app bar on desktop and from the account menu on phones.
+    - **One shell for the other pages**: `/data`, `/team/[teamName]`, `/devices` and `/admin` render inside `app/shell/PageShell.tsx` (back arrow, brand, title, theme toggle). They follow the theme like the dashboard — no forced `dark` wrapper — and take their chart colours from `app/ui/chartTheme.ts`. The fairness tab of `/data` lives in `app/data/TrackFairnessPanel.tsx`.
 
 22. **Fleet Tracker** (`racing-analyzer/app/components/RaceDashboard/FleetTracker.tsx`, `KartAssignmentEntry.tsx`, `race_ui.py`, `multi_track_manager.py`):
     - **Problem it solves**: in endurance races a team keeps its competition number but physically swaps karts every stint; the timing feed only ever exposes *team* identity (`no`/`dr`), never the physical machine. Fleet Tracker lets the operator track which physical kart each team is on, rank the fleet by pace, and spot fast/slow machines entering the pits.
