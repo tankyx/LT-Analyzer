@@ -82,8 +82,8 @@ export default function RegisterPage() {
 
   if (submitted) {
     return (
-      <div className="min-h-screen flex items-center justify-center canvas text-ink">
-        <div className="max-w-md p-6 bg-surface rounded-none text-center space-y-4">
+      <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">
+        <div className="max-w-md p-6 bg-surface text-center space-y-4">
           <h2 className="text-2xl font-bold">Check your inbox</h2>
           <p className="text-sm text-ink">
             We sent a verification link to <strong>{email}</strong>. Click the link to activate your account.
@@ -96,7 +96,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center canvas py-12">
+    <div className="min-h-screen flex items-center justify-center bg-canvas py-12">
       <div className="max-w-md w-full space-y-4 px-4">
         <h2 className="text-center text-3xl font-extrabold text-ink">Create an account</h2>
         <form className="space-y-3" onSubmit={submit}>
@@ -106,7 +106,7 @@ export default function RegisterPage() {
             placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="block w-full px-3 py-2 bg-surface border border-line rounded-none text-ink placeholder:text-muted"
+            className="block w-full px-3 py-2 bg-surface border border-line text-ink placeholder:text-muted"
           />
           <input
             type="email"
@@ -114,7 +114,7 @@ export default function RegisterPage() {
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="block w-full px-3 py-2 bg-surface border border-line rounded-none text-ink placeholder:text-muted"
+            className="block w-full px-3 py-2 bg-surface border border-line text-ink placeholder:text-muted"
           />
           <input
             type="password"
@@ -122,10 +122,10 @@ export default function RegisterPage() {
             placeholder="Password (min 12 characters)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="block w-full px-3 py-2 bg-surface border border-line rounded-none text-ink placeholder:text-muted"
+            className="block w-full px-3 py-2 bg-surface border border-line text-ink placeholder:text-muted"
           />
           {password && (
-            <div className="h-1 w-full bg-surface-2 rounded-none overflow-hidden">
+            <div className="h-1 w-full bg-surface-2 overflow-hidden">
               <div
                 className={`h-1 ${strengthColor(score)}`}
                 style={{ width: `${(score / 4) * 100}%` }}
@@ -138,7 +138,7 @@ export default function RegisterPage() {
             placeholder="Confirm password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            className="block w-full px-3 py-2 bg-surface border border-line rounded-none text-ink placeholder:text-muted"
+            className="block w-full px-3 py-2 bg-surface border border-line text-ink placeholder:text-muted"
           />
           {INVITE_REQUIRED && (
             <input
@@ -147,7 +147,7 @@ export default function RegisterPage() {
               placeholder="Invite code"
               value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)}
-              className="block w-full px-3 py-2 bg-surface border border-line rounded-none text-ink placeholder:text-muted"
+              className="block w-full px-3 py-2 bg-surface border border-line text-ink placeholder:text-muted"
             />
           )}
 
@@ -168,13 +168,13 @@ export default function RegisterPage() {
           <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
 
           {error && (
-            <div className="rounded-none bg-alarm/15 p-3 text-sm text-alarm">{error}</div>
+            <div className="bg-alarm/15 p-3 text-sm text-alarm">{error}</div>
           )}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 px-4 bg-info hover:bg-info text-on-signal rounded-none disabled:opacity-50"
+            className="w-full py-2 px-4 bg-info hover:bg-info text-on-signal disabled:opacity-50"
           >
             {loading ? 'Creating account...' : 'Create account'}
           </button>

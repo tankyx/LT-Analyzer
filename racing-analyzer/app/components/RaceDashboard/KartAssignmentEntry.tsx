@@ -74,7 +74,7 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-scrim"
       onClick={onCancel}
       data-testid="assignment-overlay"
     >
@@ -83,7 +83,7 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
         role="dialog"
         aria-modal="true"
         aria-label={prompt ? `Assign kart to ${prompt.teamName}` : 'Assign a kart'}
-        className={`w-full sm:max-w-md rounded-t-none sm:rounded-none shadow-xl p-4 sm:p-6 ${panel}`}
+        className={`w-full sm:max-w-md shadow-overlay p-4 sm:p-6 ${panel}`}
         onClick={e => e.stopPropagation()}
       >
         <h2 className="text-lg font-bold mb-4">
@@ -95,7 +95,7 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
         {/* Team field: locked in prompt mode, selectable otherwise */}
         <label className="block text-sm font-medium mb-1">Team</label>
         {prompt ? (
-          <div className={`min-h-[44px] px-3 flex items-center rounded-none border ${field} mb-4 opacity-80`}>
+          <div className={`min-h-[44px] px-3 flex items-center border ${field} mb-4 opacity-80`}>
             {prompt.teamName}
           </div>
         ) : (
@@ -104,7 +104,7 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
             value={teamName}
             onChange={e => setTeamName(e.target.value)}
             placeholder="Team name"
-            className={`w-full min-h-[44px] px-3 rounded-none border ${field} mb-4`}
+            className={`w-full min-h-[44px] px-3 border ${field} mb-4`}
           />
         )}
         {!prompt && (
@@ -117,7 +117,7 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
         <select
           value={fleetKartId}
           onChange={e => setFleetKartId(e.target.value === '' ? '' : Number(e.target.value))}
-          className={`w-full min-h-[44px] px-3 rounded-none border ${field} mb-1`}
+          className={`w-full min-h-[44px] px-3 border ${field} mb-1`}
           data-testid="kart-select"
         >
           <option value="">Select a kart…</option>
@@ -130,14 +130,14 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
         <div className="flex gap-2 mt-5">
           <button
             onClick={onCancel}
-            className={`flex-1 min-h-[48px] rounded-none font-medium border ${'border-line'}`}
+            className={`flex-1 min-h-[48px] font-medium border ${'border-line'}`}
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="flex-1 min-h-[48px] rounded-none font-semibold text-on-signal bg-info hover:bg-info disabled:opacity-50"
+            className="flex-1 min-h-[48px] font-semibold text-on-signal bg-info hover:bg-info disabled:opacity-50"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>

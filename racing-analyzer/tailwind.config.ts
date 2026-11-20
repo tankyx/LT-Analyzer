@@ -15,14 +15,12 @@ export default {
   theme: {
     extend: {
       colors: {
-        // legacy aliases still referenced by a few older components
-        background: "var(--background)",
-        foreground: "var(--foreground)",
         // pit-wall palette
         canvas: token("c-canvas"),
         surface: token("c-surface"),
         "surface-2": token("c-surface-2"),
         line: token("c-line"),
+        "line-strong": token("c-line-strong"),
         ink: token("c-ink"),
         muted: token("c-muted"),
         accent: token("c-accent"),
@@ -34,20 +32,34 @@ export default {
         "on-signal": token("c-on-signal"),
         class1: token("c-class1"),
         class2: token("c-class2"),
+        focus: token("c-focus"),
+        best: token("c-best"),
+        // backdrop behind sheets, drawers and dialogs (alpha is part of the token)
+        scrim: "rgb(0 0 0 / 0.6)",
+        // data palette: stints, chart series, pit lanes
+        ...Object.fromEntries(
+          Array.from({ length: 10 }, (_, i) => [`series-${i + 1}`, token(`c-series-${i + 1}`)]),
+        ),
       },
       fontFamily: {
         sans: ["var(--font-sans)", "Helvetica Neue", "Arial", "sans-serif"],
         cond: ["var(--font-cond)", "Arial Narrow", "Arial", "sans-serif"],
         mono: ["var(--font-mono)", "SF Mono", "Menlo", "Consolas", "monospace"],
       },
-      keyframes: {
-        "live-blink": {
-          "0%, 100%": { opacity: "1" },
-          "50%": { opacity: "0.35" },
-        },
+      // Two steps below `text-xs` for dense timing rows; no arbitrary
+      // `text-[Npx]` sizes in components.
+      fontSize: {
+        "3xs": "10px",
+        "2xs": "11px",
       },
-      animation: {
-        "live-blink": "live-blink 1.6s ease-in-out infinite",
+      // Tints on tokens come in three steps: /8 (row wash), /15 (pill and
+      // chip grounds), /25 (hover on a tint).
+      opacity: {
+        8: "0.08",
+      },
+      // The one shadow, for layers that float: menus, toasts, sheets.
+      boxShadow: {
+        overlay: "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
       },
     },
   },

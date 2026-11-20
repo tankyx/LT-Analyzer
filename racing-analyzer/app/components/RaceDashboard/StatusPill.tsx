@@ -30,7 +30,7 @@ export function describeStatus(status: string | undefined): { tone: StatusTone; 
 const TONE_CLASSES: Record<StatusTone, { pill: string; dot: string; text: string }> = {
   live: { pill: 'bg-live/15 text-live', dot: 'bg-live', text: 'text-live' },
   alarm: { pill: 'bg-alarm/15 text-alarm', dot: 'bg-alarm', text: 'text-alarm' },
-  accent: { pill: 'bg-accent/20 text-accent', dot: 'bg-accent', text: 'text-accent' },
+  accent: { pill: 'bg-accent/15 text-accent', dot: 'bg-accent', text: 'text-accent' },
   info: { pill: 'bg-info/15 text-info', dot: 'bg-info', text: 'text-info' },
   muted: { pill: 'bg-muted/15 text-muted', dot: 'bg-muted', text: 'text-muted' },
 };
@@ -49,7 +49,7 @@ const StatusPill: React.FC<StatusPillProps> = ({ status, variant = 'pill', class
   const c = TONE_CLASSES[tone];
   if (variant === 'inline') {
     return (
-      <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${c.text} ${className}`} data-tone={tone}>
+      <span className={`inline-flex items-center gap-1.5 text-2xs font-semibold ${c.text} ${className}`} data-tone={tone}>
         <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
         {label}
       </span>
@@ -57,7 +57,7 @@ const StatusPill: React.FC<StatusPillProps> = ({ status, variant = 'pill', class
   }
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap ${c.pill} ${className}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-2xs font-semibold uppercase tracking-wide whitespace-nowrap ${c.pill} ${className}`}
       data-tone={tone}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />

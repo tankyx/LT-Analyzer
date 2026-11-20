@@ -71,10 +71,10 @@ function LoginInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center canvas text-ink p-4">
+    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink p-4">
       <div className="w-full max-w-sm flex flex-col gap-6">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-none accent-gradient text-accent-ink font-cond font-bold text-lg flex items-center justify-center">
+          <div className="w-10 h-10 accent-block text-accent-ink font-cond font-bold text-lg flex items-center justify-center">
             LT
           </div>
           <div className="flex flex-col">
@@ -83,11 +83,11 @@ function LoginInner() {
           </div>
         </div>
 
-        <div className="rounded-none border border-line bg-surface p-5 md:p-6 flex flex-col gap-4">
+        <div className="border border-line bg-surface p-5 md:p-6 flex flex-col gap-4">
           <h1 className="text-lg font-semibold">Sign in</h1>
 
           {justReset && (
-            <div className="rounded-none border border-live/50 bg-live/10 px-3 py-2 text-sm">
+            <div className="border border-live/50 bg-live/8 px-3 py-2 text-sm">
               Password updated. You can log in below.
             </div>
           )}
@@ -101,7 +101,7 @@ function LoginInner() {
                 type="text"
                 autoComplete="username"
                 required
-                className="h-11 px-3 rounded-none border border-line bg-canvas text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50"
+                className="h-11 px-3 border border-line bg-canvas text-ink placeholder:text-muted"
                 placeholder="Username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -115,7 +115,7 @@ function LoginInner() {
                 type="password"
                 autoComplete="current-password"
                 required
-                className="h-11 px-3 rounded-none border border-line bg-canvas text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50"
+                className="h-11 px-3 border border-line bg-canvas text-ink placeholder:text-muted"
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -125,7 +125,7 @@ function LoginInner() {
             <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
 
             {error && (
-              <div className="rounded-none border border-alarm/50 bg-alarm/10 px-3 py-2">
+              <div className="border border-alarm/50 bg-alarm/8 px-3 py-2">
                 <p className="text-sm">{error}</p>
                 {unverifiedEmail && (
                   <div className="mt-2 text-sm">
@@ -145,7 +145,7 @@ function LoginInner() {
             <button
               type="submit"
               disabled={loading}
-              className="h-11 rounded-none accent-gradient text-accent-ink font-bold text-sm hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:opacity-50"
+              className="h-11 accent-block text-accent-ink font-bold text-sm hover:brightness-95 disabled:opacity-50"
             >
               {loading ? 'Logging in…' : 'Sign in'}
             </button>
@@ -163,7 +163,7 @@ function LoginInner() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen canvas" />}>
+    <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
       <LoginInner />
     </Suspense>
   );

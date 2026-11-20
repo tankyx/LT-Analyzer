@@ -78,8 +78,8 @@ const Stat: React.FC<{ label: string; value: React.ReactNode; sub?: React.ReactN
   tone = 'text-ink',
 }) => (
   <div className="flex flex-col gap-1 min-w-0">
-    <span className="text-[10px] md:text-[11px] font-bold tracking-[.08em] uppercase text-muted truncate">{label}</span>
-    <span className={`font-mono tabular text-[20px] md:text-[30px] font-bold leading-none tracking-tight ${tone}`}>{value}</span>
+    <span className="eyebrow text-muted truncate">{label}</span>
+    <span className={`font-mono tabular text-xl md:text-3xl font-bold leading-none tracking-tight ${tone}`}>{value}</span>
     {sub !== undefined && <span className="text-xs text-muted truncate">{sub}</span>}
   </div>
 );
@@ -147,7 +147,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
         onSelectMyTeam(e.target.value);
         setPicking(false);
       }}
-      className="h-11 md:h-10 w-full md:w-auto md:min-w-[280px] min-w-0 px-3 rounded-none border border-line bg-canvas text-sm text-ink focus:outline-none focus:ring-2 focus:ring-accent/50"
+      className="h-11 md:h-10 w-full md:w-auto md:min-w-[280px] min-w-0 px-3 border border-line bg-canvas text-sm text-ink"
     >
       <option value="">Choose your team…</option>
       {sortedTeams.map((t) => (
@@ -160,9 +160,9 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
 
   if (!ctx) {
     return (
-      <section className="rounded-none border border-line bg-surface p-4 flex flex-col md:flex-row md:items-center gap-3" aria-label="My team">
+      <section className="border border-line bg-surface p-4 flex flex-col md:flex-row md:items-center gap-3" aria-label="My team">
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-          <span className="text-[11px] font-bold tracking-[.08em] uppercase text-muted">My team</span>
+          <span className="eyebrow text-muted">My team</span>
           <span className="text-sm text-muted">
             {teams.length === 0 ? 'Waiting for live data to list the field.' : 'Pick your team to pin its gaps here.'}
           </span>
@@ -187,14 +187,14 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
 
   return (
     <section
-      className={`rounded-none border bg-surface p-3.5 md:p-4 flex flex-col gap-3 ${inPit ? 'border-alarm/60 pit-alert' : 'border-line'}`}
+      className={`border bg-surface p-3.5 md:p-4 flex flex-col gap-3 ${inPit ? 'border-alarm/60 pit-alert' : 'border-line'}`}
       aria-label="My team"
     >
       {/* Identity + actions. The row wraps: the identity column keeps a 10rem
           floor, so when the actions don't fit beside it they drop to their own
           line instead of squeezing the team name to nothing. */}
       <div className="flex flex-wrap items-center gap-3 md:gap-5">
-        <div className="w-10 h-10 md:w-[52px] md:h-[52px] rounded-none md:rounded-none accent-gradient text-accent-ink font-cond font-bold text-[22px] md:text-[28px] flex items-center justify-center shrink-0">
+        <div className="w-10 h-10 md:w-[52px] md:h-[52px] accent-block text-accent-ink font-cond font-bold text-2xl md:text-3xl flex items-center justify-center shrink-0">
           {position}
         </div>
         <div className="flex flex-col gap-1 min-w-0 flex-1 basis-40">
@@ -205,7 +205,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
                 type="button"
                 onClick={() => setPicking(false)}
                 aria-label="Cancel team change"
-                className="shrink-0 w-10 h-10 rounded-none flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+                className="shrink-0 w-10 h-10 flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
               >
                 <X size={16} />
               </button>
@@ -216,9 +216,9 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
               onClick={() => setPicking(true)}
               aria-label="Change my team"
               title="Change my team"
-              className="group flex items-center gap-1.5 min-w-0 max-w-full -ml-1 pl-1 pr-2 h-8 rounded-none text-left hover:bg-surface-2"
+              className="group flex items-center gap-1.5 min-w-0 max-w-full -ml-1 pl-1 pr-2 h-8 text-left hover:bg-surface-2"
             >
-              <span className="text-[15px] md:text-[17px] font-bold truncate">{displayTeamName(me.Team)}</span>
+              <span className="text-base font-bold truncate">{displayTeamName(me.Team)}</span>
               <ChevronDown size={16} className="shrink-0 text-muted group-hover:text-ink" />
               <span className="hidden md:inline shrink-0 text-xs font-semibold text-muted group-hover:text-ink">Change</span>
             </button>
@@ -245,7 +245,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
                 }
               }}
               title="Send PIT NOW alert to the driver overlay"
-              className="h-11 w-11 md:w-auto md:h-10 md:px-4 rounded-none md:rounded-none bg-alarm text-on-signal font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              className="h-11 w-11 md:w-auto md:h-10 md:px-4 bg-alarm text-on-signal font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <Bell size={18} />
               <span className="hidden md:inline">{sending ? 'Sending…' : 'Pit alert'}</span>

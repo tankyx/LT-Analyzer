@@ -50,8 +50,8 @@ function ResetPasswordInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center canvas text-ink">
-      <div className="max-w-md w-full p-6 bg-surface rounded-none space-y-4">
+    <div className="min-h-screen flex items-center justify-center bg-canvas text-ink">
+      <div className="max-w-md w-full p-6 bg-surface space-y-4">
         <h2 className="text-center text-2xl font-bold">Set a new password</h2>
         <form className="space-y-3" onSubmit={submit}>
           <input
@@ -60,7 +60,7 @@ function ResetPasswordInner() {
             placeholder="New password (min 12 chars)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="block w-full px-3 py-2 bg-canvas border border-line rounded-none placeholder:text-muted"
+            className="block w-full px-3 py-2 bg-canvas border border-line placeholder:text-muted"
           />
           <input
             type="password"
@@ -68,15 +68,15 @@ function ResetPasswordInner() {
             placeholder="Confirm new password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            className="block w-full px-3 py-2 bg-canvas border border-line rounded-none placeholder:text-muted"
+            className="block w-full px-3 py-2 bg-canvas border border-line placeholder:text-muted"
           />
           {error && (
-            <div className="rounded-none bg-alarm/15 p-3 text-sm text-alarm">{error}</div>
+            <div className="bg-alarm/15 p-3 text-sm text-alarm">{error}</div>
           )}
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 px-4 bg-info text-on-signal hover:bg-info rounded-none disabled:opacity-50"
+            className="w-full py-2 px-4 bg-info text-on-signal hover:bg-info disabled:opacity-50"
           >
             {loading ? 'Saving…' : 'Save new password'}
           </button>
@@ -93,7 +93,7 @@ function ResetPasswordInner() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen canvas" />}>
+    <Suspense fallback={<div className="min-h-screen bg-canvas" />}>
       <ResetPasswordInner />
     </Suspense>
   );

@@ -65,10 +65,10 @@ export const paceTone = (residual: number | null | undefined): string => {
 };
 
 const VERDICT_COPY: Record<PaceReport['verdict']['verdict'], { title: string; tone: string }> = {
-  keep: { title: 'Keep this kart', tone: 'border-live/50 bg-live/10 text-live' },
-  watch: { title: 'Watch it', tone: 'border-accent/60 bg-accent/10 text-accent' },
-  consider_switch: { title: 'Consider switching', tone: 'border-accent/60 bg-accent/10 text-accent' },
-  switch: { title: 'Switch at the next stop', tone: 'border-alarm/60 bg-alarm/10 text-alarm' },
+  keep: { title: 'Keep this kart', tone: 'border-live/50 bg-live/8 text-live' },
+  watch: { title: 'Watch it', tone: 'border-accent/60 bg-accent/8 text-accent' },
+  consider_switch: { title: 'Consider switching', tone: 'border-accent/60 bg-accent/8 text-accent' },
+  switch: { title: 'Switch at the next stop', tone: 'border-alarm/60 bg-alarm/8 text-alarm' },
   insufficient: { title: 'Not enough laps yet', tone: 'border-line bg-surface-2 text-muted' },
 };
 
@@ -142,7 +142,7 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
         <button
           type="button"
           onClick={load}
-          className="h-10 px-4 rounded-none border border-line bg-surface-2 text-sm font-semibold"
+          className="h-10 px-4 border border-line bg-surface-2 text-sm font-semibold"
         >
           Try again
         </button>
@@ -165,13 +165,13 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
   return (
     <div className="p-3 md:p-4 flex flex-col gap-3">
       {/* Verdict — the one thing a crew needs at a glance. */}
-      <div className={`rounded-none border p-3 md:p-4 ${verdictCopy.tone}`}>
+      <div className={`border p-3 md:p-4 ${verdictCopy.tone}`}>
         <div className="flex items-center justify-between gap-3">
           <span className="font-cond font-bold text-xl md:text-2xl tracking-wide uppercase">
             {verdictCopy.title}
           </span>
           {kart && (
-            <span className="font-mono tabular text-xs px-2 py-1 rounded-none bg-surface/70 text-ink shrink-0">
+            <span className="font-mono tabular text-xs px-2 py-1 bg-surface/70 text-ink shrink-0">
               {kart.label}
             </span>
           )}
@@ -180,9 +180,9 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
       </div>
 
       {/* Pace now, against the field at the same moment. */}
-      <div className="rounded-none border border-line bg-surface p-3 md:p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="border border-line bg-surface p-3 md:p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="flex flex-col gap-1">
-          <span className="text-[10px] md:text-[11px] font-bold tracking-[.08em] uppercase text-muted">
+          <span className="eyebrow text-muted">
             This stint vs field
           </span>
           <span className={`font-mono tabular text-2xl md:text-3xl font-semibold leading-none ${paceTone(current?.residual)}`}>
@@ -194,7 +194,7 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-[10px] md:text-[11px] font-bold tracking-[.08em] uppercase text-muted">
+          <span className="eyebrow text-muted">
             Last {recent?.laps ?? 5} laps
           </span>
           <span className={`font-mono tabular text-2xl md:text-3xl font-semibold leading-none ${paceTone(recent?.residual)}`}>
@@ -207,7 +207,7 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-[10px] md:text-[11px] font-bold tracking-[.08em] uppercase text-muted">
+          <span className="eyebrow text-muted">
             Your normal pace
           </span>
           <span className="font-mono tabular text-2xl md:text-3xl font-semibold leading-none text-ink">
@@ -217,7 +217,7 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-[10px] md:text-[11px] font-bold tracking-[.08em] uppercase text-muted">
+          <span className="eyebrow text-muted">
             Field right now
           </span>
           <span className="font-mono tabular text-2xl md:text-3xl font-semibold leading-none text-ink">
@@ -228,14 +228,14 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
       </div>
 
       {/* Stint by stint. */}
-      <div className="rounded-none border border-line bg-surface overflow-hidden">
+      <div className="border border-line bg-surface overflow-hidden">
         <div className="flex items-center justify-between px-3 md:px-4 h-11 border-b border-line bg-surface-2">
           <h3 className="font-cond font-bold text-lg tracking-wide">STINTS</h3>
           <button
             type="button"
             onClick={load}
             aria-label="Refresh pace"
-            className="w-9 h-9 rounded-none flex items-center justify-center text-muted hover:text-ink hover:bg-surface"
+            className="w-9 h-9 flex items-center justify-center text-muted hover:text-ink hover:bg-surface"
           >
             <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
           </button>
@@ -254,9 +254,9 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
               return (
                 <div
                   key={stint.stint_index}
-                  className={`flex items-center gap-3 px-3 md:px-4 py-2.5 ${isCurrent ? 'bg-accent/[.07]' : ''}`}
+                  className={`flex items-center gap-3 px-3 md:px-4 py-2.5 ${isCurrent ? 'bg-accent/8' : ''}`}
                 >
-                  <div className="w-8 h-8 rounded-none bg-surface-2 font-cond font-bold flex items-center justify-center shrink-0">
+                  <div className="w-8 h-8 bg-surface-2 font-cond font-bold flex items-center justify-center shrink-0">
                     {stint.stint_index + 1}
                   </div>
                   <div className="flex flex-col min-w-0 flex-1">
@@ -264,16 +264,16 @@ const PaceMonitor: React.FC<PaceMonitorProps> = ({
                       <span className={`font-mono tabular text-base font-semibold ${paceTone(stint.residual)}`}>
                         {formatDelta(stint.residual)}
                       </span>
-                      {isCurrent && <span className="text-[10px] font-bold tracking-wide text-accent">CURRENT</span>}
-                      {isBest && !isCurrent && <span className="text-[10px] font-bold tracking-wide text-live">BEST</span>}
-                      {isWorst && !isCurrent && <span className="text-[10px] font-bold tracking-wide text-alarm">WORST</span>}
+                      {isCurrent && <span className="text-3xs font-bold tracking-wide text-accent">CURRENT</span>}
+                      {isBest && !isCurrent && <span className="text-3xs font-bold tracking-wide text-live">BEST</span>}
+                      {isWorst && !isCurrent && <span className="text-3xs font-bold tracking-wide text-alarm">WORST</span>}
                     </div>
                     <span className="text-xs text-muted">
                       {stint.lap_count} laps · avg {stint.mean.toFixed(2)}s · best {stint.best.toFixed(2)}s
                     </span>
                   </div>
                   {stint.confidence === 'low' && (
-                    <span className="text-[10px] text-muted shrink-0">thin sample</span>
+                    <span className="text-3xs text-muted shrink-0">thin sample</span>
                   )}
                 </div>
               );

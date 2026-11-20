@@ -22,7 +22,7 @@ export { getTeamClass, displayTeamName };
 export const ClassChip: React.FC<{ cls: string | null }> = ({ cls }) =>
   cls ? (
     <span
-      className={`inline-block px-1.5 rounded-none text-[10px] font-semibold leading-[16px] border ${
+      className={`inline-block px-1.5 text-3xs font-semibold leading-[16px] border ${
         cls === '1' ? 'border-class1/40 text-class1' : 'border-class2/40 text-class2'
       }`}
     >
@@ -36,8 +36,8 @@ export const StarButton: React.FC<{ filled: boolean; onClick?: () => void; label
     onClick={onClick}
     aria-pressed={filled}
     aria-label={label}
-    className={`w-11 h-11 md:w-9 md:h-9 rounded-none flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${
-      filled ? 'text-accent' : 'text-line hover:text-muted'
+    className={`w-11 h-11 md:w-9 md:h-9 flex items-center justify-center transition-colors ${
+      filled ? 'text-accent' : 'text-line-strong hover:text-muted'
     }`}
   >
     <Star size={18} fill={filled ? 'currentColor' : 'none'} strokeWidth={1.8} />
@@ -68,9 +68,9 @@ export const PitAlertButton: React.FC<{
       disabled={isLoading}
       title="Send PIT NOW alert to the driver overlay"
       aria-label={`Send pit alert to ${teamName}`}
-      className="w-11 h-11 md:w-9 md:h-9 rounded-none flex items-center justify-center text-alarm hover:bg-alarm/10 disabled:opacity-50 disabled:cursor-not-allowed"
+      className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center text-alarm hover:bg-alarm/8 disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      <Bell size={18} className={isLoading ? 'animate-live-blink' : ''} />
+      <Bell size={18} className={isLoading ? 'live-glow' : ''} />
     </button>
   );
 };
@@ -141,7 +141,7 @@ const StandingsRow = React.memo(function StandingsRow({
       data-kart={team.Kart}
       style={teamColor ? { borderLeftColor: teamColor } : undefined}
       className={`flex items-center gap-3 px-3 py-2.5 border-l-[3px] border-l-transparent border-b border-line last:border-b-0 transition-colors min-h-[56px] ${
-        isMyTeam ? 'bg-accent/15' : isLeader ? 'bg-accent/[.09]' : inPit ? 'bg-alarm/[.07]' : 'hover:bg-surface-2/60'
+        isMyTeam ? 'bg-accent/15' : isLeader ? 'bg-accent/8' : inPit ? 'bg-alarm/8' : 'hover:bg-surface-2/60'
       } ${isMonitored && inPit ? 'pit-alert' : ''} ${isUpdated ? 'row-updated' : ''} ${gained ? 'row-gain' : ''} ${lost ? 'row-loss' : ''}`}
     >
       {/* Position — livery ring + number, amber block for your own team */}
@@ -149,7 +149,7 @@ const StandingsRow = React.memo(function StandingsRow({
         role="cell"
         style={!isMyTeam && teamColor ? { color: teamColor, boxShadow: `inset 0 0 0 2px ${teamColor}` } : undefined}
         className={`w-10 h-10 shrink-0 flex items-center justify-center font-cond font-bold text-lg ${
-          isMyTeam ? 'accent-gradient text-accent-ink' : 'bg-surface-2 text-ink'
+          isMyTeam ? 'accent-block text-accent-ink' : 'bg-surface-2 text-ink'
         }`}
       >
         <TickingValue value={team.Position} />
@@ -162,9 +162,9 @@ const StandingsRow = React.memo(function StandingsRow({
             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: teamColor }} aria-hidden />
           )}
           <span className="text-sm font-semibold truncate">{name}</span>
-          {isMyTeam && <span className="text-[10px] font-bold tracking-[.06em] text-accent shrink-0">YOU</span>}
+          {isMyTeam && <span className="eyebrow text-3xs text-accent shrink-0">YOU</span>}
         </div>
-        <div className="flex items-center gap-1.5 min-w-0 text-[11px] text-muted">
+        <div className="flex items-center gap-1.5 min-w-0 text-2xs text-muted">
           <span className="font-mono tabular">#{team.Kart}</span>
           <ClassChip cls={cls} />
           <StatusPill status={team.Status} variant="inline" />
@@ -173,10 +173,10 @@ const StandingsRow = React.memo(function StandingsRow({
 
       {/* Live figures: gap to leader + last lap */}
       <div role="cell" className="shrink-0 flex flex-col items-end justify-center">
-        <span className={`font-mono tabular led text-[16px] font-semibold leading-tight ${lapped ? 'text-alarm' : 'text-ink'}`}>
+        <span className={`font-mono tabular led text-base font-semibold leading-tight ${lapped ? 'text-alarm' : 'text-ink'}`}>
           <TickingValue value={team.Gap || '—'} />
         </span>
-        <span className={`font-mono tabular text-[11px] ${inPit ? 'text-alarm' : 'text-muted'}`}>
+        <span className={`font-mono tabular text-2xs ${inPit ? 'text-alarm' : 'text-muted'}`}>
           <TickingValue value={team['Last Lap'] || '—'} />
         </span>
       </div>

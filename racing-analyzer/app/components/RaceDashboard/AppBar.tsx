@@ -41,7 +41,7 @@ export function flagTone(flag: string | undefined): 'live' | 'alarm' | 'accent' 
 const FLAG_CLASSES = {
   live: 'bg-live/15 text-live',
   alarm: 'bg-alarm/15 text-alarm',
-  accent: 'bg-accent/20 text-accent',
+  accent: 'bg-accent/15 text-accent',
   muted: 'bg-muted/15 text-muted',
 };
 
@@ -84,7 +84,7 @@ const AppBar: React.FC<AppBarProps> = ({
     connectionStatus === 'connected'
       ? 'bg-live live-glow'
       : connectionStatus === 'connecting'
-        ? 'bg-accent animate-live-blink'
+        ? 'bg-accent live-glow'
         : 'bg-alarm';
   const connLabel =
     connectionStatus === 'connected'
@@ -112,9 +112,9 @@ const AppBar: React.FC<AppBarProps> = ({
             alt="LT-Analyzer"
             width={30}
             height={30}
-            className="w-[30px] h-[30px] rounded-none object-cover"
+            className="w-[30px] h-[30px] object-cover"
           />
-          <span className="font-cond font-bold text-[19px] tracking-wide">LT-ANALYZER</span>
+          <span className="font-cond font-bold text-xl tracking-wide">LT-ANALYZER</span>
           <div className="w-px h-6 bg-line ml-1.5" />
         </div>
 
@@ -123,15 +123,15 @@ const AppBar: React.FC<AppBarProps> = ({
           type="button"
           onClick={onOpenTracks}
           aria-label="Switch track"
-          className="flex items-center gap-2.5 h-10 md:h-9 pl-2.5 pr-3 rounded-none border border-line bg-surface-2 min-w-0 max-w-full md:max-w-[420px] hover:border-muted/60 transition-colors"
+          className="flex items-center gap-2.5 h-10 md:h-9 pl-2.5 pr-3 border border-line bg-surface-2 min-w-0 max-w-full md:max-w-[420px] hover:border-muted/60 transition-colors"
         >
           <span
             className={`w-2 h-2 rounded-full shrink-0 ${sessionActive ? 'bg-live live-glow' : 'bg-line'}`}
             data-testid="session-dot"
           />
-          <span className="text-[15px] md:text-sm font-semibold truncate">{trackName || 'Select a track'}</span>
+          <span className="text-sm font-semibold truncate">{trackName || 'Select a track'}</span>
           {sessionLabel && (
-            <span className="hidden sm:inline text-[13px] text-muted truncate">{sessionLabel}</span>
+            <span className="hidden sm:inline text-sm text-muted truncate">{sessionLabel}</span>
           )}
           <ChevronDown size={16} className="text-muted shrink-0" />
         </button>
@@ -139,7 +139,7 @@ const AppBar: React.FC<AppBarProps> = ({
         {/* Flag */}
         {flag && (
           <span
-            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-full text-[13px] font-semibold ${FLAG_CLASSES[tone]}`}
+            className={`hidden sm:inline-flex items-center gap-1.5 h-8 px-2.5 rounded-full text-sm font-semibold ${FLAG_CLASSES[tone]}`}
           >
             <Flag size={14} />
             {flag}
@@ -152,7 +152,7 @@ const AppBar: React.FC<AppBarProps> = ({
         {cleanTimers.length > 0 && (
           <div className="hidden lg:flex items-center gap-4">
             {cleanTimers.map((t, i) => (
-              <span key={i} className="font-mono tabular text-[15px] font-semibold text-ink whitespace-nowrap">
+              <span key={i} className="font-mono tabular text-sm font-semibold text-ink whitespace-nowrap">
                 {t}
               </span>
             ))}
@@ -161,7 +161,7 @@ const AppBar: React.FC<AppBarProps> = ({
         )}
 
         {/* Connection */}
-        <div className="hidden md:flex items-center gap-1.5 text-[11px] uppercase tracking-[.12em] text-muted whitespace-nowrap" title={connLabel}>
+        <div className="hidden md:flex items-center gap-1.5 eyebrow font-normal text-muted whitespace-nowrap" title={connLabel}>
           <span className={`w-2 h-2 rounded-full ${connDot}`} data-testid="conn-dot" />
           {connLabel}
         </div>
@@ -170,7 +170,7 @@ const AppBar: React.FC<AppBarProps> = ({
         <button
           type="button"
           onClick={onOpenStats}
-          className="hidden md:flex items-center gap-1.5 h-9 px-2.5 rounded-none text-sm font-semibold text-ink hover:bg-surface-2 transition-colors"
+          className="hidden md:flex items-center gap-1.5 h-9 px-2.5 text-sm font-semibold text-ink hover:bg-surface-2 transition-colors"
         >
           <BarChart3 size={16} />
           Driver stats
@@ -181,7 +181,7 @@ const AppBar: React.FC<AppBarProps> = ({
           type="button"
           onClick={() => setHelpOpen(true)}
           aria-label="Open dashboard guide"
-          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 rounded-none border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
         >
           <HelpCircle size={16} />
           <span className="hidden lg:inline text-xs font-semibold">Guide</span>
@@ -192,7 +192,7 @@ const AppBar: React.FC<AppBarProps> = ({
           type="button"
           onClick={toggleTheme}
           aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 rounded-none border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
         >
           {isDark ? <Sun size={16} /> : <Moon size={16} />}
           <span className="hidden lg:inline text-xs font-semibold">{isDark ? 'Light' : 'Dark'}</span>
@@ -207,7 +207,7 @@ const AppBar: React.FC<AppBarProps> = ({
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-label="Account menu"
-              className="w-10 h-10 md:w-auto md:h-9 md:px-2 rounded-full bg-info text-on-signal font-bold text-[13px] flex items-center justify-center gap-1"
+              className="w-10 h-10 md:w-auto md:h-9 md:px-2 rounded-full bg-info text-on-signal font-bold text-sm flex items-center justify-center gap-1"
             >
               {initials}
               <ChevronDown size={14} className="hidden md:inline" />
@@ -229,7 +229,7 @@ const AppBar: React.FC<AppBarProps> = ({
                   else if (e.key === 'End') next = items.length - 1;
                   items[next].focus();
                 }}
-                className="absolute right-0 mt-2 w-56 rounded-none border border-line bg-surface shadow-xl p-1.5 z-50"
+                className="absolute right-0 mt-2 w-56 border border-line bg-surface shadow-overlay p-1.5 z-50"
               >
                 <div className="px-3 py-2">
                   <div className="text-sm font-semibold truncate">{user.username}</div>
@@ -245,7 +245,7 @@ const AppBar: React.FC<AppBarProps> = ({
                     setMenuOpen(false);
                     onOpenStats();
                   }}
-                  className="md:hidden w-full flex items-center gap-2 h-11 px-3 rounded-none text-sm font-medium hover:bg-surface-2"
+                  className="md:hidden w-full flex items-center gap-2 h-11 px-3 text-sm font-medium hover:bg-surface-2"
                 >
                   <BarChart3 size={16} />
                   Driver stats
@@ -264,7 +264,7 @@ const AppBar: React.FC<AppBarProps> = ({
                         setMenuOpen(false);
                         onOpenDevices();
                       }}
-                      className="w-full flex items-center gap-2 h-11 md:h-10 px-3 rounded-none text-sm font-medium hover:bg-surface-2"
+                      className="w-full flex items-center gap-2 h-11 md:h-10 px-3 text-sm font-medium hover:bg-surface-2"
                     >
                       <Cpu size={16} />
                       Devices
@@ -279,7 +279,7 @@ const AppBar: React.FC<AppBarProps> = ({
                     setMenuOpen(false);
                     onLogout();
                   }}
-                  className="w-full flex items-center gap-2 h-11 md:h-10 px-3 rounded-none text-sm font-medium text-alarm hover:bg-alarm/10"
+                  className="w-full flex items-center gap-2 h-11 md:h-10 px-3 text-sm font-medium text-alarm hover:bg-alarm/8"
                 >
                   <LogOut size={16} />
                   Log out

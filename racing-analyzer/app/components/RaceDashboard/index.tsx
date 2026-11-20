@@ -1241,7 +1241,7 @@ const RaceDashboard = () => {
 
   if (isLoading && connectionStatus === 'disconnected') {
     return (
-      <div className="flex items-center justify-center min-h-screen canvas text-ink">
+      <div className="flex items-center justify-center min-h-screen bg-canvas text-ink">
         <div className="flex flex-col items-center gap-4">
           <div className="w-10 h-10 border-[3px] border-accent border-t-transparent rounded-full animate-spin" />
           <div className="text-sm text-muted">Connecting to the timing server…</div>
@@ -1276,11 +1276,11 @@ const RaceDashboard = () => {
           teamCount={teamCounts}
         />
         {lastUpdate && (
-          <span className="md:hidden text-[11px] text-muted">Updated {lastUpdate}</span>
+          <span className="md:hidden text-2xs text-muted">Updated {lastUpdate}</span>
         )}
       </div>
 
-      <div className="rounded-none border border-line bg-surface overflow-hidden tower-sweep" role="table" aria-label="Standings">
+      <div className="border border-line bg-surface overflow-hidden tower-sweep" role="table" aria-label="Standings">
         {filteredTeams.length > 0 ? (
           sortedTeams.map(team => (
             <StandingsRow
@@ -1305,7 +1305,7 @@ const RaceDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setTrackSheetOpen(true)}
-                  className="mt-4 h-10 px-4 rounded-none border border-line bg-surface-2 text-sm font-semibold text-ink"
+                  className="mt-4 h-10 px-4 border border-line bg-surface-2 text-sm font-semibold text-ink"
                 >
                   Pick a live track
                 </button>
@@ -1316,7 +1316,7 @@ const RaceDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedClass('all')}
-                  className="mt-4 h-10 px-4 rounded-none border border-line bg-surface-2 text-sm font-semibold text-ink"
+                  className="mt-4 h-10 px-4 border border-line bg-surface-2 text-sm font-semibold text-ink"
                 >
                   Show all teams
                 </button>
@@ -1351,7 +1351,7 @@ const RaceDashboard = () => {
         />
       )}
 
-      <div className="rounded-none border border-line bg-surface overflow-hidden">
+      <div className="border border-line bg-surface overflow-hidden">
         <div className="flex items-center justify-between gap-3 px-4 h-12 border-b border-line bg-surface-2">
           <h2 className="font-cond font-bold text-lg tracking-wide flex items-center gap-2">
             <Eye size={18} className="text-accent" />
@@ -1359,12 +1359,12 @@ const RaceDashboard = () => {
             <span className="font-mono tabular text-xs px-1.5 py-px rounded-full bg-line text-muted">{monitoredTeams.length}</span>
           </h2>
           {!isQualificationMode && (
-            <div className="inline-flex gap-1 p-[3px] rounded-none bg-surface border border-line" role="group" aria-label="Gap mode">
+            <div className="inline-flex gap-1 p-[3px] bg-surface border border-line" role="group" aria-label="Gap mode">
               <button
                 type="button"
                 aria-pressed={!showAdjustedGap}
                 onClick={() => setShowAdjustedGap(false)}
-                className={`h-8 px-3 rounded-none text-xs font-semibold ${!showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
+                className={`h-8 px-3 text-xs font-semibold ${!showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
               >
                 Raw
               </button>
@@ -1372,7 +1372,7 @@ const RaceDashboard = () => {
                 type="button"
                 aria-pressed={showAdjustedGap}
                 onClick={() => setShowAdjustedGap(true)}
-                className={`h-8 px-3 rounded-none text-xs font-semibold ${showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
+                className={`h-8 px-3 text-xs font-semibold ${showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
               >
                 Adjusted
               </button>
@@ -1382,7 +1382,7 @@ const RaceDashboard = () => {
             <button
               type="button"
               onClick={() => { setIsUserUpdate(true); setMonitoredTeams([]); }}
-              className="h-8 px-2.5 rounded-none text-xs font-semibold text-muted hover:text-alarm hover:bg-alarm/10"
+              className="h-8 px-2.5 text-xs font-semibold text-muted hover:text-alarm hover:bg-alarm/8"
             >
               Clear all
             </button>
@@ -1402,19 +1402,19 @@ const RaceDashboard = () => {
               return (
                 <div
                   key={kart}
-                  className={`rounded-none border p-3 flex flex-col gap-2 transition-colors ${
-                    inPit ? 'border-alarm/50 bg-alarm/[.07]' : 'border-line bg-canvas'
+                  className={`border p-3 flex flex-col gap-2 transition-colors ${
+                    inPit ? 'border-alarm/50 bg-alarm/8' : 'border-line bg-canvas'
                   } ${hoveredTeam === kart ? 'ring-2 ring-info/60' : ''}`}
                   style={{ boxShadow: teamColors[kart] ? `inset 3px 0 0 ${teamColors[kart]}` : undefined }}
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-none bg-surface-2 font-cond font-bold text-base flex items-center justify-center shrink-0">
+                    <div className="w-8 h-8 bg-surface-2 font-cond font-bold text-base flex items-center justify-center shrink-0">
                       {data.position}
                     </div>
                     <div className="flex flex-col min-w-0 flex-1">
                       <span className="text-sm font-semibold truncate">{displayTeamName(data.team_name)}</span>
                       <div className="flex items-center gap-2">
-                        <span className="font-mono tabular text-[11px] text-muted">#{kart}</span>
+                        <span className="font-mono tabular text-2xs text-muted">#{kart}</span>
                         {team?.Status !== undefined && <StatusPill status={team.Status} variant="inline" />}
                       </div>
                     </div>
@@ -1430,7 +1430,7 @@ const RaceDashboard = () => {
                         type="button"
                         onClick={() => toggleTeamMonitoring(kart)}
                         aria-label={`Stop monitoring ${data.team_name}`}
-                        className="w-9 h-9 rounded-none flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+                        className="w-9 h-9 flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
                       >
                         <X size={16} />
                       </button>
@@ -1438,15 +1438,15 @@ const RaceDashboard = () => {
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="flex flex-col">
-                      <span className="text-[10px] font-bold tracking-[.08em] uppercase text-muted">Last</span>
+                      <span className="eyebrow text-muted">Last</span>
                       <span className="font-mono tabular text-sm">{data.last_lap || '—'}</span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-[10px] font-bold tracking-[.08em] uppercase text-muted">Best</span>
+                      <span className="eyebrow text-muted">Best</span>
                       <span className="font-mono tabular text-sm">{data.best_lap || '—'}</span>
                     </div>
                     <div className="flex flex-col">
-                      <span className="text-[10px] font-bold tracking-[.08em] uppercase text-muted">{isQualificationMode ? 'Laps' : 'Stops'}</span>
+                      <span className="eyebrow text-muted">{isQualificationMode ? 'Laps' : 'Stops'}</span>
                       <span className="font-mono tabular text-sm">
                         {data.pit_stops || '0'}
                         {!isQualificationMode && showAdjustedGap && data.remaining_stops !== undefined && (
@@ -1488,7 +1488,7 @@ const RaceDashboard = () => {
 
   const ChartTab = (
     <div className="flex flex-col gap-3">
-      <div className="rounded-none border border-line bg-surface p-3 md:p-4">
+      <div className="border border-line bg-surface p-3 md:p-4">
         <TimeDeltaChart
           gapHistory={gapHistory}
           teams={teams}
@@ -1500,7 +1500,7 @@ const RaceDashboard = () => {
           requiredPitStops={requiredPitStops}
         />
       </div>
-      <div className="rounded-none border border-line bg-surface p-4 text-xs text-muted">
+      <div className="border border-line bg-surface p-4 text-xs text-muted">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="flex items-center gap-2">
             <span className="h-px w-5 bg-muted" /><span className="h-3 w-3 rounded-full bg-muted" />
@@ -1528,7 +1528,7 @@ const RaceDashboard = () => {
   ];
 
   return (
-    <div className="h-dvh canvas text-ink flex flex-col overflow-hidden rise-in">
+    <div className="h-dvh bg-canvas text-ink flex flex-col overflow-hidden rise-in">
       <AppBar
         trackName={selectedTrackName}
         sessionLabel={sessionLabel}
@@ -1553,7 +1553,7 @@ const RaceDashboard = () => {
         top={
           <>
             {!sessionActive && sessionStatus && (
-              <div className="rounded-none border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2">
+              <div className="border border-accent/50 bg-accent/8 px-3 py-2 text-sm flex items-center gap-2">
                 <AlertTriangle size={16} className="text-accent shrink-0" />
                 <span>{sessionStatus.trackName || selectedTrackName}: no active session right now.</span>
               </div>
@@ -1562,14 +1562,14 @@ const RaceDashboard = () => {
             {dataWarning && (
               <div
                 role="status"
-                className="rounded-none border border-accent/50 bg-accent/10 px-3 py-2 text-sm flex items-center gap-2"
+                className="border border-accent/50 bg-accent/8 px-3 py-2 text-sm flex items-center gap-2"
               >
                 <AlertTriangle size={16} className="text-accent shrink-0" />
                 <span className="flex-1 min-w-0">{dataWarning}</span>
                 <button
                   type="button"
                   onClick={() => { setDataWarning(null); refreshFleetState(); }}
-                  className="shrink-0 h-7 px-2.5 rounded-none text-xs font-semibold bg-surface-2 hover:bg-line"
+                  className="shrink-0 h-7 px-2.5 text-xs font-semibold bg-surface-2 hover:bg-line"
                 >
                   Retry
                 </button>
@@ -1577,7 +1577,7 @@ const RaceDashboard = () => {
                   type="button"
                   onClick={() => setDataWarning(null)}
                   aria-label="Dismiss warning"
-                  className="shrink-0 w-7 h-7 rounded-none flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
+                  className="shrink-0 w-7 h-7 flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
                 >
                   <X size={14} />
                 </button>
@@ -1620,7 +1620,7 @@ const RaceDashboard = () => {
           isActive={activeTab === 'pace'}
         />
         {ChartTab}
-        <div className="rounded-none border border-line bg-surface overflow-hidden">
+        <div className="border border-line bg-surface overflow-hidden">
           <StintPlanner
             isDarkMode={isDarkMode}
             myTeam={myTeam}
@@ -1631,7 +1631,7 @@ const RaceDashboard = () => {
             trackName={selectedTrackName}
           />
         </div>
-        <div className="rounded-none border border-line bg-surface overflow-hidden">
+        <div className="border border-line bg-surface overflow-hidden">
           <FleetTracker
             isDarkMode={isDarkMode}
             fleetBoard={fleetBoard}
@@ -1646,7 +1646,7 @@ const RaceDashboard = () => {
           />
         </div>
         {user?.role === 'admin' && (
-          <div className="rounded-none border border-line bg-surface overflow-hidden">
+          <div className="border border-line bg-surface overflow-hidden">
             <AdminPanel isDarkMode={isDarkMode} />
           </div>
         )}
