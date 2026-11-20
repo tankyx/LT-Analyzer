@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Search, Settings, X } from 'lucide-react';
 import { buildTrackTrie, searchTrackTrie } from './lib/trackTrie';
+import Dialog from '../../ui/Dialog';
+import IconButton from '../../ui/IconButton';
+import { Input } from '../../ui/Field';
 
 export interface RailTrack {
   track_id: number;
@@ -61,33 +64,6 @@ const TrackRail: React.FC<TrackRailProps> = ({
   const [query, setQuery] = useState('');
   const { live, idle } = useMemo(() => groupTracks(tracks, query), [tracks, query]);
   const isSheet = variant === 'sheet';
-  const sheetRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!isSheet) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose?.();
-      // Keep focus inside the modal while it is open.
-      if (e.key === 'Tab' && sheetRef.current) {
-        const focusables = sheetRef.current.querySelectorAll<HTMLElement>(
-          'button, input, [tabindex]:not([tabindex="-1"])',
-        );
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [isSheet, onClose]);
-
   const pick = (id: number) => {
     onSelect(id);
     if (isSheet) onClose?.();
@@ -129,14 +105,14 @@ const TrackRail: React.FC<TrackRailProps> = ({
     <>
       <div className="relative shrink-0">
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-        <input
+        <Input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Search ${tracks.length} tracks`}
           aria-label="Search tracks"
           autoFocus={isSheet}
-          className="w-full h-10 md:h-9 pl-9 pr-8 border border-line bg-canvas text-sm text-ink placeholder:text-muted"
+          className="h-10 md:h-9 pl-9 pr-8"
         />
         {query && (
           <button
@@ -199,23 +175,19 @@ const TrackRail: React.FC<TrackRailProps> = ({
   }
 
   return (
-    <div ref={sheetRef} className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center" role="dialog" aria-modal="true" aria-label="Choose a track">
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-scrim" />
-      <div className="relative flex flex-col gap-3 p-3 pb-[max(12px,env(safe-area-inset-bottom))] bg-surface border border-line w-full md:w-[440px] h-[85vh] md:h-[70vh] shadow-overlay">
-        <div className="flex items-center justify-between px-1">
-          <span className="font-cond font-bold text-lg tracking-wide">TRACKS</span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close track picker"
-            className="w-10 h-10 flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        {body}
+    <Dialog
+      label="Choose a track"
+      onClose={() => onClose?.()}
+      className="gap-3 p-3 pb-[max(12px,env(safe-area-inset-bottom))] h-[85vh] md:h-[70vh]"
+    >
+      <div className="flex items-center justify-between px-1">
+        <span className="font-cond font-bold text-lg tracking-wide">TRACKS</span>
+        <IconButton label="Close track picker" onClick={onClose}>
+          <X size={18} />
+        </IconButton>
       </div>
-    </div>
+      {body}
+    </Dialog>
   );
 };
 

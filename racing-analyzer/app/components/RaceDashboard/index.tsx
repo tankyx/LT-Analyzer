@@ -4,7 +4,10 @@ import TimeDeltaChart from './TimeDeltaChart';
 import TabbedInterface from './TabbedInterface';
 import ApiService from '../../services/ApiService';
 import webSocketService, { RaceDataUpdate, TeamsUpdate, SessionUpdate, AllTracksStatusUpdate, TrackStatus, FleetKartState } from '../../services/WebSocketService';
-import StatusPill from './StatusPill';
+import StatusPill from '../../ui/StatusPill';
+import { Panel, PanelHeader, EmptyState } from '../../ui/Panel';
+import SegmentedControl from '../../ui/SegmentedControl';
+import Button from '../../ui/Button';
 import ClassFilter from './ClassFilter';
 import PitStopConfig from './PitStopConfig';
 import StintPlanner from './StintPlanner';
@@ -1351,43 +1354,32 @@ const RaceDashboard = () => {
         />
       )}
 
-      <div className="border border-line bg-surface overflow-hidden">
-        <div className="flex items-center justify-between gap-3 px-4 h-12 border-b border-line bg-surface-2">
-          <h2 className="font-cond font-bold text-lg tracking-wide flex items-center gap-2">
-            <Eye size={18} className="text-accent" />
-            MONITORED
-            <span className="font-mono tabular text-xs px-1.5 py-px rounded-full bg-line text-muted">{monitoredTeams.length}</span>
-          </h2>
-          {!isQualificationMode && (
-            <div className="inline-flex gap-1 p-[3px] bg-surface border border-line" role="group" aria-label="Gap mode">
-              <button
-                type="button"
-                aria-pressed={!showAdjustedGap}
-                onClick={() => setShowAdjustedGap(false)}
-                className={`h-8 px-3 text-xs font-semibold ${!showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
-              >
-                Raw
-              </button>
-              <button
-                type="button"
-                aria-pressed={showAdjustedGap}
-                onClick={() => setShowAdjustedGap(true)}
-                className={`h-8 px-3 text-xs font-semibold ${showAdjustedGap ? 'bg-surface-2 text-ink' : 'text-muted'}`}
-              >
-                Adjusted
-              </button>
-            </div>
-          )}
-          {monitoredTeams.length > 0 && (
-            <button
-              type="button"
-              onClick={() => { setIsUserUpdate(true); setMonitoredTeams([]); }}
-              className="h-8 px-2.5 text-xs font-semibold text-muted hover:text-alarm hover:bg-alarm/8"
-            >
-              Clear all
-            </button>
-          )}
-        </div>
+      <Panel as="div" className="overflow-hidden">
+        <PanelHeader
+          title="Monitored"
+          icon={<Eye size={18} />}
+          count={monitoredTeams.length}
+          actions={
+            <>
+              {!isQualificationMode && (
+                <SegmentedControl
+                  label="Gap mode"
+                  value={showAdjustedGap ? 'adjusted' : 'raw'}
+                  onChange={(v) => setShowAdjustedGap(v === 'adjusted')}
+                  options={[
+                    { value: 'raw', label: 'Raw' },
+                    { value: 'adjusted', label: 'Adjusted' },
+                  ]}
+                />
+              )}
+              {monitoredTeams.length > 0 && (
+                <Button variant="quiet" size="sm" className="hover:text-alarm" onClick={() => { setIsUserUpdate(true); setMonitoredTeams([]); }}>
+                  Clear all
+                </Button>
+              )}
+            </>
+          }
+        />
 
         <div className="p-3 flex flex-col gap-2">
           {Object.entries(frontendDeltaData)
@@ -1459,20 +1451,15 @@ const RaceDashboard = () => {
               );
             })}
           {Object.keys(frontendDeltaData).length === 0 && (
-            <div className="py-10 flex flex-col items-center text-center text-muted">
-              <Star size={36} className="opacity-30 mb-3" />
-              {!myTeam ? (
-                <>
-                  <p className="text-sm font-semibold text-ink">Pick your team first</p>
-                  <p className="text-xs mt-1">Gaps are measured from your team, so choose it in the card above.</p>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm font-semibold text-ink">No teams monitored yet</p>
-                  <p className="text-xs mt-1">Tap the star on a standings row to track its gap to you.</p>
-                </>
-              )}
-            </div>
+            !myTeam ? (
+              <EmptyState icon={<Star size={36} />} title="Pick your team first">
+                Gaps are measured from your team, so choose it in the card above.
+              </EmptyState>
+            ) : (
+              <EmptyState icon={<Star size={36} />} title="No teams monitored yet">
+                Tap the star on a standings row to track its gap to you.
+              </EmptyState>
+            )
           )}
         </div>
 
@@ -1482,7 +1469,7 @@ const RaceDashboard = () => {
             Adjusted gap accounts for remaining pit stops ({Math.floor(pitStopTime / 60)}:{String(pitStopTime % 60).padStart(2, '0')} per stop). Positive = they are behind you.
           </div>
         )}
-      </div>
+      </Panel>
     </div>
   );
 
@@ -1668,7 +1655,6 @@ const RaceDashboard = () => {
 
       {assignmentEntry?.open && (
         <KartAssignmentEntry
-          isDarkMode={isDarkMode}
           registry={fleetRegistry}
           teams={teams}
           prompt={assignmentEntry.prompt}

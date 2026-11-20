@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { API_BASE_URL } from '../../utils/config';
 import TurnstileWidget from '../components/TurnstileWidget';
+import Button from '../ui/Button';
+import { Field, Input } from '../ui/Field';
 
 function LoginInner() {
   const [username, setUsername] = useState('');
@@ -93,34 +95,30 @@ function LoginInner() {
           )}
 
           <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">Username</span>
-              <input
+            <Field label="Username">
+              <Input
                 id="username"
                 name="username"
                 type="text"
                 autoComplete="username"
                 required
-                className="h-11 px-3 border border-line bg-canvas text-ink placeholder:text-muted"
                 placeholder="Username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">Password</span>
-              <input
+            </Field>
+            <Field label="Password">
+              <Input
                 id="password"
                 name="password"
                 type="password"
                 autoComplete="current-password"
                 required
-                className="h-11 px-3 border border-line bg-canvas text-ink placeholder:text-muted"
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
-            </label>
+            </Field>
 
             <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
 
@@ -142,13 +140,9 @@ function LoginInner() {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="h-11 accent-block text-accent-ink font-bold text-sm hover:brightness-95 disabled:opacity-50"
-            >
+            <Button type="submit" variant="primary" size="lg" block disabled={loading} className="md:h-11 font-bold">
               {loading ? 'Logging in…' : 'Sign in'}
-            </button>
+            </Button>
 
             <div className="flex justify-between text-sm text-muted">
               <Link href="/forgot-password" className="hover:text-ink">Forgot password?</Link>

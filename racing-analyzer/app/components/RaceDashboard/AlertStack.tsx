@@ -2,6 +2,8 @@
 
 import React from 'react';
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import Button from '../../ui/Button';
+import IconButton from '../../ui/IconButton';
 
 export interface DashboardAlert {
   id: number;
@@ -48,31 +50,18 @@ const AlertStack: React.FC<AlertStackProps> = ({ alerts, onDismiss, onLocate }) 
             <div className="flex-1 min-w-0 text-sm">{alert.customContent || alert.message}</div>
             <div className="flex items-center gap-1 shrink-0">
               {isPit && alert.teamKart && onLocate && (
-                <button
-                  type="button"
-                  onClick={() => onLocate(alert.teamKart!)}
-                  className="h-8 px-2.5 text-xs font-semibold bg-surface-2 hover:bg-line"
-                >
+                <Button size="sm" onClick={() => onLocate(alert.teamKart!)}>
                   Locate
-                </button>
+                </Button>
               )}
               {alert.action && (
-                <button
-                  type="button"
-                  onClick={() => { alert.action!.onClick(); onDismiss(alert.id); }}
-                  className="h-8 px-2.5 text-xs font-semibold bg-accent/15 text-accent hover:bg-accent/25"
-                >
+                <Button size="sm" onClick={() => { alert.action!.onClick(); onDismiss(alert.id); }}>
                   {alert.action.label}
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
-                onClick={() => onDismiss(alert.id)}
-                aria-label="Dismiss"
-                className="w-8 h-8 flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
-              >
+              <IconButton label="Dismiss" size="sm" onClick={() => onDismiss(alert.id)}>
                 <X size={16} />
-              </button>
+              </IconButton>
             </div>
           </div>
         );

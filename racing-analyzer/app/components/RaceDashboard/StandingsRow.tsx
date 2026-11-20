@@ -2,7 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Bell, Star } from 'lucide-react';
-import StatusPill, { describeStatus, toneClasses } from './StatusPill';
+import StatusPill, { ClassChip } from '../../ui/StatusPill';
+import IconButton from '../../ui/IconButton';
 import { getTeamClass, displayTeamName } from './lib/teamName';
 
 export interface RowTeam {
@@ -17,31 +18,18 @@ export interface RowTeam {
   Status?: string;
 }
 
-export { getTeamClass, displayTeamName };
-
-export const ClassChip: React.FC<{ cls: string | null }> = ({ cls }) =>
-  cls ? (
-    <span
-      className={`inline-block px-1.5 text-3xs font-semibold leading-[16px] border ${
-        cls === '1' ? 'border-class1/40 text-class1' : 'border-class2/40 text-class2'
-      }`}
-    >
-      C{cls}
-    </span>
-  ) : null;
+export { getTeamClass, displayTeamName, ClassChip };
 
 export const StarButton: React.FC<{ filled: boolean; onClick?: () => void; label: string }> = ({ filled, onClick, label }) => (
-  <button
-    type="button"
+  <IconButton
+    label={label}
     onClick={onClick}
     aria-pressed={filled}
-    aria-label={label}
-    className={`w-11 h-11 md:w-9 md:h-9 flex items-center justify-center transition-colors ${
-      filled ? 'text-accent' : 'text-line-strong hover:text-muted'
-    }`}
+    // Rests in line-strong so twenty stars do not compete with the figures.
+    className={filled ? 'text-accent hover:bg-transparent hover:text-accent' : 'text-line-strong hover:bg-transparent hover:text-muted'}
   >
     <Star size={18} fill={filled ? 'currentColor' : 'none'} strokeWidth={1.8} />
-  </button>
+  </IconButton>
 );
 
 export const PitAlertButton: React.FC<{
@@ -62,16 +50,15 @@ export const PitAlertButton: React.FC<{
     }
   };
   return (
-    <button
-      type="button"
+    <IconButton
+      label={`Send pit alert to ${teamName}`}
+      variant="alarm"
       onClick={handleClick}
       disabled={isLoading}
       title="Send PIT NOW alert to the driver overlay"
-      aria-label={`Send pit alert to ${teamName}`}
-      className="w-11 h-11 md:w-9 md:h-9 flex items-center justify-center text-alarm hover:bg-alarm/8 disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <Bell size={18} className={isLoading ? 'live-glow' : ''} />
-    </button>
+    </IconButton>
   );
 };
 
@@ -121,7 +108,6 @@ const StandingsRow = React.memo(function StandingsRow({
   const cls = getTeamClass(team.Team);
   const name = displayTeamName(team.Team);
   const inPit = team.Status === 'Pit-in';
-  const { tone } = describeStatus(team.Status);
   const lapped = /tour|lap/i.test(team.Gap || '');
   const isLeader = team.Position === '1';
   const canAlert = isMonitored && !['Pit-in', 'Finished', 'DNF', 'DSQ'].includes(team.Status || '');
@@ -194,7 +180,6 @@ const StandingsRow = React.memo(function StandingsRow({
           label={isMonitored ? `Stop monitoring ${name}` : `Monitor ${name}`}
         />
       </div>
-      <span className="sr-only">{toneClasses(tone).text}</span>
     </div>
   );
 }, (prev, next) => (

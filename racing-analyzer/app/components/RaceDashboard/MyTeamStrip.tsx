@@ -2,7 +2,11 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Bell, ChevronDown, X } from 'lucide-react';
-import StatusPill from './StatusPill';
+import StatusPill from '../../ui/StatusPill';
+import Stat from '../../ui/Stat';
+import Button from '../../ui/Button';
+import IconButton from '../../ui/IconButton';
+import { Select } from '../../ui/Field';
 import { displayTeamName } from './lib/teamName';
 import { calculateTrend, headToHeadGap, parseTimeToSeconds } from '../../../utils/raceMath';
 
@@ -71,19 +75,6 @@ interface MyTeamStripProps {
   pitAlertTargetSlot?: React.ReactNode;
 }
 
-const Stat: React.FC<{ label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: string }> = ({
-  label,
-  value,
-  sub,
-  tone = 'text-ink',
-}) => (
-  <div className="flex flex-col gap-1 min-w-0">
-    <span className="eyebrow text-muted truncate">{label}</span>
-    <span className={`font-mono tabular text-xl md:text-3xl font-bold leading-none tracking-tight ${tone}`}>{value}</span>
-    {sub !== undefined && <span className="text-xs text-muted truncate">{sub}</span>}
-  </div>
-);
-
 /**
  * The pinned "my team" card: position, last/best lap, gap to the cars ahead
  * and behind with a closing/opening trend, stops, and the pit-alert trigger.
@@ -140,14 +131,14 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
   );
 
   const picker = (
-    <select
+    <Select
       aria-label="Choose your team"
       value={myTeam}
       onChange={(e) => {
         onSelectMyTeam(e.target.value);
         setPicking(false);
       }}
-      className="h-11 md:h-10 w-full md:w-auto md:min-w-[280px] min-w-0 px-3 border border-line bg-canvas text-sm text-ink"
+      className="md:w-auto md:min-w-[280px]"
     >
       <option value="">Choose your team…</option>
       {sortedTeams.map((t) => (
@@ -155,7 +146,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
           P{t.Position} · {displayTeamName(t.Team)} (#{t.Kart})
         </option>
       ))}
-    </select>
+    </Select>
   );
 
   if (!ctx) {
@@ -201,14 +192,9 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
           {picking ? (
             <div className="flex items-center gap-2 min-w-0">
               {picker}
-              <button
-                type="button"
-                onClick={() => setPicking(false)}
-                aria-label="Cancel team change"
-                className="shrink-0 w-10 h-10 flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
-              >
+              <IconButton label="Cancel team change" onClick={() => setPicking(false)}>
                 <X size={16} />
-              </button>
+              </IconButton>
             </div>
           ) : (
             <button
@@ -233,8 +219,9 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
         {canAlert && (
           <div className="ml-auto shrink-0 flex items-center gap-2 md:gap-3">
             {pitAlertTargetSlot}
-            <button
-              type="button"
+            <Button
+              variant="danger"
+              size="lg"
               disabled={sending}
               onClick={async () => {
                 setSending(true);
@@ -245,11 +232,12 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
                 }
               }}
               title="Send PIT NOW alert to the driver overlay"
-              className="h-11 w-11 md:w-auto md:h-10 md:px-4 bg-alarm text-on-signal font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              // Icon-only on phones, labelled from md up.
+              className="w-11 px-0 md:w-auto md:px-4 font-bold"
             >
               <Bell size={18} />
               <span className="hidden md:inline">{sending ? 'Sending…' : 'Pit alert'}</span>
-            </button>
+            </Button>
           </div>
         )}
       </div>

@@ -69,4 +69,16 @@ const StatusPill: React.FC<StatusPillProps> = ({ status, variant = 'pill', class
   );
 };
 
+/** The racing class beside a kart number: C1 or C2. Sits on `surface` only. */
+export const ClassChip: React.FC<{ cls: string | null }> = ({ cls }) =>
+  cls ? (
+    <span
+      className={`inline-block px-1.5 text-3xs font-semibold leading-[16px] border ${
+        cls === '1' ? 'border-class1/40 text-class1' : 'border-class2/40 text-class2'
+      }`}
+    >
+      C{cls}
+    </span>
+  ) : null;
+
 export default StatusPill;

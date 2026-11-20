@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import StatusPill, { describeStatus } from '@/app/components/RaceDashboard/StatusPill';
+import StatusPill, { describeStatus } from '@/app/ui/StatusPill';
 
 describe('describeStatus', () => {
   test.each([

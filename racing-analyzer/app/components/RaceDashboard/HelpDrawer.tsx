@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { X } from 'lucide-react';
+import Dialog from '../../ui/Dialog';
+import IconButton from '../../ui/IconButton';
 
 interface HelpDrawerProps {
   onClose: () => void;
@@ -42,48 +44,17 @@ const SHORTCUTS: Array<[string, string]> = [
 /** First-visit / on-demand guide: task-focused explanations, keyboard/reader
     accessible, dismissible. A real dialog, not a hover tooltip. */
 const HelpDrawer: React.FC<HelpDrawerProps> = ({ onClose }) => {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if (e.key === 'Tab' && ref.current) {
-        const focusables = ref.current.querySelectorAll<HTMLElement>(
-          'button, a, [tabindex]:not([tabindex="-1"])',
-        );
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end md:justify-center md:items-center" role="dialog" aria-modal="true" aria-label="Dashboard guide">
-      <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-scrim" />
-      <div
-        ref={ref}
-        className="relative flex flex-col gap-4 p-4 pb-[max(16px,env(safe-area-inset-bottom))] bg-surface border border-line w-full md:w-[520px] max-h-[85vh] md:max-h-[75vh] shadow-overlay"
-      >
+    <Dialog
+      label="Dashboard guide"
+      onClose={onClose}
+      className="gap-4 p-4 pb-[max(16px,env(safe-area-inset-bottom))] md:w-[520px] max-h-[85vh] md:max-h-[75vh]"
+    >
         <div className="flex items-center justify-between px-1">
           <h2 className="font-cond font-bold text-xl tracking-wide">DASHBOARD GUIDE</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close guide"
-            className="w-10 h-10 flex items-center justify-center text-muted hover:text-ink hover:bg-surface-2"
-          >
+          <IconButton label="Close guide" onClick={onClose}>
             <X size={18} />
-          </button>
+          </IconButton>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto scroll-thin flex flex-col gap-3 -mx-1 px-1">
@@ -106,8 +77,7 @@ const HelpDrawer: React.FC<HelpDrawerProps> = ({ onClose }) => {
             </ul>
           </div>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 };
 

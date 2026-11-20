@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { BarChart3, ChevronDown, Cpu, Flag, HelpCircle, LogOut, Moon, Sun } from 'lucide-react';
+import Button from '../../ui/Button';
 import { useTheme } from '../../contexts/ThemeContext';
 import HelpDrawer from './HelpDrawer';
 
@@ -168,36 +169,30 @@ const AppBar: React.FC<AppBarProps> = ({
         </div>
 
         {/* Driver stats */}
-        <button
-          type="button"
-          onClick={onOpenStats}
-          className="hidden md:flex items-center gap-1.5 h-9 px-2.5 text-sm font-semibold text-ink hover:bg-surface-2 transition-colors"
-        >
+        <Button variant="quiet" onClick={onOpenStats} className="hidden md:inline-flex gap-1.5 px-2.5 text-ink">
           <BarChart3 size={16} />
           Driver stats
-        </button>
+        </Button>
 
-        {/* Help */}
-        <button
-          type="button"
+        {/* Help: icon-only below lg, labelled above */}
+        <Button
           onClick={() => setHelpOpen(true)}
           aria-label="Open dashboard guide"
-          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          className="w-11 px-0 md:w-auto md:px-2.5 gap-1.5 text-xs text-muted hover:text-ink"
         >
           <HelpCircle size={16} />
-          <span className="hidden lg:inline text-xs font-semibold">Guide</span>
-        </button>
+          <span className="hidden lg:inline">Guide</span>
+        </Button>
 
         {/* Theme */}
-        <button
-          type="button"
+        <Button
           onClick={toggleTheme}
           aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="h-10 w-10 md:w-auto md:h-9 md:px-2.5 border border-line flex items-center justify-center gap-1.5 text-muted hover:text-ink hover:bg-surface-2 transition-colors"
+          className="w-11 px-0 md:w-auto md:px-2.5 gap-1.5 text-xs text-muted hover:text-ink"
         >
           {isDark ? <Sun size={16} /> : <Moon size={16} />}
-          <span className="hidden lg:inline text-xs font-semibold">{isDark ? 'Light' : 'Dark'}</span>
-        </button>
+          <span className="hidden lg:inline">{isDark ? 'Light' : 'Dark'}</span>
+        </Button>
 
         {/* User */}
         {user && (
