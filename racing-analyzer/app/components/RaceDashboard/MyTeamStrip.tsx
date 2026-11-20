@@ -226,7 +226,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
           <div className="flex items-center gap-2.5 flex-wrap">
             <span className="font-mono tabular text-xs text-muted">#{me.Kart}</span>
             <StatusPill status={me.Status} />
-            {me.RunTime && <span className="text-xs text-muted">run {me.RunTime}</span>}
+            {me.RunTime && <span className="text-xs text-muted">run <span className="tabular">{me.RunTime}</span></span>}
           </div>
         </div>
 

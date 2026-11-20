@@ -784,7 +784,7 @@ export default function DataPage() {
             <div className="text-center text-muted py-8">Loading top teams...</div>
           ) : topTeams.length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="tabular w-full text-sm">
                 <thead className="bg-surface-2">
                   <tr className="text-left border-b border-line">
                     <th className="px-4 py-3 text-ink">Rank</th>
@@ -1086,7 +1086,7 @@ export default function DataPage() {
             ) : allLaps.length > 0 ? (
               <>
                 <div className="overflow-x-auto mb-4">
-                  <table className="w-full text-sm">
+                  <table className="tabular w-full text-sm">
                     <thead className="bg-surface-2">
                       <tr className="text-left border-b border-line">
                         <th className="px-4 py-3 text-ink">Lap #</th>
@@ -1381,7 +1381,7 @@ export default function DataPage() {
                       Team 2: {lapDetails[selectedTeams[1]]?.length || 0}
                     </div>
                     <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-                      <table className="w-full text-sm">
+                      <table className="tabular w-full text-sm">
                         <thead className="sticky top-0 bg-surface-2">
                           <tr className="text-left border-b border-line">
                             <th className="px-4 py-3 text-ink">Lap</th>
@@ -1971,7 +1971,7 @@ function TrackFairnessPanel({ tracks }: { tracks: Track[] }) {
           <div className="text-muted">No drivers reached the minimum sample threshold for this track.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="tabular w-full text-sm">
               <thead className="bg-surface-2">
                 <tr className="text-left">
                   <th className="px-3 py-2 text-ink">#</th>

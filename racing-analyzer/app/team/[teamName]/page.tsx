@@ -854,7 +854,7 @@ function SessionsTab({
 
       {sessions.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="tabular w-full text-sm">
             <thead className="bg-surface-2">
               <tr className="text-left border-b border-line">
                 <th className="px-4 py-3 text-ink cursor-pointer hover:text-white" onClick={() => onSort('date')}>
@@ -903,7 +903,7 @@ function SessionsTab({
                           ) : sessionLaps.length > 0 ? (
                             <div className="max-h-96 overflow-y-auto">
                               <h4 className="text-white font-semibold mb-2">Lap Details ({sessionLaps.length} laps)</h4>
-                              <table className="w-full text-xs">
+                              <table className="tabular w-full text-xs">
                                 <thead className="bg-surface-2 sticky top-0">
                                   <tr className="text-left">
                                     <th className="px-3 py-2 text-ink">Lap #</th>
@@ -1053,7 +1053,7 @@ function ConsistencyTab({
       <div className="bg-surface p-6">
         <h3 className="text-xl font-semibold text-white mb-4">Session Detail</h3>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="tabular w-full text-sm">
             <thead className="bg-surface-2">
               <tr className="text-left">
                 <th className="px-3 py-2 text-ink">Date</th>
@@ -1236,7 +1236,7 @@ function SprintFairnessPanel({ block, threshold }: { block: FairnessResponse['sp
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="tabular w-full text-sm">
               <thead className="bg-surface-2">
                 <tr className="text-left">
                   <th className="px-3 py-2 text-ink">Date</th>
@@ -1368,7 +1368,7 @@ function EnduranceFairnessPanel({ block, threshold }: { block: FairnessResponse[
 
       {block.sessions.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="tabular w-full text-sm">
             <thead className="bg-surface-2">
               <tr className="text-left">
                 <th className="px-3 py-2 text-ink">Date</th>

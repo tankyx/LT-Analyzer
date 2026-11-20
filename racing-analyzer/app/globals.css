@@ -74,9 +74,11 @@
 body {
   color: rgb(var(--c-ink));
   background: rgb(var(--c-canvas));
-  /* Race-control terminal: monospace is the default voice — timing data is
-     measurement, not prose. Condensed stays for section headers only. */
-  font-family: var(--font-mono), "SF Mono", "Menlo", "Consolas", monospace;
+  /* Three families, three jobs. Barlow (sans) for words: names, labels,
+     sentences. Barlow Condensed (`font-cond`) for signage: position numbers,
+     panel titles. JetBrains Mono (`font-mono` / `.tabular`) for measurements:
+     lap times, gaps, timers, kart numbers. */
+  font-family: var(--font-sans), "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -98,6 +100,12 @@ body {
   :focus-visible {
     outline: 2px solid rgb(var(--c-focus));
     outline-offset: 2px;
+  }
+
+  /* Numbers a user types are measurements too. */
+  input[type='number'] {
+    font-family: var(--font-mono), "SF Mono", "Menlo", "Consolas", monospace;
+    font-variant-numeric: tabular-nums;
   }
 }
 
@@ -127,8 +135,10 @@ body {
   animation: live-blink-hard 1.4s steps(2, start) infinite;
 }
 
-/* Timing figures: fixed-width digits so a table doesn't jitter on refresh. */
+/* Timing figures: mono with fixed-width digits, so a table doesn't jitter on
+   refresh and a figure reads as a measurement next to a Barlow label. */
 .tabular {
+  font-family: var(--font-mono), "SF Mono", "Menlo", "Consolas", monospace;
   font-variant-numeric: tabular-nums;
 }
 

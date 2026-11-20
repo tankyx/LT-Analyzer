@@ -1170,7 +1170,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       <div className="mb-6">
         <div className="flex items-baseline justify-between mb-2">
           <h3 className="font-cond font-bold text-lg tracking-wide">Schedule</h3>
-          <span className="text-xs text-muted">{stintAssignments.length} stints · {formatTime(currentSpan)}</span>
+          <span className="text-xs text-muted tabular">{stintAssignments.length} stints · {formatTime(currentSpan)}</span>
         </div>
         <div ref={timelineRef} className="flex items-stretch h-16 w-full overflow-hidden border border-line bg-canvas">
           {stintAssignments.map((a, i) => (
@@ -1418,13 +1418,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           <span className="font-semibold">{Math.max(0, config.numStints - 1)}</span> pit stops
         </span>
         <span>
-          Driving <span className="font-semibold">{formatTime(drivingTime(config))}</span>
+          Driving <span className="font-semibold tabular">{formatTime(drivingTime(config))}</span>
           {' · '}
-          in pits <span className="font-semibold">{formatTime(config.pitDuration * Math.max(0, config.numStints - 1))}</span>
+          in pits <span className="font-semibold tabular">{formatTime(config.pitDuration * Math.max(0, config.numStints - 1))}</span>
         </span>
         <span className={scheduleFits ? '' : 'text-accent'}>
-          Planned <span className="font-semibold">{formatTime(currentSpan)}</span> of{' '}
-          <span className="font-semibold">{formatTime(config.totalRaceTime)}</span>
+          Planned <span className="font-semibold tabular">{formatTime(currentSpan)}</span> of{' '}
+          <span className="font-semibold tabular">{formatTime(config.totalRaceTime)}</span>
           {!scheduleFits && (
             <span className="ml-1">
               ({currentSpan > config.totalRaceTime ? 'over' : 'short'} by {formatTime(Math.abs(currentSpan - config.totalRaceTime))})

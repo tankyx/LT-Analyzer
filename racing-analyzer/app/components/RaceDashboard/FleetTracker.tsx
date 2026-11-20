@@ -68,7 +68,7 @@ const CardBody: React.FC<{ kart: FleetKartState; isDarkMode: boolean }> = ({ kar
       <div className="flex items-center justify-between">
         <span className="font-bold">{kart.label}</span>
         {kart.classification !== 'insufficient' && kart.pace_delta_vs_fleet != null ? (
-          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${paceChipClass(kart.classification, isDarkMode)}`}
+          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold tabular ${paceChipClass(kart.classification, isDarkMode)}`}
             data-testid="pace-chip">{fmtDelta(kart.pace_delta_vs_fleet)}</span>
         ) : (
           <span className={`px-2 py-0.5 rounded-full text-xs ${paceChipClass('insufficient', isDarkMode)}`}>low data</span>
