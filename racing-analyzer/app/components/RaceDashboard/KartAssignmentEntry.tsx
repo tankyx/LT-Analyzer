@@ -137,7 +137,7 @@ const KartAssignmentEntry: React.FC<KartAssignmentEntryProps> = ({
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="flex-1 min-h-[48px] rounded-none font-semibold text-white bg-info hover:bg-info disabled:opacity-50"
+            className="flex-1 min-h-[48px] rounded-none font-semibold text-on-signal bg-info hover:bg-info disabled:opacity-50"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>

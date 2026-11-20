@@ -1002,8 +1002,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     !renameValue.trim()
                       ? 'bg-line cursor-not-allowed text-ink'
                       : isDarkMode
-                      ? 'bg-live hover:bg-live text-white'
-                      : 'bg-live hover:bg-live text-white'
+                      ? 'bg-live hover:bg-live text-on-signal'
+                      : 'bg-live hover:bg-live text-on-signal'
                   }`}
                 >
                   Save name
@@ -1034,7 +1034,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 <button
                   onClick={() => (showSavePresetDialog ? closeSaveDialog() : setShowSavePresetDialog(true))}
                   className={`px-4 py-2 rounded-none ${
-                    'bg-info hover:bg-info text-white'
+                    'bg-info hover:bg-info text-on-signal'
                   }`}
                 >
                   Save as new
@@ -1044,7 +1044,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                   <button
                     onClick={handleDeletePreset}
                     className={`px-4 py-2 rounded-none ${
-                      'bg-alarm hover:bg-alarm text-white'
+                      'bg-alarm hover:bg-alarm text-on-signal'
                     }`}
                   >
                     Delete
@@ -1109,8 +1109,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     !newPresetName.trim()
                       ? 'bg-line cursor-not-allowed text-ink'
                       : isDarkMode
-                      ? 'bg-live hover:bg-live text-white'
-                      : 'bg-live hover:bg-live text-white'
+                      ? 'bg-live hover:bg-live text-on-signal'
+                      : 'bg-live hover:bg-live text-on-signal'
                   }`}
                 >
                   Save

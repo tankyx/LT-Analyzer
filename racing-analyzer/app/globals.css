@@ -21,6 +21,9 @@
   --c-live: 20 128 71;
   --c-alarm: 198 55 50;
   --c-info: 36 100 196;
+  /* Text on a solid live/alarm/info fill. Flips with the theme because the
+     fills lighten in dark, where literal white drops below 3:1. */
+  --c-on-signal: 255 255 255;
   --c-class1: 36 100 196;
   --c-class2: 112 49 213;
 
@@ -43,6 +46,7 @@
   --c-live: 52 211 153;
   --c-alarm: 245 108 96;
   --c-info: 96 172 255;
+  --c-on-signal: 10 13 19;
   --c-class1: 96 172 255;
   --c-class2: 151 96 245;
 

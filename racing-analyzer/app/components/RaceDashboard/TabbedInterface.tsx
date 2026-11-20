@@ -152,7 +152,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
                   onClick={() => handleTabChange(tab.id)}
                   className={`relative flex flex-col items-center justify-center gap-1 min-w-[72px] px-3 py-2 rounded-none border text-xs font-semibold transition-all ${
                     active
-                      ? 'bg-accent text-accent-ink border-accent shadow-[0_0_18px_-2px_rgb(var(--c-accent)/0.9)]'
+                      ? 'bg-accent-hi text-accent-ink border-accent-hi shadow-[0_0_18px_-2px_rgb(var(--c-accent)/0.9)]'
                       : 'bg-surface text-muted border-line hover:text-ink hover:bg-surface-2 hover:border-muted'
                   }`}
                 >
@@ -186,7 +186,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
                 onClick={() => handleTabChange(tab.id)}
                 aria-current={active ? 'page' : undefined}
                 title={tab.hint}
-                className={`relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 text-[11px] font-semibold ${
+                className={`relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 font-sans text-[11px] font-semibold ${
                   active ? 'text-accent' : 'text-muted'
                 }`}
               >
@@ -194,7 +194,8 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
                   <span className="absolute top-0 inset-x-0 h-[3px] bg-accent shadow-[0_0_10px_rgb(var(--c-accent)/0.9)]" aria-hidden />
                 )}
                 {tab.icon}
-                <span className="truncate max-w-full px-1">{tab.label}</span>
+                {/* Below 360px six labels cannot fit: go icon-only, keep the name for screen readers. */}
+                <span className="truncate max-w-full px-1 max-[359px]:sr-only">{tab.label}</span>
                 {tab.count !== undefined && tab.count > 0 && (
                   <span className="absolute top-1.5 right-[calc(50%-22px)] font-mono tabular text-[10px] leading-none px-1 py-0.5 rounded-none bg-line text-muted">
                     {tab.count}

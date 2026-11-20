@@ -112,4 +112,43 @@ describe('MyTeamStrip', () => {
     expect(onSelect).toHaveBeenCalledWith('21');
     expect(screen.queryByLabelText('Choose your team')).toBeNull();
   });
+
+  // Layout regression: with a paired board the stats used to share one
+  // non-wrapping row with the actions, pushing the pit-alert button outside
+  // the card at <=1440px and squeezing the team name to zero width. jsdom has
+  // no layout engine, so this pins the structure that prevents it.
+  test('stats sit in their own wrapping row, apart from the identity and pit-alert row', () => {
+    render(
+      <MyTeamStrip
+        teams={field}
+        myTeam="14"
+        onSelectMyTeam={() => {}}
+        isQualificationMode={false}
+        requiredPitStops={5}
+        onPitAlert={jest.fn()}
+        pitAlertTargetSlot={<select aria-label="Pit alert target"><option>All boards</option></select>}
+      />,
+    );
+    const stats = screen.getByTestId('my-team-stats');
+    const alertBtn = screen.getByTitle('Send PIT NOW alert to the driver overlay');
+    const name = screen.getByLabelText('Change my team');
+    const topRow = name.closest('.flex-wrap');
+
+    expect(topRow).not.toBeNull();
+    expect(topRow).toContainElement(alertBtn);
+    expect(topRow).toContainElement(screen.getByLabelText('Pit alert target'));
+    expect(topRow).not.toContainElement(stats);
+    expect(stats.className).toContain('auto-fit');
+    // no stat may refuse to shrink any more
+    expect(stats.querySelector('.shrink-0')).toBeNull();
+  });
+
+  test('pit alert text uses the on-signal token, not literal white', () => {
+    render(
+      <MyTeamStrip teams={field} myTeam="14" onSelectMyTeam={() => {}} isQualificationMode={false} requiredPitStops={5} onPitAlert={jest.fn()} />,
+    );
+    const alertBtn = screen.getByTitle('Send PIT NOW alert to the driver overlay');
+    expect(alertBtn.className).toContain('text-on-signal');
+    expect(alertBtn.className).not.toContain('text-white');
+  });
 });

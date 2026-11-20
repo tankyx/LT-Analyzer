@@ -150,7 +150,7 @@ export default function LayoutsModal(
             </label>
           </div>
           <div className="flex gap-2 mt-2">
-            <button onClick={submit} className="px-3 py-1 bg-info rounded-none hover:bg-info text-sm">
+            <button onClick={submit} className="px-3 py-1 bg-info text-on-signal rounded-none hover:bg-info text-sm">
               {editingId === null ? 'Add' : 'Save'}
             </button>
             {editingId !== null && (

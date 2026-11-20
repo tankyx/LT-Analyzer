@@ -207,7 +207,7 @@ const AppBar: React.FC<AppBarProps> = ({
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               aria-label="Account menu"
-              className="w-10 h-10 md:w-auto md:h-9 md:px-2 rounded-full bg-info text-white font-bold text-[13px] flex items-center justify-center gap-1"
+              className="w-10 h-10 md:w-auto md:h-9 md:px-2 rounded-full bg-info text-on-signal font-bold text-[13px] flex items-center justify-center gap-1"
             >
               {initials}
               <ChevronDown size={14} className="hidden md:inline" />

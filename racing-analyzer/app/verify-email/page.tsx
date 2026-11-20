@@ -46,7 +46,7 @@ function VerifyEmailInner() {
           <>
             <h2 className="text-2xl font-bold">Email verified ✓</h2>
             <p className="text-sm text-ink">You can now sign in.</p>
-            <Link href="/login" className="inline-block px-4 py-2 bg-info rounded-none">Sign in</Link>
+            <Link href="/login" className="inline-block px-4 py-2 bg-info text-on-signal rounded-none">Sign in</Link>
           </>
         )}
         {status === 'expired' && <ResendForm reason="expired" />}
@@ -106,7 +106,7 @@ function ResendForm({ reason }: { reason: 'expired' | 'invalid' }) {
         className="block w-full px-3 py-2 bg-surface border border-line rounded-none text-ink placeholder:text-muted"
       />
       <TurnstileWidget onVerify={setTurnstileToken} onExpire={() => setTurnstileToken(null)} />
-      <button type="submit" className="w-full py-2 px-4 bg-info hover:bg-info rounded-none">
+      <button type="submit" className="w-full py-2 px-4 bg-info text-on-signal hover:bg-info rounded-none">
         Resend verification
       </button>
     </form>

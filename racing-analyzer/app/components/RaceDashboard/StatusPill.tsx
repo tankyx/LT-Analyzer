@@ -57,7 +57,7 @@ const StatusPill: React.FC<StatusPillProps> = ({ status, variant = 'pill', class
   }
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide ${c.pill} ${className}`}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap ${c.pill} ${className}`}
       data-tone={tone}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />

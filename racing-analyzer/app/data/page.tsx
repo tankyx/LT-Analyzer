@@ -930,7 +930,7 @@ export default function DataPage() {
                 <button
                   onClick={handleMassDelete}
                   disabled={!massDeleteThreshold || massDeleteThreshold <= 0 || massDeleting}
-                  className="w-full px-4 py-2 bg-alarm text-white rounded-none hover:bg-alarm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full px-4 py-2 bg-alarm text-on-signal rounded-none hover:bg-alarm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {massDeleting ? 'Deleting...' : 'Delete Laps'}
                 </button>
@@ -966,7 +966,7 @@ export default function DataPage() {
               {selectedTeams.map((team) => (
                 <div
                   key={team}
-                  className="bg-info text-white px-4 py-2 rounded-none flex items-center gap-2"
+                  className="bg-info text-on-signal px-4 py-2 rounded-none flex items-center gap-2"
                 >
                   <span>{team}</span>
                   <button
@@ -1073,7 +1073,7 @@ export default function DataPage() {
               </h2>
               <button
                 onClick={() => router.push(`/team/${encodeURIComponent(selectedTeams[0])}`)}
-                className="px-4 py-2 bg-info text-white rounded-none hover:bg-info transition-colors flex items-center gap-2"
+                className="px-4 py-2 bg-info text-on-signal rounded-none hover:bg-info transition-colors flex items-center gap-2"
               >
                 📊 View Full Profile
               </button>
@@ -1479,7 +1479,7 @@ export default function DataPage() {
                 <button
                   onClick={confirmDeleteBestLap}
                   disabled={deletingLap}
-                  className="px-4 py-2 bg-alarm text-white rounded-none hover:bg-alarm transition-colors disabled:opacity-50"
+                  className="px-4 py-2 bg-alarm text-on-signal rounded-none hover:bg-alarm transition-colors disabled:opacity-50"
                 >
                   {deletingLap ? 'Deleting...' : 'Delete'}
                 </button>

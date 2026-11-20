@@ -79,7 +79,7 @@ const Stat: React.FC<{ label: string; value: React.ReactNode; sub?: React.ReactN
 }) => (
   <div className="flex flex-col gap-1 min-w-0">
     <span className="text-[10px] md:text-[11px] font-bold tracking-[.08em] uppercase text-muted truncate">{label}</span>
-    <span className={`font-mono tabular text-[22px] md:text-[30px] font-bold leading-none tracking-tight ${tone}`}>{value}</span>
+    <span className={`font-mono tabular text-[20px] md:text-[30px] font-bold leading-none tracking-tight ${tone}`}>{value}</span>
     {sub !== undefined && <span className="text-xs text-muted truncate">{sub}</span>}
   </div>
 );
@@ -190,11 +190,14 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
       className={`rounded-none border bg-surface p-3.5 md:p-4 flex flex-col gap-3 ${inPit ? 'border-alarm/60 pit-alert' : 'border-line'}`}
       aria-label="My team"
     >
-      <div className="flex items-center gap-3 md:gap-5">
+      {/* Identity + actions. The row wraps: the identity column keeps a 10rem
+          floor, so when the actions don't fit beside it they drop to their own
+          line instead of squeezing the team name to nothing. */}
+      <div className="flex flex-wrap items-center gap-3 md:gap-5">
         <div className="w-10 h-10 md:w-[52px] md:h-[52px] rounded-none md:rounded-none accent-gradient text-accent-ink font-cond font-bold text-[22px] md:text-[28px] flex items-center justify-center shrink-0">
           {position}
         </div>
-        <div className="flex flex-col gap-1 min-w-0 flex-1">
+        <div className="flex flex-col gap-1 min-w-0 flex-1 basis-40">
           {picking ? (
             <div className="flex items-center gap-2 min-w-0">
               {picker}
@@ -227,74 +230,78 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
           </div>
         </div>
 
-        {/* Desktop stats inline */}
-        <div className="hidden md:flex items-center gap-5 lg:gap-6 shrink-0">
-          <div className="w-px h-11 bg-line" />
-          <Stat label="Last lap" value={me['Last Lap'] || '—'} tone={lastTone} sub={ctx.isPersonalBest ? 'personal best' : undefined} />
-          <Stat label="Best lap" value={me['Best Lap'] || '—'} />
-          <div className="w-px h-11 bg-line" />
-          <Stat
-            label={ahead ? `Ahead · P${ahead.team.Position}` : 'Ahead'}
-            value={
-              ahead ? (
-                <span className="inline-flex items-center gap-1.5">
-                  {formatGap(ahead.gap)}
-                  {trend.ahead < 0 ? <ArrowDown size={16} /> : trend.ahead > 0 ? <ArrowUp size={16} /> : null}
-                </span>
-              ) : (
-                'Leader'
-              )
-            }
-            tone={ahead ? aheadTone : 'text-accent'}
-            sub={ahead ? (ahead.gap === null ? 'lapped' : trendWord(trend.ahead, true)) : undefined}
-          />
-          <Stat
-            label={behind ? `Behind · P${behind.team.Position}` : 'Behind'}
-            value={
-              behind ? (
-                <span className="inline-flex items-center gap-1.5">
-                  {formatGap(behind.gap)}
-                  {trend.behind > 0 ? <ArrowUp size={16} /> : trend.behind < 0 ? <ArrowDown size={16} /> : null}
-                </span>
-              ) : (
-                'Last'
-              )
-            }
-            tone={behind ? behindTone : 'text-muted'}
-            sub={behind ? (behind.gap === null ? 'lapped' : trendWord(trend.behind, false)) : undefined}
-          />
-          <div className="w-px h-11 bg-line" />
-          {isQualificationMode ? (
-            <Stat label="Laps" value={me['Pit Stops'] || '0'} />
-          ) : (
-            <Stat label="Stops" value={`${stops} / ${requiredPitStops}`} sub={`${Math.max(0, requiredPitStops - stops)} to go`} />
-          )}
-        </div>
-
-        {canAlert && pitAlertTargetSlot}
         {canAlert && (
-          <button
-            type="button"
-            disabled={sending}
-            onClick={async () => {
-              setSending(true);
-              try {
-                await onPitAlert?.(me.Kart, me.Team);
-              } finally {
-                setSending(false);
-              }
-            }}
-            title="Send PIT NOW alert to the driver overlay"
-            className="shrink-0 h-11 w-11 md:w-auto md:h-10 md:px-4 rounded-none md:rounded-none bg-alarm text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            <Bell size={18} />
-            <span className="hidden md:inline">{sending ? 'Sending…' : 'Pit alert'}</span>
-          </button>
+          <div className="ml-auto shrink-0 flex items-center gap-2 md:gap-3">
+            {pitAlertTargetSlot}
+            <button
+              type="button"
+              disabled={sending}
+              onClick={async () => {
+                setSending(true);
+                try {
+                  await onPitAlert?.(me.Kart, me.Team);
+                } finally {
+                  setSending(false);
+                }
+              }}
+              title="Send PIT NOW alert to the driver overlay"
+              className="h-11 w-11 md:w-auto md:h-10 md:px-4 rounded-none md:rounded-none bg-alarm text-on-signal font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Bell size={18} />
+              <span className="hidden md:inline">{sending ? 'Sending…' : 'Pit alert'}</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Desktop stats: their own row. An auto-fit grid, so five figures sit on
+          one line when the workbench is wide and wrap when it is not — they
+          are never clipped and never push the pit-alert button off the card. */}
+      <div
+        className="hidden md:grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-6 gap-y-3 pt-3 border-t border-line"
+        data-testid="my-team-stats"
+      >
+        <Stat label="Last lap" value={me['Last Lap'] || '—'} tone={lastTone} sub={ctx.isPersonalBest ? 'personal best' : undefined} />
+        <Stat label="Best lap" value={me['Best Lap'] || '—'} />
+        <Stat
+          label={ahead ? `Ahead · P${ahead.team.Position}` : 'Ahead'}
+          value={
+            ahead ? (
+              <span className="inline-flex items-center gap-1.5">
+                {formatGap(ahead.gap)}
+                {trend.ahead < 0 ? <ArrowDown size={16} /> : trend.ahead > 0 ? <ArrowUp size={16} /> : null}
+              </span>
+            ) : (
+              'Leader'
+            )
+          }
+          tone={ahead ? aheadTone : 'text-accent'}
+          sub={ahead ? (ahead.gap === null ? 'lapped' : trendWord(trend.ahead, true)) : undefined}
+        />
+        <Stat
+          label={behind ? `Behind · P${behind.team.Position}` : 'Behind'}
+          value={
+            behind ? (
+              <span className="inline-flex items-center gap-1.5">
+                {formatGap(behind.gap)}
+                {trend.behind > 0 ? <ArrowUp size={16} /> : trend.behind < 0 ? <ArrowDown size={16} /> : null}
+              </span>
+            ) : (
+              'Last'
+            )
+          }
+          tone={behind ? behindTone : 'text-muted'}
+          sub={behind ? (behind.gap === null ? 'lapped' : trendWord(trend.behind, false)) : undefined}
+        />
+        {isQualificationMode ? (
+          <Stat label="Laps" value={me['Pit Stops'] || '0'} />
+        ) : (
+          <Stat label="Stops" value={`${stops} / ${requiredPitStops}`} sub={`${Math.max(0, requiredPitStops - stops)} to go`} />
         )}
       </div>
 
       {/* Phone stats grid */}
-      <div className="grid grid-cols-3 gap-2 md:hidden">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-x-2 gap-y-3 md:hidden">
         <Stat label="Last" value={me['Last Lap'] || '—'} tone={lastTone} />
         <Stat
           label={ahead ? `Ahead P${ahead.team.Position}` : 'Ahead'}

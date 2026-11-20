@@ -143,7 +143,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   className={`flex-1 px-3 py-2 rounded-none text-sm font-medium transition-all border
                     ${!showUrlInput
                       ? (isDarkMode 
-                          ? 'bg-info text-white border-info' 
+                          ? 'bg-info text-on-signal border-info' 
                           : 'bg-info/15 text-info border-info')
                       : (isDarkMode 
                           ? 'bg-surface text-ink border-line hover:bg-surface-2' 
@@ -158,7 +158,7 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   className={`flex-1 px-3 py-2 rounded-none text-sm font-medium transition-all border
                     ${showUrlInput
                       ? (isDarkMode 
-                          ? 'bg-info text-white border-info' 
+                          ? 'bg-info text-on-signal border-info' 
                           : 'bg-info/15 text-info border-info')
                       : (isDarkMode 
                           ? 'bg-surface text-ink border-line hover:bg-surface-2' 
@@ -273,8 +273,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                     disabled={isStarting}
                     className={`flex-1 px-3 py-2 rounded-none text-sm font-medium transition-all
                       ${isDarkMode 
-                        ? 'bg-info hover:bg-info text-white' 
-                        : 'bg-info hover:bg-info text-white'
+                        ? 'bg-info hover:bg-info text-on-signal' 
+                        : 'bg-info hover:bg-info text-on-signal'
                       }
                     `}
                   >
@@ -308,8 +308,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                   ${isStarting ? 'opacity-70 cursor-wait' : ''}
                   ${isSimulating ? 'opacity-50 cursor-not-allowed' : ''}
                   ${isDarkMode 
-                    ? 'bg-live hover:bg-live text-white disabled:bg-surface-2 disabled:text-muted' 
-                    : 'bg-live hover:bg-live text-white disabled:bg-surface-2 disabled:text-muted'
+                    ? 'bg-live hover:bg-live text-on-signal disabled:bg-surface-2 disabled:text-muted' 
+                    : 'bg-live hover:bg-live text-on-signal disabled:bg-surface-2 disabled:text-muted'
                   }
                 `}
               >
@@ -338,8 +338,8 @@ const SimulationControls: React.FC<SimulationControlsProps> = ({
                 ${isStopping ? 'opacity-70 cursor-wait' : ''}
                 ${!isSimulating ? 'opacity-50 cursor-not-allowed' : ''}
                 ${isDarkMode 
-                  ? 'bg-alarm hover:bg-alarm text-white disabled:bg-surface-2 disabled:text-muted' 
-                  : 'bg-alarm hover:bg-alarm text-white disabled:bg-surface-2 disabled:text-muted'
+                  ? 'bg-alarm hover:bg-alarm text-on-signal disabled:bg-surface-2 disabled:text-muted' 
+                  : 'bg-alarm hover:bg-alarm text-on-signal disabled:bg-surface-2 disabled:text-muted'
                 }
               `}
             >

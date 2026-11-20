@@ -455,7 +455,7 @@ export default function TeamProfilePage() {
           <p>{error}</p>
           <button
             onClick={() => router.push('/data')}
-            className="mt-4 px-4 py-2 bg-alarm hover:bg-alarm rounded-none transition-colors"
+            className="mt-4 px-4 py-2 bg-alarm text-on-signal hover:bg-alarm rounded-none transition-colors"
           >
             Back to Data Page
           </button>
@@ -745,7 +745,7 @@ function AliasPanel({
             <button
               onClick={onAdd}
               disabled={busy || !newAlias.trim()}
-              className="px-3 py-1.5 bg-info hover:bg-info disabled:opacity-50 text-white text-sm rounded-none"
+              className="px-3 py-1.5 bg-info hover:bg-info disabled:opacity-50 text-on-signal text-sm rounded-none"
             >
               {busy ? '...' : 'Add'}
             </button>

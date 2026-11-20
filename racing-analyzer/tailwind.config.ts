@@ -31,6 +31,7 @@ export default {
         live: token("c-live"),
         alarm: token("c-alarm"),
         info: token("c-info"),
+        "on-signal": token("c-on-signal"),
         class1: token("c-class1"),
         class2: token("c-class2"),
       },

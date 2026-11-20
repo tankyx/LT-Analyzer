@@ -244,7 +244,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                 setUserForm({ username: '', password: '', email: '', role: 'user' });
                 setShowUserModal(true);
               }}
-              className="px-4 py-2 bg-info text-white rounded-none hover:bg-info"
+              className="px-4 py-2 bg-info text-on-signal rounded-none hover:bg-info"
             >
               Add User
             </button>
@@ -312,7 +312,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                 setTrackForm({ name: '', location: '', length_meters: '', description: '', timing_url: '', websocket_url: '', is_active: true });
                 setShowTrackModal(true);
               }}
-              className="px-4 py-2 bg-info text-white rounded-none hover:bg-info"
+              className="px-4 py-2 bg-info text-on-signal rounded-none hover:bg-info"
             >
               Add Track
             </button>
@@ -412,7 +412,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                 Cancel
               </button>
               <button onClick={editingUser ? handleUpdateUser : handleCreateUser}
-                className="px-4 py-2 bg-info text-white rounded-none hover:bg-info">
+                className="px-4 py-2 bg-info text-on-signal rounded-none hover:bg-info">
                 {editingUser ? 'Update' : 'Create'}
               </button>
             </div>
@@ -470,7 +470,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
                 Cancel
               </button>
               <button onClick={editingTrack ? handleUpdateTrack : handleCreateTrack}
-                className="px-4 py-2 bg-info text-white rounded-none hover:bg-info">
+                className="px-4 py-2 bg-info text-on-signal rounded-none hover:bg-info">
                 {editingTrack ? 'Update' : 'Create'}
               </button>
             </div>

@@ -256,7 +256,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
       {/* Quick actions */}
       <div className="flex flex-wrap gap-2 mb-3">
         <button onClick={onAddAssignment}
-          className="flex-1 min-h-[44px] px-4 rounded-none font-semibold text-white bg-info hover:bg-info">
+          className="flex-1 min-h-[44px] px-4 rounded-none font-semibold text-on-signal bg-info hover:bg-info">
           + Record kart assignment
         </button>
         {canEditRegistry && (
@@ -271,7 +271,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
       {canEditRegistry && showRegistry && (
         <div className={`mb-4 p-3 rounded-none border ${cardBase}`}>
           <button onClick={handleAutoPopulate} disabled={busy}
-            className="w-full min-h-[44px] mb-2 px-4 rounded-none font-semibold text-white bg-info hover:bg-info disabled:opacity-50">
+            className="w-full min-h-[44px] mb-2 px-4 rounded-none font-semibold text-on-signal bg-info hover:bg-info disabled:opacity-50">
             Auto-add karts from session
           </button>
           {autoMsg && <p className={`text-xs mb-3 ${subtle}`}>{autoMsg}</p>}
@@ -312,7 +312,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
               placeholder="Add a kart (e.g. K-12)"
               className={`flex-1 min-h-[44px] px-3 rounded-none border ${isDarkMode ? 'bg-canvas border-line text-white' : 'bg-surface border-line'}`} />
             <button onClick={handleAddKart} disabled={busy || !newLabel.trim()}
-              className="min-h-[44px] px-4 rounded-none font-semibold text-white bg-live hover:bg-live disabled:opacity-50">Add</button>
+              className="min-h-[44px] px-4 rounded-none font-semibold text-on-signal bg-live hover:bg-live disabled:opacity-50">Add</button>
           </div>
           {registry.length > 0 && (
             <ul className="space-y-1 max-h-32 overflow-y-auto">
@@ -335,7 +335,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
             <>
               <p className="text-sm mt-1 mb-4">One tap creates a kart for every team in the session.</p>
               <button onClick={handleAutoPopulate} disabled={busy}
-                className="min-h-[44px] px-5 rounded-none font-semibold text-white bg-info hover:bg-info disabled:opacity-50">
+                className="min-h-[44px] px-5 rounded-none font-semibold text-on-signal bg-info hover:bg-info disabled:opacity-50">
                 Auto-add karts from session
               </button>
               {autoMsg && <p className="text-xs mt-3">{autoMsg}</p>}
@@ -425,7 +425,7 @@ const FleetTracker: React.FC<FleetTrackerProps> = ({
             {selected.column === 'available' ? (
               <>
                 <button onClick={() => doAssign(selected)}
-                  className="w-full min-h-[48px] mb-3 rounded-none font-semibold text-white bg-info hover:bg-info">
+                  className="w-full min-h-[48px] mb-3 rounded-none font-semibold text-on-signal bg-info hover:bg-info">
                   Assign to a team…
                 </button>
                 <p className={`text-sm mb-2 ${subtle}`}>Move to lane</p>
