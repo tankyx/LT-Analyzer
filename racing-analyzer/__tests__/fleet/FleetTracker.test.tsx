@@ -38,7 +38,6 @@ const kart = (over: Partial<FleetKartState>): FleetKartState => ({
 });
 
 const baseProps = {
-  isDarkMode: false,
   registry: [{ id: 1, label: 'K1', is_active: true }] as FleetKart[],
   trackId: 1,
   canEditRegistry: false,
@@ -116,10 +115,10 @@ describe('FleetTracker kanban', () => {
     render(<FleetTracker {...baseProps} fleetBoard={[]} canEditRegistry />);
     fireEvent.click(screen.getByText(/Manage fleet/i));
     const editor = screen.getByTestId('lane-color-editor');
-    // Recolor lane 1 to rose; the chosen swatch gets the selected ring.
-    const rose = within(editor).getByLabelText('Lane 1 rose');
-    fireEvent.click(rose);
-    expect(rose.className).toMatch(/ring-2/);
+    // Recolor lane 1 to red; the chosen swatch gets the selected ring.
+    const red = within(editor).getByLabelText('Lane 1 red');
+    fireEvent.click(red);
+    expect(red.className).toMatch(/ring-2/);
     expect(within(editor).getByLabelText('Lane 1 blue').className).not.toMatch(/ring-2/);
   });
 
@@ -147,5 +146,17 @@ describe('FleetTracker kanban', () => {
     rerender(<FleetTracker {...baseProps} fleetBoard={[]} registry={[]} canEditRegistry isActive sessionId={null} />);
     rerender(<FleetTracker {...baseProps} fleetBoard={[]} registry={[]} canEditRegistry={false} isActive sessionId={42} />);
     expect(ApiService.autoPopulateFleet).not.toHaveBeenCalled();
+  });
+
+  test('a lane colour saved under an old name still resolves, from the token palette', () => {
+    window.localStorage.setItem('fleet_lane_colors_1', JSON.stringify({ 1: 'emerald', 2: 'not-a-colour' }));
+    render(<FleetTracker {...baseProps} trackId={1} fleetBoard={[]} canEditRegistry />);
+    fireEvent.click(screen.getByText(/Manage fleet/i));
+    const editor = screen.getByTestId('lane-color-editor');
+    // 'emerald' was renamed 'green'; an unknown key falls back to the lane default.
+    expect(within(editor).getByLabelText('Lane 1 green').className).toMatch(/ring-2/);
+    expect(within(editor).getByLabelText('Lane 1 green').className).toContain('bg-series-4');
+    expect(within(editor).getByLabelText('Lane 2 green').className).toMatch(/ring-2/);
+    window.localStorage.removeItem('fleet_lane_colors_1');
   });
 });

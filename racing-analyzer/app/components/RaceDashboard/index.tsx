@@ -26,7 +26,6 @@ import PitAlertTarget, {
 import AlertStack from './AlertStack';
 import StandingsRow, { PitAlertButton } from './StandingsRow';
 import { getTeamClass, displayTeamName } from './lib/teamName';
-import { useTheme } from '../../contexts/ThemeContext';
 import { AlertTriangle, Car, Clock, Eye, Gauge, Info, LineChart, List, Settings, Star, X } from 'lucide-react';
 import FleetTracker, { FleetKart } from './FleetTracker';
 import PaceMonitor from './PaceMonitor';
@@ -481,7 +480,6 @@ const RaceDashboard = () => {
   const [error, setError] = useState<string | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
   // Non-blocking notice for background data loads that failed (fleet, prefs).
   const [dataWarning, setDataWarning] = useState<string | null>(null);
-  const { isDark: isDarkMode } = useTheme();
   const [trackSheetOpen, setTrackSheetOpen] = useState(false);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
@@ -1350,7 +1348,6 @@ const RaceDashboard = () => {
             setDefaultLapTime(newTime);
             updatePitStopConfig(pitStopTime, requiredPitStops, newTime);
           }}
-          isDarkMode={isDarkMode}
         />
       )}
 
@@ -1480,7 +1477,6 @@ const RaceDashboard = () => {
           gapHistory={gapHistory}
           teams={teams}
           monitoredTeams={monitoredTeams}
-          isDarkMode={isDarkMode}
           onColorAssignment={handleColorAssignment}
           onTeamHover={handleTeamHover}
           pitStopTime={pitStopTime}
@@ -1534,7 +1530,6 @@ const RaceDashboard = () => {
       <TabbedInterface
         tabs={tabs}
         defaultTab="standings"
-        isDarkMode={isDarkMode}
         onTabChange={setActiveTab}
         pinnedId="standings"
         top={
@@ -1609,7 +1604,6 @@ const RaceDashboard = () => {
         {ChartTab}
         <div className="border border-line bg-surface overflow-hidden">
           <StintPlanner
-            isDarkMode={isDarkMode}
             myTeam={myTeam}
             teams={teams}
             isSimulating={true}
@@ -1620,7 +1614,6 @@ const RaceDashboard = () => {
         </div>
         <div className="border border-line bg-surface overflow-hidden">
           <FleetTracker
-            isDarkMode={isDarkMode}
             fleetBoard={fleetBoard}
             registry={fleetRegistry}
             trackId={selectedTrackId}
@@ -1634,7 +1627,7 @@ const RaceDashboard = () => {
         </div>
         {user?.role === 'admin' && (
           <div className="border border-line bg-surface overflow-hidden">
-            <AdminPanel isDarkMode={isDarkMode} />
+            <AdminPanel />
           </div>
         )}
       </TabbedInterface>

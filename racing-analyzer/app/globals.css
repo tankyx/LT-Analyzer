@@ -47,6 +47,9 @@
   --c-series-9: 18 165 148;
   --c-series-10: 99 102 241;
 
+  /* Lightness of the per-kart livery colour (hue comes from the kart number). */
+  --livery-l: 36%;
+
   color-scheme: light;
 }
 
@@ -67,6 +70,8 @@
   --c-on-signal: 10 13 19;
   --c-class1: 96 172 255;
   --c-class2: 151 96 245;
+
+  --livery-l: 60%;
 
   color-scheme: dark;
 }

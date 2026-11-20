@@ -14,7 +14,6 @@ interface TabbedInterfaceProps {
   defaultTab?: string;
   children: React.ReactNode[];
   /** Kept for call-site compatibility; theming now comes from CSS tokens. */
-  isDarkMode?: boolean;
   onTabChange?: (tabId: string) => void;
   /**
    * id of a tab whose panel is pinned as a persistent left column on desktop

@@ -8,7 +8,6 @@ interface PitStopConfigProps {
   defaultLapTime: number;
   setDefaultLapTime: (time: number) => void;
   /** Kept for call-site compatibility; theming now comes from CSS tokens. */
-  isDarkMode?: boolean;
 }
 
 const PitStopConfig: React.FC<PitStopConfigProps> = ({

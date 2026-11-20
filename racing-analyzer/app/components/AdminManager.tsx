@@ -34,7 +34,7 @@ interface Track {
  * in the dashboard's Admin tab (dark) and the standalone /admin page. All
  * mutations go through AuthContext.apiFetch so the CSRF token is always sent.
  */
-export default function AdminManager({ isDarkMode = false }: { isDarkMode?: boolean }) {
+export default function AdminManager() {
   const { user, apiFetch } = useAuth();
   const [activeSubTab, setActiveSubTab] = useState<'users' | 'tracks'>('users');
   const [users, setUsers] = useState<User[]>([]);
@@ -209,7 +209,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
     );
   }
 
-  const th = `px-6 py-3 text-left text-xs font-medium ${isDarkMode ? 'text-ink' : 'text-muted'} uppercase tracking-wider`;
+  const th = `px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider`;
   const field = 'w-full px-3 py-2 border border-line bg-canvas text-ink';
 
   return (
@@ -408,7 +408,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
             </div>
             <div className="flex justify-end space-x-3 mt-6">
               <button onClick={() => setShowUserModal(false)}
-                className={`px-4 py-2 ${isDarkMode ? 'bg-surface-2 hover:bg-line' : 'bg-line hover:bg-line'}`}>
+                className={`px-4 py-2 bg-surface-2 hover:bg-line border border-line`}>
                 Cancel
               </button>
               <button onClick={editingUser ? handleUpdateUser : handleCreateUser}
@@ -466,7 +466,7 @@ export default function AdminManager({ isDarkMode = false }: { isDarkMode?: bool
             </div>
             <div className="flex justify-end space-x-3 mt-6">
               <button onClick={() => setShowTrackModal(false)}
-                className={`px-4 py-2 ${isDarkMode ? 'bg-surface-2 hover:bg-line' : 'bg-line hover:bg-line'}`}>
+                className={`px-4 py-2 bg-surface-2 hover:bg-line border border-line`}>
                 Cancel
               </button>
               <button onClick={editingTrack ? handleUpdateTrack : handleCreateTrack}

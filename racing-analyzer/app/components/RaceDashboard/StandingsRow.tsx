@@ -71,8 +71,6 @@ interface StandingsRowProps {
   selectedTrackId: number;
   onToggleMonitor: (kart: string) => void;
   onTriggerAlert?: (kartNum: string, teamName: string, trackId: number) => Promise<void>;
-  /** Kept for call-site compatibility; theming now comes from CSS tokens. */
-  isDarkMode?: boolean;
 }
 
 /** Returns the value from the previous render (undefined on first). */

@@ -3,12 +3,10 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../contexts/AuthContext';
-import { useTheme } from '../contexts/ThemeContext';
 import AdminManager from '../components/AdminManager';
 
 export default function AdminDashboard() {
   const { user, loading: authLoading } = useAuth();
-  const { isDark } = useTheme();
   const router = useRouter();
 
   useEffect(() => {
@@ -39,7 +37,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Shared admin UI (users + tracks + per-track layouts) */}
-        <AdminManager isDarkMode={isDark} />
+        <AdminManager />
       </div>
     </div>
   );

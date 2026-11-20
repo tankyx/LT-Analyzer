@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { liveryColor } from '../../ui/chartTheme';
 import {
   Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine, Label, Area, ComposedChart
@@ -21,7 +22,6 @@ interface TimeDeltaChartProps {
     'Pit Stops'?: string;
   }>;
   monitoredTeams: string[];
-  isDarkMode?: boolean;
   onColorAssignment?: (colors: Record<string, string>) => void;
   onTeamHover?: (teamId: string | null) => void;
   pitStopTime?: number;
@@ -31,7 +31,6 @@ interface TimeDeltaChartProps {
 interface ModeToggleProps {
   mode: 'regular' | 'adjusted';
   setMode: (mode: 'regular' | 'adjusted') => void;
-  isDarkMode: boolean;
 }
 
 // Type for chart data
@@ -73,7 +72,6 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   gapHistory, 
   teams, 
   monitoredTeams,
-  isDarkMode = false,
   onColorAssignment,
   onTeamHover,
   pitStopTime = 158,  // Default 2:38
@@ -85,27 +83,11 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
   const [chartKey, setChartKey] = useState<number>(0);
   const [gapMode, setGapMode] = useState<'regular' | 'adjusted'>('regular'); // 'regular' or 'adjusted'
   
-  // Force chart re-render when theme or mode changes
+  // Force chart re-render when the gap mode changes. (Theme changes need
+  // nothing: every colour is a CSS variable.)
   useEffect(() => {
     setChartKey(prev => prev + 1);
-  }, [isDarkMode, gapMode]);
-
-  // Generate team colors
-  const generateColor = useCallback((kartNumber: string): string => {
-    const kartId = parseInt(kartNumber);
-    
-    const goldenRatioConjugate = 0.618033988749895;
-    let hue = (kartId * goldenRatioConjugate) % 1;
-    hue = Math.round(hue * 360);
-    
-    // Vary saturation and lightness further based on kart number
-    const saturation = 70 + ((kartId % 3) * 10); // 70%, 80%, or 90%
-    const lightness = isDarkMode ? 
-      (50 + ((kartId % 5) * 5)) : // 50-70% for dark mode
-      (40 - ((kartId % 3) * 5));  // 30-40% for light mode
-    
-    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
-  }, [isDarkMode]);
+  }, [gapMode]);
 
   // Prepare data with sliding window of 15 laps
   useEffect(() => {
@@ -114,7 +96,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     // Set team colors
     const colors: Record<string, string> = {};
     monitoredTeams.forEach(kart => {
-      colors[kart] = generateColor(kart);
+      colors[kart] = liveryColor(kart);
     });
     setTeamColors(colors);
     
@@ -176,7 +158,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
     }
 
     setChartData(preparedData);
-  }, [gapHistory, teams, monitoredTeams, isDarkMode, generateColor, onColorAssignment]);
+  }, [gapHistory, teams, monitoredTeams, onColorAssignment]);
 
   // Custom tooltip component
   const CustomTooltip = ({ active, payload, label }: {
@@ -228,7 +210,7 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                   </div>
                   <div className="flex-grow">
                     <div className="flex items-center gap-2">
-                      <div className={`text-xs font-medium text-center px-1 ${isDarkMode ? 'bg-surface-2' : 'bg-line'}`}>
+                      <div className={`text-xs font-medium text-center px-1 bg-surface-2`}>
                         P{position || '?'}
                       </div>
                       <div className={`font-medium truncate ${'text-ink'}`}>
@@ -336,7 +318,6 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
             <ModeToggle 
               mode={gapMode} 
               setMode={setGapMode}
-              isDarkMode={isDarkMode}
             />
             
             <div className="text-xs px-2 py-1 bg-info/15 text-info">
@@ -443,7 +424,8 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
                       type="monotone"
                       dataKey={dataKey}
                       name={displayName}
-                      fill={`${color}30`} // Semi-transparent fill
+                      fill={color}
+                      fillOpacity={0.19}
                       stroke={color}
                       strokeWidth={isHighlighted ? 3 : 2}
                       strokeDasharray="5 2"
@@ -530,7 +512,6 @@ const TimeDeltaChart: React.FC<TimeDeltaChartProps> = ({
 export default React.memo(TimeDeltaChart, (prev, next) =>
   prev.gapHistory === next.gapHistory &&
   prev.monitoredTeams === next.monitoredTeams &&
-  prev.isDarkMode === next.isDarkMode &&
   prev.pitStopTime === next.pitStopTime &&
   prev.requiredPitStops === next.requiredPitStops,
 );

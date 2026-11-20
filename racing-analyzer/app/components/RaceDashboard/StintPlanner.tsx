@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { seriesBlock } from '../../ui/chartTheme';
 import {
   saveStintConfig,
   loadStintConfig,
@@ -35,7 +36,6 @@ import {
 } from './lib/stintPlan';
 
 interface StintPlannerProps {
-  isDarkMode?: boolean;
   myTeam?: string;
   teams?: Array<{
     Team: string;
@@ -66,7 +66,6 @@ interface ActiveStint {
 }
 
 const StintPlanner: React.FC<StintPlannerProps> = ({
-  isDarkMode = false,
   myTeam,
   teams = [],
   isSimulating = false,
@@ -362,23 +361,8 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
     }
   }, [trackId]);
 
-  // Pastel colors for drivers (4 opposite colors on color wheel)
-  // Vivid livery palette — saturated so blocks read on both themes and sit
-  // in the same world as the pit-wall orange/purple (no washed-out pastels).
-  const driverColors = useMemo(() => [
-    '#E5484D',  // red
-    '#F76B15',  // orange
-    '#3E63DD',  // blue
-    '#30A46C',  // green
-    '#8E4EC6',  // purple
-    '#00A2C7',  // cyan
-    '#D6409F',  // pink
-    '#65A30D',  // lime
-    '#12A594',  // teal
-    '#6366F1',  // indigo
-  ], []);
-
-  const getDriverColor = (index: number) => driverColors[index % driverColors.length];
+  // Drivers take the data palette in order (series-1..10), with the text
+  // colour that reads on each.
 
   // Calculate available jokers and long stints
   const availableSpecialStints = useMemo(() => {
@@ -949,7 +933,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
 
       {/* Preset Selector */}
       {trackName && (
-        <div className={`mb-6 p-4 border ${isDarkMode ? 'bg-surface-2 border-line' : 'bg-info/15 border-line'}`}>
+        <div className={`mb-6 p-4 border bg-surface-2 border-line`}>
           <div className="flex items-center gap-3 flex-wrap">
             <label htmlFor="stint-preset-select" className={`text-sm font-medium text-ink`}>
               {trackName} presets:
@@ -1001,9 +985,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                   className={`px-4 py-2 ${
                     !renameValue.trim()
                       ? 'bg-line cursor-not-allowed text-ink'
-                      : isDarkMode
-                      ? 'bg-live hover:bg-live text-on-signal'
-                      : 'bg-live hover:bg-live text-on-signal'
+                      : 'bg-live hover:brightness-95 text-on-signal'
                   }`}
                 >
                   Save name
@@ -1011,7 +993,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 <button
                   onClick={cancelRenamePreset}
                   className={`px-4 py-2 ${
-                    isDarkMode ? 'bg-line hover:bg-surface-2 text-ink' : 'bg-line hover:bg-line text-ink'
+                    'bg-surface-2 hover:bg-line text-ink border border-line'
                   }`}
                 >
                   Cancel
@@ -1024,7 +1006,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                     onClick={startRenamePreset}
                     title={`Rename "${selectedPreset.name}" without creating a second preset`}
                     className={`px-4 py-2 ${
-                      isDarkMode ? 'bg-line hover:bg-surface-2 text-ink' : 'bg-line hover:bg-line text-ink'
+                      'bg-surface-2 hover:bg-line text-ink border border-line'
                     }`}
                   >
                     Rename
@@ -1034,7 +1016,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 <button
                   onClick={() => (showSavePresetDialog ? closeSaveDialog() : setShowSavePresetDialog(true))}
                   className={`px-4 py-2 ${
-                    'bg-info hover:bg-info text-on-signal'
+                    'accent-block text-accent-ink hover:brightness-95'
                   }`}
                 >
                   Save as new
@@ -1108,9 +1090,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                   className={`px-4 py-2 ${
                     !newPresetName.trim()
                       ? 'bg-line cursor-not-allowed text-ink'
-                      : isDarkMode
-                      ? 'bg-live hover:bg-live text-on-signal'
-                      : 'bg-live hover:bg-live text-on-signal'
+                      : 'bg-live hover:brightness-95 text-on-signal'
                   }`}
                 >
                   Save
@@ -1118,7 +1098,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 <button
                   onClick={closeSaveDialog}
                   className={`px-4 py-2 ${
-                    isDarkMode ? 'bg-line hover:bg-surface-2 text-ink' : 'bg-line hover:bg-line text-ink'
+                    'bg-surface-2 hover:bg-line text-ink border border-line'
                   }`}
                 >
                   Cancel
@@ -1151,10 +1131,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
       {activeStint && (
         <div 
           className={`mb-6 p-4 border-2 border-live`}
-          style={{
-            backgroundColor: getDriverColor(activeStint.driverIndex),
-            color: '#fff'
-          }}
+          style={seriesBlock(activeStint.driverIndex)}
         >
           <h3 className="text-lg font-cond font-bold tracking-wide mb-2">Active Stint</h3>
           <div className="flex items-center gap-4">
@@ -1184,7 +1161,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 onClick={() => setSelectedStintIndex(i)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedStintIndex(i); } }}
                 title={`Stint ${a.stint}: ${driverNames[a.driver - 1]}, ${a.duration} min — drag the right edge to resize`}
-                style={{ flexGrow: Math.max(a.duration, 0.5), flexBasis: 0, backgroundColor: getDriverColor(a.driver - 1), color: '#fff' }}
+                style={{ flexGrow: Math.max(a.duration, 0.5), flexBasis: 0, ...seriesBlock(a.driver - 1) }}
                 className={`relative flex flex-col items-center justify-center min-w-0 overflow-hidden cursor-pointer select-none hover:brightness-110 ${
                   selectedStintIndex === i ? 'ring-2 ring-accent z-10' : ''
                 }`}
@@ -1225,10 +1202,10 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
               value={stintAssignments[selectedStintIndex].driver}
               onChange={(e) => handleStintDriverChange(selectedStintIndex, parseInt(e.target.value))}
               className="p-2 border border-line bg-surface text-ink"
-              style={{ backgroundColor: getDriverColor(stintAssignments[selectedStintIndex].driver - 1) }}
+              style={seriesBlock(stintAssignments[selectedStintIndex].driver - 1)}
             >
               {driverNames.map((name, di) => (
-                <option key={di} value={di + 1} style={{ backgroundColor: getDriverColor(di) }}>{name}</option>
+                <option key={di} value={di + 1} style={seriesBlock(di)}>{name}</option>
               ))}
             </select>
           </label>
@@ -1274,19 +1251,13 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
           className={`w-full md:w-64 p-2 border ${
             'border-line'
           }`}
-          style={{
-            backgroundColor: getDriverColor(currentDriverIndex),
-            color: '#fff'
-          }}
+          style={seriesBlock(currentDriverIndex)}
         >
           {driverNames.map((name, index) => (
             <option 
               key={index} 
               value={index}
-              style={{
-                backgroundColor: getDriverColor(index),
-                color: '#fff'
-              }}
+              style={seriesBlock(index)}
             >
               {name}
             </option>
@@ -1308,7 +1279,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.numStints}
             onChange={(e) => handleConfigChange('numStints', parseInt(e.target.value) || 1)}
             className={`w-full p-2 border ${
-              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
+              'bg-canvas border-line-strong'
             }`}
           />
         </div>
@@ -1325,7 +1296,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.minStintTime}
             onChange={(e) => handleConfigChange('minStintTime', parseInt(e.target.value) || 1)}
             className={`w-full p-2 border ${
-              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
+              'bg-canvas border-line-strong'
             }`}
           />
         </div>
@@ -1342,7 +1313,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.maxStintTime}
             onChange={(e) => handleConfigChange('maxStintTime', parseInt(e.target.value) || 1)}
             className={`w-full p-2 border ${
-              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
+              'bg-canvas border-line-strong'
             }`}
           />
         </div>
@@ -1360,7 +1331,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.pitDuration}
             onChange={(e) => handleConfigChange('pitDuration', parseFloat(e.target.value) || 1)}
             className={`w-full p-2 border ${
-              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
+              'bg-canvas border-line-strong'
             }`}
           />
         </div>
@@ -1377,7 +1348,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.numDrivers}
             onChange={(e) => handleConfigChange('numDrivers', parseInt(e.target.value) || 1)}
             className={`w-full p-2 border ${
-              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
+              'bg-canvas border-line-strong'
             }`}
           />
         </div>
@@ -1394,7 +1365,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
             value={config.totalRaceTime}
             onChange={(e) => handleConfigChange('totalRaceTime', parseInt(e.target.value) || 30)}
             className={`w-full p-2 border ${
-              isDarkMode ? 'bg-surface-2 border-line' : 'bg-surface border-line'
+              'bg-canvas border-line-strong'
             }`}
           />
         </div>
@@ -1480,10 +1451,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
                 className={`w-full p-2 border transition-colors ${
                   'border-line'
                 }`}
-                style={{
-                  backgroundColor: getDriverColor(index),
-                  color: '#fff'
-                }}
+                style={seriesBlock(index)}
               />
             </div>
           ))}
@@ -1504,10 +1472,7 @@ const StintPlanner: React.FC<StintPlannerProps> = ({
               className={`p-3 border transition-colors ${
                 'border-line'
               }`}
-              style={{
-                backgroundColor: getDriverColor(index),
-                color: '#fff'
-              }}
+              style={seriesBlock(index)}
             >
               <h4 className="font-medium mb-2">{stat.name}</h4>
               <div className="text-sm space-y-1">
