@@ -4,7 +4,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BarChart3, ChevronDown, Cpu, Flag, HelpCircle, LogOut, Moon, Sun } from 'lucide-react';
 import Button from '../../ui/Button';
 import { useTheme } from '../../contexts/ThemeContext';
-import HelpDrawer from './HelpDrawer';
 
 export interface AppBarUser {
   username: string;
@@ -25,6 +24,8 @@ interface AppBarProps {
   onLogout: () => void;
   onOpenTracks: () => void;
   onOpenStats: () => void;
+  /** Opens the guide (quick start + tab reference); the dashboard owns it. */
+  onOpenGuide: () => void;
   /** Opens the device-token page (datalogger boards). */
   onOpenDevices?: () => void;
 }
@@ -59,11 +60,11 @@ const AppBar: React.FC<AppBarProps> = ({
   onLogout,
   onOpenTracks,
   onOpenStats,
+  onOpenGuide,
   onOpenDevices,
 }) => {
   const { isDark, toggleTheme } = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -104,7 +105,6 @@ const AppBar: React.FC<AppBarProps> = ({
   const cleanTimers = timers.map((t) => (t || '').trim()).filter(Boolean);
 
   return (
-    <>
     <header className="sticky top-0 z-40 h-14 border-b border-line bg-surface/80 backdrop-blur-md">
       <div className="h-full flex items-center gap-2 md:gap-4 px-3 md:px-5">
         {/* Brand (desktop only; the track button carries identity on phones) */}
@@ -125,6 +125,7 @@ const AppBar: React.FC<AppBarProps> = ({
           type="button"
           onClick={onOpenTracks}
           aria-label="Switch track"
+          data-tour="track"
           className="flex items-center gap-2.5 h-10 md:h-9 pl-2.5 pr-3 border border-line bg-surface-2 min-w-0 max-w-full md:max-w-[420px] hover:border-muted/60 transition-colors"
         >
           <span
@@ -176,8 +177,9 @@ const AppBar: React.FC<AppBarProps> = ({
 
         {/* Help: icon-only below lg, labelled above */}
         <Button
-          onClick={() => setHelpOpen(true)}
+          onClick={onOpenGuide}
           aria-label="Open dashboard guide"
+          data-tour="guide"
           className="w-11 px-0 md:w-auto md:px-2.5 gap-1.5 text-xs text-muted hover:text-ink"
         >
           <HelpCircle size={16} />
@@ -286,8 +288,6 @@ const AppBar: React.FC<AppBarProps> = ({
         )}
       </div>
     </header>
-    {helpOpen && <HelpDrawer onClose={() => setHelpOpen(false)} />}
-    </>
   );
 };
 

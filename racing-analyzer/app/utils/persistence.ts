@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   STINT_ASSIGNMENTS: 'lt_analyzer_stint_assignments',
   CURRENT_DRIVER_INDEX: 'lt_analyzer_current_driver_index',
   TRACK_STINT_PRESETS: 'lt_analyzer_track_stint_presets',
+  ONBOARDING_SEEN: 'lt_analyzer_onboarding_seen',
 } as const;
 
 // Types for stint presets
@@ -136,6 +137,27 @@ export const saveSelectedTrack = (trackId: number): void => {
 
 export const loadSelectedTrack = (): number | null => {
   return loadFromStorage<number | null>(STORAGE_KEYS.SELECTED_TRACK, null);
+};
+
+// First-launch onboarding (the feature tour and quick start): the accounts
+// that have closed it in this browser. Kept per account so a shared pit-wall
+// laptop still shows it to the next person who logs in.
+const onboardingAccount = (username: string): string => username.trim().toLowerCase();
+
+const loadOnboardingSeen = (): string[] => {
+  const seen = loadFromStorage<unknown>(STORAGE_KEYS.ONBOARDING_SEEN, []);
+  return Array.isArray(seen) ? seen.filter((v): v is string => typeof v === 'string') : [];
+};
+
+export const hasSeenOnboarding = (username: string): boolean =>
+  loadOnboardingSeen().includes(onboardingAccount(username));
+
+export const markOnboardingSeen = (username: string): void => {
+  const seen = loadOnboardingSeen();
+  const account = onboardingAccount(username);
+  if (!seen.includes(account)) {
+    saveToStorage(STORAGE_KEYS.ONBOARDING_SEEN, [...seen, account]);
+  }
 };
 
 export const saveMyTeam = (teamKart: string): void => {

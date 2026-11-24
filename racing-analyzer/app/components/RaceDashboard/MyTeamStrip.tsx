@@ -151,7 +151,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
 
   if (!ctx) {
     return (
-      <section className="border border-line bg-surface p-4 flex flex-col md:flex-row md:items-center gap-3" aria-label="My team">
+      <section className="border border-line bg-surface p-4 flex flex-col md:flex-row md:items-center gap-3" aria-label="My team" data-tour="my-team">
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
           <span className="eyebrow text-muted">My team</span>
           <span className="text-sm text-muted">
@@ -180,6 +180,7 @@ const MyTeamStrip: React.FC<MyTeamStripProps> = ({
     <section
       className={`border bg-surface p-3.5 md:p-4 flex flex-col gap-3 ${inPit ? 'border-alarm/60 pit-alert' : 'border-line'}`}
       aria-label="My team"
+      data-tour="my-team"
     >
       {/* Identity + actions. The row wraps: the identity column keeps a 10rem
           floor, so when the actions don't fit beside it they drop to their own

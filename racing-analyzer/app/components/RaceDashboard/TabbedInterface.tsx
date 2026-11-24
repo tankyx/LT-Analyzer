@@ -12,6 +12,11 @@ export interface TabProps {
 interface TabbedInterfaceProps {
   tabs: TabProps[];
   defaultTab?: string;
+  /**
+   * When set, the parent owns the active tab and this component only reports
+   * changes through `onTabChange` (the feature tour steps through the tabs).
+   */
+  activeTab?: string;
   children: React.ReactNode[];
   /** Kept for call-site compatibility; theming now comes from CSS tokens. */
   onTabChange?: (tabId: string) => void;
@@ -36,19 +41,21 @@ interface TabbedInterfaceProps {
 const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
   tabs,
   defaultTab,
+  activeTab: controlledTab,
   children,
   onTabChange,
   pinnedId,
   top,
 }) => {
-  const [activeTab, setActiveTab] = useState<string>(defaultTab || tabs[0]?.id || '');
+  const [internalTab, setInternalTab] = useState<string>(defaultTab || tabs[0]?.id || '');
+  const activeTab = controlledTab ?? internalTab;
 
   const pinnedIndex = pinnedId ? tabs.findIndex((t) => t.id === pinnedId) : -1;
   const pinnedTab = pinnedIndex >= 0 ? tabs[pinnedIndex] : undefined;
   const dockTabs = pinnedTab ? tabs.filter((t) => t.id !== pinnedId) : tabs;
 
   const handleTabChange = (tabId: string) => {
-    setActiveTab(tabId);
+    setInternalTab(tabId);
     onTabChange?.(tabId);
   };
 
@@ -144,6 +151,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
                   key={tab.id}
                   role="tab"
                   id={tabId(tab.id)}
+                  data-tour={`tab-${tab.id}`}
                   aria-selected={active}
                   aria-controls={panelId(tab.id)}
                   tabIndex={active ? 0 : -1}
@@ -183,6 +191,7 @@ const TabbedInterface: React.FC<TabbedInterfaceProps> = ({
               <button
                 key={tab.id}
                 onClick={() => handleTabChange(tab.id)}
+                data-tour={`tab-${tab.id}`}
                 aria-current={active ? 'page' : undefined}
                 title={tab.hint}
                 className={`relative flex-1 min-w-0 h-14 flex flex-col items-center justify-center gap-1 font-sans text-2xs font-semibold ${

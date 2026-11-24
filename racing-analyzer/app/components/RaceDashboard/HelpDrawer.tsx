@@ -1,12 +1,23 @@
 'use client';
 
-import React from 'react';
-import { X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Route, X } from 'lucide-react';
+import Button from '../../ui/Button';
 import Dialog from '../../ui/Dialog';
 import IconButton from '../../ui/IconButton';
+import SegmentedControl from '../../ui/SegmentedControl';
+import QuickStart, { QuickStartProps } from './QuickStart';
+
+export type GuideView = 'quickstart' | 'tabs';
 
 interface HelpDrawerProps {
   onClose: () => void;
+  /** Page to open on. The first-visit offer opens on the quick start. */
+  initialView?: GuideView;
+  /** Live setup state for the quick start. Without it only the tab reference is shown. */
+  quickStart?: QuickStartProps;
+  /** Closes the guide and replays the feature tour. */
+  onStartTour?: () => void;
 }
 
 const SECTIONS: Array<{ title: string; body: string }> = [
@@ -41,42 +52,80 @@ const SHORTCUTS: Array<[string, string]> = [
   ['Esc', 'Close this guide or the track picker'],
 ];
 
-/** First-visit / on-demand guide: task-focused explanations, keyboard/reader
-    accessible, dismissible. A real dialog, not a hover tooltip. */
-const HelpDrawer: React.FC<HelpDrawerProps> = ({ onClose }) => {
+const VIEWS: Array<{ value: GuideView; label: string }> = [
+  { value: 'quickstart', label: 'Quick start' },
+  { value: 'tabs', label: 'Tabs & keys' },
+];
+
+/**
+ * The guide: a quick start for setting the dashboard up (opened unprompted on
+ * a new account's first visit) and a reference for what each tab does.
+ * Keyboard/reader accessible, dismissible. A real dialog, not a hover tooltip.
+ */
+const HelpDrawer: React.FC<HelpDrawerProps> = ({ onClose, initialView = 'tabs', quickStart, onStartTour }) => {
+  const [chosenView, setChosenView] = useState<GuideView>(initialView);
+  const view: GuideView = quickStart ? chosenView : 'tabs';
+  const title = view === 'quickstart' ? 'Quick start' : 'Dashboard guide';
+
   return (
     <Dialog
-      label="Dashboard guide"
+      label={title}
       onClose={onClose}
       className="gap-4 p-4 pb-[max(16px,env(safe-area-inset-bottom))] md:w-[520px] max-h-[85vh] md:max-h-[75vh]"
     >
         <div className="flex items-center justify-between px-1">
-          <h2 className="font-cond font-bold text-xl tracking-wide">DASHBOARD GUIDE</h2>
+          <h2 className="font-cond font-bold text-xl tracking-wide uppercase">{title}</h2>
           <IconButton label="Close guide" onClick={onClose}>
             <X size={18} />
           </IconButton>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto scroll-thin flex flex-col gap-3 -mx-1 px-1">
-          {SECTIONS.map((s) => (
-            <div key={s.title} className="border border-line bg-canvas p-3">
-              <h3 className="font-cond font-bold text-lg tracking-wide text-accent">{s.title}</h3>
-              <p className="text-sm text-muted mt-1">{s.body}</p>
-            </div>
-          ))}
-
-          <div className="border border-line bg-surface-2 p-3">
-            <h3 className="font-cond font-bold text-lg tracking-wide text-ink">Keyboard</h3>
-            <ul className="mt-1 flex flex-col gap-1">
-              {SHORTCUTS.map(([key, desc]) => (
-                <li key={key} className="flex items-center gap-2 text-sm text-muted">
-                  <kbd className="font-mono tabular text-xs px-1.5 py-0.5 bg-surface border border-line text-ink">{key}</kbd>
-                  {desc}
-                </li>
-              ))}
-            </ul>
+        {(quickStart || onStartTour) && (
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            {quickStart && (
+              <SegmentedControl label="Guide section" options={VIEWS} value={view} onChange={setChosenView} />
+            )}
+            {onStartTour && (
+              <Button variant="quiet" onClick={onStartTour} className="gap-1.5">
+                <Route size={16} />
+                Take the tour
+              </Button>
+            )}
           </div>
+        )}
+
+        <div className="flex-1 min-h-0 overflow-y-auto scroll-thin flex flex-col gap-3 -mx-1 px-1">
+          {view === 'quickstart' && quickStart ? (
+            <QuickStart {...quickStart} />
+          ) : (
+            <>
+              {SECTIONS.map((s) => (
+                <div key={s.title} className="border border-line bg-canvas p-3">
+                  <h3 className="font-cond font-bold text-lg tracking-wide text-accent">{s.title}</h3>
+                  <p className="text-sm text-muted mt-1">{s.body}</p>
+                </div>
+              ))}
+
+              <div className="border border-line bg-surface-2 p-3">
+                <h3 className="font-cond font-bold text-lg tracking-wide text-ink">Keyboard</h3>
+                <ul className="mt-1 flex flex-col gap-1">
+                  {SHORTCUTS.map(([key, desc]) => (
+                    <li key={key} className="flex items-center gap-2 text-sm text-muted">
+                      <kbd className="font-mono tabular text-xs px-1.5 py-0.5 bg-surface border border-line text-ink">{key}</kbd>
+                      {desc}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </>
+          )}
         </div>
+
+        {view === 'quickstart' && (
+          <Button variant="primary" size="lg" block onClick={onClose}>
+            Got it
+          </Button>
+        )}
     </Dialog>
   );
 };

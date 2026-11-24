@@ -11,6 +11,9 @@ import PitStopConfig from './PitStopConfig';
 import StintPlanner from './StintPlanner';
 import AdminPanel from './AdminPanel';
 import AppBar from './AppBar';
+import HelpDrawer, { GuideView } from './HelpDrawer';
+import FeatureTour from './FeatureTour';
+import { useOnboardingOffer, OnboardingPrefs } from './lib/onboarding';
 import TrackRail, { RailTrack } from './TrackRail';
 import MyTeamStrip from './MyTeamStrip';
 import PitAlertTarget, {
@@ -75,6 +78,14 @@ const RaceDashboard = () => {
   // Non-blocking notice for background data loads that failed (fleet, prefs).
   const [dataWarning, setDataWarning] = useState<string | null>(null);
   const [trackSheetOpen, setTrackSheetOpen] = useState(false);
+  // The guide (quick start + tab reference). `null` is closed.
+  const [guideView, setGuideView] = useState<GuideView | null>(null);
+  // The feature tour (spotlight walk through the dashboard).
+  const [tourOpen, setTourOpen] = useState(false);
+  // Inputs for the first-launch onboarding: the track resolved at startup and
+  // the latest per-track prefs the server returned.
+  const [settledTrackId, setSettledTrackId] = useState<number | null>(null);
+  const [loadedPrefs, setLoadedPrefs] = useState<{ trackId: number; prefs: OnboardingPrefs } | null>(null);
   const [teamColors, setTeamColors] = useState<Record<string, string>>({});
   const [hoveredTeam, setHoveredTeam] = useState<string | null>(null);
   const [selectedClass, setSelectedClass] = useState<string>('all');
@@ -420,6 +431,32 @@ const RaceDashboard = () => {
   const lastFleetFetchRef = useRef(0);
   const activeTabRef = useRef(activeTab);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
+  // First-launch onboarding. An account with nothing set up gets the feature
+  // tour unprompted, once; the tour ends on the quick start. Closing either
+  // by any route records the account so it is not shown again.
+  const onboarding = useOnboardingOffer(user?.username, settledTrackId, loadedPrefs);
+  const dismissOnboarding = onboarding.dismiss;
+  const tabBeforeTourRef = useRef('standings');
+  const startTour = useCallback(() => {
+    tabBeforeTourRef.current = activeTabRef.current;
+    setGuideView(null);
+    setTrackSheetOpen(false);
+    setTourOpen(true);
+  }, []);
+  const endTour = useCallback(() => {
+    setTourOpen(false);
+    // The tour walks through the tabs; put the user back where they were.
+    setActiveTab(tabBeforeTourRef.current);
+    dismissOnboarding();
+  }, [dismissOnboarding]);
+  const closeGuide = useCallback(() => {
+    setGuideView(null);
+    dismissOnboarding();
+  }, [dismissOnboarding]);
+  useEffect(() => {
+    if (onboarding.offered) startTour();
+  }, [onboarding.offered, startTour]);
   const refreshFleetState = useCallback(async () => {
     if (!selectedTrackId) return;
     try {
@@ -666,6 +703,7 @@ const RaceDashboard = () => {
           // Join the selected track
           if (result.tracks.length > 0) {
             setSelectedTrackId(trackToSelect);
+            setSettledTrackId(trackToSelect);
             webSocketService.joinTrack(trackToSelect);
           }
 
@@ -746,6 +784,7 @@ const RaceDashboard = () => {
           setPitStopTime(fresh.pit_stop_time);
           setRequiredPitStops(fresh.required_pit_stops);
           setDefaultLapTime(fresh.default_lap_time);
+          setLoadedPrefs({ trackId: selectedTrackId, prefs: fresh });
         } catch (err) {
           console.warn('Failed to load prefs for track', selectedTrackId, err);
           setDataWarning('Could not sync your settings for this track.');
@@ -848,6 +887,13 @@ const RaceDashboard = () => {
   const selectedTrackName = availableTracks.find(t => t.id === selectedTrackId)?.track_name || '';
   // The pace API keys on the team name as the feed spells it, not the kart number.
   const myTeamName = teams.find(t => t.Kart === myTeam)?.Team || '';
+  // For the quick start: the pinned team as the user knows it, or just the
+  // kart number while the field has not loaded.
+  const myTeamLabel = !myTeam
+    ? ''
+    : myTeamName
+      ? `${displayTeamName(myTeamName)} (#${myTeam})`
+      : `kart #${myTeam}`;
   const sessionLabel = sessionInfo.title2 || sessionInfo.title1 || sessionInfo.title || '';
   const sessionActive = sessionStatus ? sessionStatus.active : teams.length > 0;
   const railTracks: RailTrack[] = allTracksStatus.length > 0
@@ -875,7 +921,7 @@ const RaceDashboard = () => {
         )}
       </div>
 
-      <div className="border border-line bg-surface overflow-hidden" role="table" aria-label="Standings">
+      <div className="border border-line bg-surface overflow-hidden" role="table" aria-label="Standings" data-tour="standings">
         {filteredTeams.length > 0 ? (
           sortedTeams.map(team => (
             <StandingsRow
@@ -1018,12 +1064,16 @@ const RaceDashboard = () => {
         onLogout={logout}
         onOpenTracks={() => setTrackSheetOpen(true)}
         onOpenStats={() => router.push('/data')}
+        // While setup is unfinished the guide opens on the quick start;
+        // after that, on the tab reference.
+        onOpenGuide={() => setGuideView(myTeam && monitoredTeams.length > 0 ? 'tabs' : 'quickstart')}
         onOpenDevices={() => router.push('/devices')}
       />
 
       <TabbedInterface
         tabs={tabs}
         defaultTab="standings"
+        activeTab={activeTab}
         onTabChange={setActiveTab}
         pinnedId="standings"
         top={
@@ -1135,6 +1185,35 @@ const RaceDashboard = () => {
           onClose={() => setTrackSheetOpen(false)}
           isAdmin={user?.role === 'admin'}
           onOpenAdmin={() => router.push('/admin')}
+        />
+      )}
+
+      {guideView && (
+        <HelpDrawer
+          initialView={guideView}
+          onClose={closeGuide}
+          onStartTour={startTour}
+          quickStart={{
+            trackName: selectedTrackName,
+            hasField: teams.length > 0,
+            myTeamLabel,
+            monitoredCount: monitoredTeams.length,
+            onChooseTrack: () => {
+              closeGuide();
+              setTrackSheetOpen(true);
+            },
+          }}
+        />
+      )}
+
+      {tourOpen && (
+        <FeatureTour
+          onShowTab={setActiveTab}
+          onClose={endTour}
+          onOpenQuickStart={() => {
+            endTour();
+            setGuideView('quickstart');
+          }}
         />
       )}
 

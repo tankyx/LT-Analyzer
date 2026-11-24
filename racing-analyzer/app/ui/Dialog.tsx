@@ -17,12 +17,11 @@ export interface DialogProps {
 }
 
 /**
- * A modal layer: scrim, Esc to close, and focus kept inside while open.
- * A bottom sheet on phones, centred from md up. The one place the
- * scrim, the overlay shadow and the focus trap are written.
+ * Esc to close, and Tab kept inside `panelRef`, for as long as the caller is
+ * mounted. Dialog uses it; so does the feature tour, whose card is placed
+ * beside a spotlight and so cannot be a Dialog.
  */
-const Dialog: React.FC<DialogProps> = ({ label, onClose, className, scrimTestId, children }) => {
-  const panelRef = useRef<HTMLDivElement>(null);
+export function useDialogKeys(panelRef: React.RefObject<HTMLElement | null>, onClose: () => void): void {
   const closeRef = useRef(onClose);
   useEffect(() => {
     closeRef.current = onClose;
@@ -51,7 +50,17 @@ const Dialog: React.FC<DialogProps> = ({ label, onClose, className, scrimTestId,
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  }, [panelRef]);
+}
+
+/**
+ * A modal layer: scrim, Esc to close, and focus kept inside while open.
+ * A bottom sheet on phones, centred from md up. The one place the
+ * scrim, the overlay shadow and the focus trap are written.
+ */
+const Dialog: React.FC<DialogProps> = ({ label, onClose, className, scrimTestId, children }) => {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogKeys(panelRef, onClose);
 
   return (
     <div
